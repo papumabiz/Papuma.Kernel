@@ -64,6 +64,71 @@ public class ChangeWriter
 
 `ChangeWriter` ist hier bewusst transaktionsbasiert und zustandslos. Er bekommt die Transaktion vom aufrufenden Use-Case und verwendet keine eigene Connection.
 
+## Optionale Erweiterung: Unit of Work
+
+Die aktuelle Variante ist bereits eine explizite Unit of Work auf Use-Case-Ebene: der Use Case oeffnet die Transaktion, fuehrt mehrere Writes aus und committet einmal.
+
+Wenn sich dieses Muster oft wiederholt, kann eine schlanke Unit of Work Abstraktion sinnvoll werden.
+
+Sinnvoll, wenn:
+
+- viele Handler identischen Connection/Transaction Boilerplate haben
+- einheitliche Retry, Logging oder Telemetrie fuer Writes gewuenscht ist
+- mehrere Repositories konsistent in einer fachlichen Operation koordiniert werden
+
+```csharp
+// src/Kernel/Transactions/IUnitOfWork.cs
+public interface IUnitOfWork
+{
+    Task ExecuteAsync(
+        Func<NpgsqlConnection, NpgsqlTransaction, CancellationToken, Task> action,
+        CancellationToken ct = default);
+}
+
+// src/Kernel/Transactions/NpgsqlUnitOfWork.cs
+public class NpgsqlUnitOfWork : IUnitOfWork
+{
+    private readonly NpgsqlDataSource _dataSource;
+
+    public NpgsqlUnitOfWork(NpgsqlDataSource dataSource)
+    {
+        _dataSource = dataSource;
+    }
+
+    public async Task ExecuteAsync(
+        Func<NpgsqlConnection, NpgsqlTransaction, CancellationToken, Task> action,
+        CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        try
+        {
+            await action(conn, tx, ct);
+            await tx.CommitAsync(ct);
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
+    }
+}
+```
+
+Nutzung im Use Case:
+
+```csharp
+await _uow.ExecuteAsync(async (conn, tx, ct) =>
+{
+    // CRUD Write
+    // ChangeWriter.AppendAsync(...)
+    // optional BusinessEventWriter + OutboxWriter
+}, ct);
+```
+
+Wichtig: Auch mit Unit of Work bleibt die Regel gleich: eine fachliche Operation entspricht genau einer Datenbanktransaktion.
+
 ---
 
 ## Wie eine CRUD-Operation mit Change Feed aussieht

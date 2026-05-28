@@ -204,6 +204,7 @@ Diese Dinge werden **nicht** in Phase 1–2 gebaut, können aber später ergänz
 | Projection Leasing | Bei horizontaler Skalierung (mehrere App-Instanzen) |
 | Snapshotting | Bei sehr langen Streams (>100k Events pro Entity) |
 | DotNetCore.CAP / Wolverine | Als Dispatcher, wenn externe Services benötigt werden |
+| Schlanke Unit of Work | Wenn sich Connection/Transaction Boilerplate in vielen Use Cases wiederholt |
 
 ## Betriebsinvarianten (nicht optional)
 
