@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  build-test-pack:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore Papuma.Kernel.slnx
+
+      - name: Build
+        run: dotnet build Papuma.Kernel.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test Papuma.Kernel.slnx --configuration Release --no-build --verbosity normal
+
+      - name: Pack
+        run: dotnet pack src/Papuma.Kernel/Papuma.Kernel.csproj --configuration Release --no-build --output artifacts
+
+      - name: Upload NuGet package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: papuma-kernel-nupkg
+          path: artifacts/*.nupkg
+          if-no-files-found: error
