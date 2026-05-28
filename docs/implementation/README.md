@@ -27,6 +27,7 @@ Die Konsequenz: Das bestehende KI-generierte Framework wird **verworfen**. Statt
 | Schema-Evolution | Projection-seitige Interpretation | Upcasting-Pipeline |
 | Projektionen | Async, entkoppelt vom Write | Synchron im Write-Transaction |
 | Abstraktion | Wird erst nach Phase 3 extrahiert | Framework-first Ansatz |
+| Event-Klassifikation | Change Events + Business Events getrennt | Ein Event-Typ fuer alles |
 
 ## Warum JSON statt Protobuf?
 
@@ -38,7 +39,7 @@ Protobuf würde Typen erzwingen und das Schema fest einschreiben – das zwingt 
 |---|---|
 | [01-konzepte.md](01-konzepte.md) | Kernkonzepte: Change Feed, Projections, CQRS-Hybrid |
 | [02-datenbank.md](02-datenbank.md) | PostgreSQL-Schema: alle Tabellen und Indizes |
-| [03-change-feed.md](03-change-feed.md) | `ChangeRecord`, `ChangeWriter`, transaktionales Schreiben |
+| [03-change-feed.md](03-change-feed.md) | `ChangeRecord`, `ChangeWriter`, `BusinessEventWriter`, `OutboxWriter` |
 | [04-projections.md](04-projections.md) | `ProjectionWorker`, Checkpoints, parallele Projections |
 | [05-versionierung.md](05-versionierung.md) | Versionierung ohne Upcasting, typisierte Handler |
 | [06-gdpr.md](06-gdpr.md) | DSGVO-Redaktion im Event-basierten System |
@@ -60,6 +61,14 @@ Die Projections laufen mit **at-least-once Verarbeitung**. Das bedeutet:
 
 Ohne diese drei Punkte ist das System nicht robust genug für Produktion.
 
+## Event-Typen (wichtig)
+
+Im Kernel gibt es zwei Event-Klassen mit unterschiedlicher Aufgabe:
+
+- **Change Events**: beschreiben persistente Zustandsaenderungen (`change_feed`)
+- **Business Events**: beschreiben fachliche Vorkommnisse, die nicht zwingend eine CRUD-Aenderung sind (z.B. `UserLoggedIn`, `CheckoutStarted`, `PaymentAuthorized`)
+
+Diese Trennung verhindert semantische Vermischung und macht das System fuer Audit, Analytics und Integrationen deutlich klarer.
 ## Phasenbezug der Dokumente
 
 - `01-konzepte.md` bis `04-projections.md`: Phase 1-2 (Foundation + reale Projections)

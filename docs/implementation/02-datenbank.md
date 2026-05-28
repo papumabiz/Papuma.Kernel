@@ -96,6 +96,53 @@ CREATE TABLE projection_failures (
 
 ---
 
+### `business_event_log` – Fachliche Ereignisse ohne zwingende Mutation
+
+Diese Tabelle speichert Business Events wie `UserLoggedIn`, `OrderPlaced`, `PaymentAuthorized`.
+
+```sql
+CREATE TABLE business_event_log (
+    event_id      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_type    TEXT        NOT NULL,
+    aggregate_id  TEXT        NULL,
+    correlation_id TEXT       NULL,
+    causation_id   TEXT       NULL,
+    payload       JSONB       NOT NULL,
+    occurred_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_business_event_type        ON business_event_log (event_type);
+CREATE INDEX idx_business_event_occurred_at ON business_event_log (occurred_at);
+CREATE INDEX idx_business_event_aggregate   ON business_event_log (aggregate_id);
+```
+
+`aggregate_id` ist optional, weil manche Events keinen konkreten Aggregate-State betreffen.
+
+---
+
+### `event_outbox` – Zuverlaessige Weitergabe an externe Systeme
+
+Falls Business Events an externe Systeme gehen (Webhook, Broker, Mailer), sollte eine Outbox verwendet werden.
+
+```sql
+CREATE TABLE event_outbox (
+    outbox_id      BIGSERIAL   PRIMARY KEY,
+    event_id       UUID        NOT NULL,
+    event_type     TEXT        NOT NULL,
+    payload        JSONB       NOT NULL,
+    status         TEXT        NOT NULL DEFAULT 'Pending',
+    attempts       INT         NOT NULL DEFAULT 0,
+    next_retry_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_error     TEXT        NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_event_outbox_status_retry ON event_outbox (status, next_retry_at);
+```
+
+---
+
 ### Domain-Tabellen (Beispiel: `users`)
 
 Die eigentlichen Daten leben in normalen Tabellen. Das ist die CRUD Truth.
@@ -152,6 +199,37 @@ CREATE TABLE projection_failures (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (projection_name, sequence_id)
 );
+
+-- business_event_log
+CREATE TABLE business_event_log (
+    event_id      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_type    TEXT        NOT NULL,
+    aggregate_id  TEXT        NULL,
+    correlation_id TEXT       NULL,
+    causation_id   TEXT       NULL,
+    payload       JSONB       NOT NULL,
+    occurred_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_business_event_type        ON business_event_log (event_type);
+CREATE INDEX idx_business_event_occurred_at ON business_event_log (occurred_at);
+CREATE INDEX idx_business_event_aggregate   ON business_event_log (aggregate_id);
+
+-- event_outbox
+CREATE TABLE event_outbox (
+    outbox_id      BIGSERIAL   PRIMARY KEY,
+    event_id       UUID        NOT NULL,
+    event_type     TEXT        NOT NULL,
+    payload        JSONB       NOT NULL,
+    status         TEXT        NOT NULL DEFAULT 'Pending',
+    attempts       INT         NOT NULL DEFAULT 0,
+    next_retry_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_error     TEXT        NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_event_outbox_status_retry ON event_outbox (status, next_retry_at);
 
 -- domain: users (Beispiel)
 CREATE TABLE users (

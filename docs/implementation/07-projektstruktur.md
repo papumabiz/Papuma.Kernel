@@ -97,6 +97,12 @@ Beispiele:
 - `ActivityFeedProjection` → baut einen Activity-Stream
 - `NotificationProjection` → sendet Push-Notifications
 
+Ergaenzung in Phase 2:
+
+- `business_event_log` fuer fachliche Ereignisse ohne zwingende Mutation
+- `event_outbox` fuer robuste externe Zustellung (Broker/Webhook)
+- Publisher-Worker mit Retry und idempotenter Zustellung
+
 **Wichtig:** Erst nach 3 echten Projections abstrahieren. Nicht vorher. Sonst abstrahiert man Fantasie.
 
 ---

@@ -180,3 +180,112 @@ public record UserEmailUpdatedV2(string Value, bool Verified);
 - Keine Benachrichtigung von Projections
 
 Das alles passiert asynchron, über Polling – im nächsten Schritt.
+
+## Business Events (ohne CRUD-Change)
+
+Nicht jedes Event ist ein Change Event. Beispiel: `UserLoggedIn`.
+
+Das Event kann fachlich wichtig sein (Audit, Analytics, Fraud Detection), ohne dass dafuer eine Domain-Tabelle geaendert werden muss.
+
+```csharp
+// src/Kernel/Events/BusinessEventWriter.cs
+public class BusinessEventWriter
+{
+    public async Task<Guid> AppendAsync(
+        NpgsqlTransaction transaction,
+        string eventType,
+        string? aggregateId,
+        string payloadJson,
+        string? correlationId = null,
+        string? causationId = null,
+        CancellationToken ct = default)
+    {
+        var eventId = Guid.NewGuid();
+
+        await using var cmd = transaction.Connection!.CreateCommand();
+        cmd.Transaction = transaction;
+        cmd.CommandText = """
+            INSERT INTO business_event_log
+                (event_id, event_type, aggregate_id, correlation_id, causation_id, payload)
+            VALUES
+                (@eventId, @eventType, @aggregateId, @correlationId, @causationId, @payload::jsonb)
+            """;
+
+        cmd.Parameters.AddWithValue("eventId", eventId);
+        cmd.Parameters.AddWithValue("eventType", eventType);
+        cmd.Parameters.AddWithValue("aggregateId", (object?)aggregateId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("correlationId", (object?)correlationId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("causationId", (object?)causationId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("payload", payloadJson);
+
+        await cmd.ExecuteNonQueryAsync(ct);
+        return eventId;
+    }
+}
+```
+
+## Outbox fuer externe Verarbeitung
+
+Wenn Business Events nach extern veroeffentlicht werden sollen (Message Broker, Webhook), schreibe sie in derselben Transaktion in `event_outbox`.
+
+```csharp
+// src/Kernel/Events/OutboxWriter.cs
+public class OutboxWriter
+{
+    public async Task EnqueueAsync(
+        NpgsqlTransaction transaction,
+        Guid eventId,
+        string eventType,
+        string payloadJson,
+        CancellationToken ct = default)
+    {
+        await using var cmd = transaction.Connection!.CreateCommand();
+        cmd.Transaction = transaction;
+        cmd.CommandText = """
+            INSERT INTO event_outbox (event_id, event_type, payload)
+            VALUES (@eventId, @eventType, @payload::jsonb)
+            """;
+
+        cmd.Parameters.AddWithValue("eventId", eventId);
+        cmd.Parameters.AddWithValue("eventType", eventType);
+        cmd.Parameters.AddWithValue("payload", payloadJson);
+
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+}
+```
+
+## Beispiel: Login-Event ohne Domain-Mutation
+
+```csharp
+public async Task HandleLoginAsync(Guid userId, string ip, CancellationToken ct)
+{
+    await using var conn = await _dataSource.OpenConnectionAsync(ct);
+    await using var tx = await conn.BeginTransactionAsync(ct);
+
+    var payload = JsonSerializer.Serialize(new
+    {
+        UserId = userId,
+        Ip = ip,
+        LoggedInAt = DateTimeOffset.UtcNow
+    });
+
+    var eventId = await _businessEventWriter.AppendAsync(
+        transaction: tx,
+        eventType: "UserLoggedIn",
+        aggregateId: userId.ToString(),
+        payloadJson: payload,
+        ct: ct);
+
+    await _outboxWriter.EnqueueAsync(
+        transaction: tx,
+        eventId: eventId,
+        eventType: "UserLoggedIn",
+        payloadJson: payload,
+        ct: ct);
+
+    await tx.CommitAsync(ct);
+}
+```
+
+Damit bleibt die Erzeugung des Events robust, auch wenn der externe Publisher gerade nicht verfuegbar ist.

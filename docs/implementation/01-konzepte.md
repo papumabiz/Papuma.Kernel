@@ -78,6 +78,25 @@ Jeder Eintrag im Feed enthält:
 - Wann? (`Timestamp`)
 - In welcher Reihenfolge? (`SequenceId`)
 
+## Change Events vs Business Events
+
+Nicht jedes fachliche Ereignis ist eine Zustandsaenderung.
+
+- **Change Event**: entsteht aus einer persistierten Mutation (z.B. `UserEmailUpdated`)
+- **Business Event**: fachliches Signal ohne zwingende Mutation (z.B. `UserLoggedIn`, `CheckoutViewed`)
+
+Diese beiden Event-Typen sollten getrennt gespeichert und verarbeitet werden.
+
+Warum?
+
+- Change Events dienen Rebuild/Replay von Read Models
+- Business Events dienen Prozesssteuerung, Analytics, Benachrichtigungen, Integrationen
+- Login- oder Tracking-Events werden sonst kuenstlich als Datenaenderung modelliert
+
+Empfohlene Regel:
+
+> Alles, was fuer State-Rekonstruktion relevant ist, geht in `change_feed`. Alles andere in einen separaten `business_event_log`.
+
 ## Was sind Projections?
 
 Projections sind asynchrone Hintergrundprozesse, die den Change Feed konsumieren und daraus Read Models, Suchindizes, Benachrichtigungen etc. aufbauen.
