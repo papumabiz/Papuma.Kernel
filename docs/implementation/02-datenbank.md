@@ -76,6 +76,26 @@ Jede Projection hat eine Zeile in dieser Tabelle. Der Wert `last_sequence_id` is
 
 ---
 
+### `projection_failures` – Fehler und Poison Events
+
+Wenn eine Projection ein Event nicht verarbeiten kann, wird der Fehler hier erfasst. Damit bleibt der Fehlerpfad transparent und operativ bearbeitbar.
+
+```sql
+CREATE TABLE projection_failures (
+    projection_name TEXT        NOT NULL,
+    sequence_id     BIGINT      NOT NULL,
+    event_type      TEXT        NOT NULL,
+    attempts        INT         NOT NULL,
+    last_error      TEXT        NOT NULL,
+    next_retry_at   TIMESTAMPTZ NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (projection_name, sequence_id)
+);
+```
+
+---
+
 ### Domain-Tabellen (Beispiel: `users`)
 
 Die eigentlichen Daten leben in normalen Tabellen. Das ist die CRUD Truth.
@@ -118,6 +138,19 @@ CREATE TABLE projection_checkpoint (
     projection_name  TEXT   PRIMARY KEY,
     last_sequence_id BIGINT NOT NULL DEFAULT 0,
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- projection_failures
+CREATE TABLE projection_failures (
+    projection_name TEXT        NOT NULL,
+    sequence_id     BIGINT      NOT NULL,
+    event_type      TEXT        NOT NULL,
+    attempts        INT         NOT NULL,
+    last_error      TEXT        NOT NULL,
+    next_retry_at   TIMESTAMPTZ NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (projection_name, sequence_id)
 );
 
 -- domain: users (Beispiel)

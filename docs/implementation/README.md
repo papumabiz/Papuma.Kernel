@@ -48,7 +48,24 @@ Protobuf würde Typen erzwingen und das Schema fest einschreiben – das zwingt 
 
 - .NET 10 SDK
 - PostgreSQL (lokal oder Docker)
-- NuGet-Pakete: `Npgsql`, `Dapper`, `System.Text.Json` (im SDK enthalten)
+- NuGet-Pakete: `Npgsql`, `Npgsql.DependencyInjection`, `Dapper`, `System.Text.Json` (im SDK enthalten)
+
+## Betriebsmodell (wichtig)
+
+Die Projections laufen mit **at-least-once Verarbeitung**. Das bedeutet:
+
+- Ein Event kann in Fehlerfällen erneut verarbeitet werden
+- Projection-Handler müssen **idempotent** sein
+- Für dauerhaft fehlerhafte Events braucht es eine Fehlerstrategie (Retry + Dead Letter)
+
+Ohne diese drei Punkte ist das System nicht robust genug für Produktion.
+
+## Phasenbezug der Dokumente
+
+- `01-konzepte.md` bis `04-projections.md`: Phase 1-2 (Foundation + reale Projections)
+- `05-versionierung.md`: Phase 3 (Versioning)
+- `06-gdpr.md`: Phase 3/4 (Compliance-Härtung)
+- `07-projektstruktur.md`: Gesamt-Roadmap und Betriebskonventionen
 
 ## Der wichtigste Satz dieses Systems
 

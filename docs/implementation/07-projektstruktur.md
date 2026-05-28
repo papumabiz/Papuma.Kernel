@@ -74,6 +74,8 @@ App/Features/Users/Projections/UserReadModelProjection.cs  ← richtig
 5. `ProjectionWorker` implementieren
 6. `UserReadModelProjection` – erste echte Projection
 7. Replay manuell testen: Checkpoint auf 0 zurücksetzen, Worker läuft durch
+8. Idempotenz für Projection-Write-Paths sicherstellen (`ON CONFLICT DO UPDATE`)
+9. `projection_failures` Tabelle anlegen (ohne Dead-Letter-Überspringen im ersten Schritt)
 
 **Noch nicht:**
 - Keine generischen Abstraktionen
@@ -138,7 +140,7 @@ var connectionString = builder.Configuration.GetConnectionString("Postgres")
 
 builder.Services.AddNpgsqlDataSource(connectionString);
 builder.Services.AddSingleton<ChangeWriter>();
-builder.Services.AddSingleton<GdprProcessor>();
+// GdprProcessor erst ab Phase 3/4 registrieren
 ```
 
 ```json
@@ -176,6 +178,7 @@ Starte den Worker. Er sollte alle Events neu verarbeiten – und am Ende zum ide
 <!-- src/Kernel/Kernel.csproj -->
 <ItemGroup>
     <PackageReference Include="Npgsql" Version="10.*" />
+    <PackageReference Include="Npgsql.DependencyInjection" Version="10.*" />
     <PackageReference Include="Dapper" Version="2.*" />          <!-- optional, für Read-Queries -->
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.*" />
 </ItemGroup>
@@ -195,6 +198,16 @@ Diese Dinge werden **nicht** in Phase 1–2 gebaut, können aber später ergänz
 | Projection Leasing | Bei horizontaler Skalierung (mehrere App-Instanzen) |
 | Snapshotting | Bei sehr langen Streams (>100k Events pro Entity) |
 | DotNetCore.CAP / Wolverine | Als Dispatcher, wenn externe Services benötigt werden |
+
+## Betriebsinvarianten (nicht optional)
+
+Diese Regeln gelten ab dem ersten produktiven Einsatz:
+
+1. Projection-Handler sind idempotent.
+2. At-least-once Semantik ist akzeptiert und getestet.
+3. Für Poison Events existiert ein operativer Pfad (`projection_failures` Monitoring + Manual/Auto Skip).
+4. Replay wird in Staging regelmäßig geprobt.
+5. Neue Event-Versionen werden erst nach Consumer-Readiness ausgerollt.
 
 ---
 

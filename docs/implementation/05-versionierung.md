@@ -130,14 +130,6 @@ public class ProjectionRegistry
     // Key: (eventType, version)
     private readonly Dictionary<(string, int), Func<ChangeRecord, CancellationToken, Task>> _handlers = new();
 
-    public void Register<TPayload>(IVersionedHandler<TPayload> handler)
-    {
-        var key = (typeof(TPayload).Name, handler.Version);
-        // Konvention: Typ-Name = EventType
-        // z.B. "UserEmailUpdatedV1" → "UserEmailUpdated" + Version 1
-        // Alternativ: explizit EventType als Parameter übergeben (empfohlen für Klarheit)
-    }
-
     public void Register<TPayload>(
         string eventType,
         IVersionedHandler<TPayload> handler)
@@ -155,8 +147,15 @@ public class ProjectionRegistry
     {
         var key = (record.EventType, record.Version);
         if (_handlers.TryGetValue(key, out var handle))
+        {
             await handle(record, ct);
-        // unbekannte Events werden stillschweigend ignoriert (kein Fehler)
+            return;
+        }
+
+        // Empfehlung: unbekannte Kombinationen protokollieren und in projection_failures aufnehmen,
+        // statt sie still zu ignorieren.
+        throw new InvalidOperationException(
+            $"No handler registered for event '{record.EventType}' version {record.Version}.");
     }
 }
 ```
@@ -194,6 +193,11 @@ Es gibt genau zwei Fälle, in denen eine zentrale Upcasting-Pipeline sinnvoll w�
 2. **Viele unabhängige Consumers** (z.B. Kafka-Ecosystem) – dann hilft eine Schema Registry
 
 In allen anderen Fällen: Projection-seitige Version-Interpretation ist die bessere Lösung.
+
+## Betriebsregel für Versionierung
+
+Neue Event-Versionen dürfen erst in Producer-Code gehen, wenn mindestens eine Projection-Version
+den neuen Event-Typ versteht. Sonst laufen Worker in Fehlerzustände.
 
 ---
 

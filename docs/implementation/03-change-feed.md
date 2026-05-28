@@ -13,9 +13,11 @@ public record ChangeRecord(
     string   EventType,
     int      Version,
     string   PayloadJson,
-    DateTime Timestamp
+    DateTimeOffset Timestamp
 );
 ```
+
+`DateTimeOffset` passt besser zu `TIMESTAMPTZ` als `DateTime`, weil Offset/UTC-Semantik explizit bleibt.
 
 **Warum ein `record`?**  
 `record` ist in C# semantisch immutable und hat eingebaute value equality. Das passt perfekt zu einem Event, das niemals verändert werden soll.
@@ -33,13 +35,6 @@ Der `ChangeWriter` ist für das atomare Schreiben zuständig: CRUD-Mutation und 
 // src/Kernel/ChangeFeed/ChangeWriter.cs
 public class ChangeWriter
 {
-    private readonly NpgsqlDataSource _dataSource;
-
-    public ChangeWriter(NpgsqlDataSource dataSource)
-    {
-        _dataSource = dataSource;
-    }
-
     public async Task AppendAsync(
         NpgsqlTransaction transaction,
         string entity,
@@ -66,6 +61,8 @@ public class ChangeWriter
     }
 }
 ```
+
+`ChangeWriter` ist hier bewusst transaktionsbasiert und zustandslos. Er bekommt die Transaktion vom aufrufenden Use-Case und verwendet keine eigene Connection.
 
 ---
 
@@ -123,6 +120,8 @@ public class UpdateUserEmailHandler
 ```
 
 **Das ist der entscheidende Punkt:** Schritt 1 und 2 sind atomar. Es gibt keinen Zustand, in dem die E-Mail aktualisiert wurde, aber kein Feed-Eintrag existiert – und umgekehrt.
+
+Zusatz: Das Write-Modell ist atomar, das Read-Modell ist asynchron. Daher gilt später für Projections at-least-once (siehe Kapitel 4).
 
 ---
 

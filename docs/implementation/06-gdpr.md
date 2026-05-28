@@ -110,7 +110,7 @@ public class GdprProcessor
                 EventType:   reader.GetString(3),
                 Version:     reader.GetInt32(4),
                 PayloadJson: reader.GetString(5),
-                Timestamp:   reader.GetDateTime(6)
+                Timestamp:   reader.GetFieldValue<DateTimeOffset>(6)
             ));
         }
 
