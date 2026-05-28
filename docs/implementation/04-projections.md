@@ -390,6 +390,64 @@ public class ReplayService
 
 Replay ist regulärer Betrieb, kein Sonderfall.
 
+## Snapshot-Strategie (optional)
+
+In diesem Architekturmodell sind Snapshots **kein Pflichtbestandteil**. Sie werden erst relevant, wenn Rebuild oder Recovery zu lange dauern.
+
+Warum anfangs meist nicht noetig:
+
+- CRUD Truth ist vorhanden
+- Change Feed dient primär Synchronisation und Replay
+- Aggregate muessen nicht bei jedem Request aus kompletter Event-History hydriert werden
+
+Wann Snapshots sinnvoll werden:
+
+- Rebuild-Zeit fuer wichtige Projections ueberschreitet SLOs
+- Incident-Recovery dauert zu lange
+- Sehr grosse Historie (z.B. Jahre, hunderte Millionen Events)
+
+Wichtig: Hier sind **Projection Snapshots** gemeint, nicht klassische Aggregate-Snapshots aus purem Event Sourcing.
+
+### Minimales Snapshot-Schema
+
+```sql
+CREATE TABLE projection_snapshot (
+    projection_name    TEXT        NOT NULL,
+    snapshot_id        BIGSERIAL   PRIMARY KEY,
+    snapshot_sequence  BIGINT      NOT NULL,
+    snapshot_payload   JSONB       NOT NULL,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_projection_snapshot_latest
+    ON projection_snapshot (projection_name, snapshot_sequence DESC);
+```
+
+### Replay mit Snapshot-Startpunkt
+
+1. Letzten Snapshot fuer Projection laden
+2. Read Model aus `snapshot_payload` wiederherstellen
+3. Feed nur ab `snapshot_sequence + 1` weiter verarbeiten
+
+```csharp
+// Pseudocode
+var snapshot = await LoadLatestSnapshot("user_read_model");
+if (snapshot is not null)
+{
+    await RestoreReadModelFromSnapshot(snapshot.PayloadJson);
+    await SetCheckpoint("user_read_model", snapshot.SnapshotSequence);
+}
+
+await worker.Run(); // verarbeitet nur neuere Events
+```
+
+### Snapshot-Erzeugung
+
+- entweder zeitbasiert (z.B. alle 6h)
+- oder eventbasiert (z.B. alle 100k verarbeiteten Events)
+
+Snapshotting ist rein eine Performance-Optimierung. Die fachliche Wahrheit bleibt unveraendert im Modell aus CRUD Truth + Change Feed.
+
 ## Zusatztabelle für Fehlerverfolgung
 
 ```sql

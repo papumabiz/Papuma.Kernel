@@ -115,6 +115,7 @@ Erst jetzt:
 - `ProjectionRegistry` für Dispatch
 - `ReplayService` fertig stellen
 - CLI-Tool oder Admin-Endpoint für Replay: `replay --projection user_read_model`
+- Snapshot-Strategie evaluieren und nur bei Bedarf einfuehren (Projection Snapshots)
 
 ---
 
