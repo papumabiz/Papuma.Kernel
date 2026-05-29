@@ -1,83 +1,141 @@
 # 07 – Projektstruktur, Konventionen und Phasenplan
 
-## Verzeichnisstruktur
+## Library-first: `Papuma.Kernel` als eigenständiges NuGet-Package
+
+Der Kernel wird **von Anfang an** als eigenständige Library entwickelt – nicht erst in Phase 4. Das ist eine bewusste Entscheidung:
+
+| Argument | Begründung |
+|---|---|
+| **Klare Dependency-Richtung** | Die App referenziert den Kernel, nie umgekehrt. Das erzwingt saubere Schnittstellen. |
+| **Unabhängige Testbarkeit** | Der Kernel wird isoliert getestet, ohne App-Abhängigkeiten. |
+| **Wiederverwendbarkeit** | Wenn ein zweites Projekt den Kernel nutzen will, ist er sofort verfügbar. |
+| **Disziplin** | Verhindert, dass Feature-Code in den Kernel wandert. Die Package-Grenze ist eine harte Barriere. |
+| **Versionierung** | Kernel-Releases können unabhängig von der App versioniert werden. |
+
+> **Regel:** Der Kernel kennt keine Features, keine Entities, keine Business-Logik. Er stellt nur Infrastruktur bereit: Change Feed, Projections, Tenancy, GDPR.
+
+### Solution-Struktur
 
 ```
-src/
-├── Kernel/                         ← wiederverwendbare Bausteine (kein Business-Code)
-│   ├── ChangeFeed/
-│   │   ├── ChangeRecord.cs
-│   │   ├── ChangeWriter.cs
-│   │   └── ChangeWriterOptions.cs
-│   ├── Events/
-│   │   ├── BusinessEventWriter.cs
-│   │   └── OutboxWriter.cs
-│   ├── Transactions/
-│   │   ├── IUnitOfWork.cs
-│   │   ├── NpgsqlUnitOfWork.cs
-│   │   └── UnitOfWorkOptions.cs
-│   ├── Projections/
-│   │   ├── IProjectionHandler.cs
-│   │   ├── IExternalProjectionHandler.cs
-│   │   ├── IReplayableProjection.cs
-│   │   ├── IVersionedHandler.cs
-│   │   ├── ProjectionWorker.cs
-│   │   ├── ProjectionWorkerOptions.cs
-│   │   ├── ProjectionRegistry.cs
-│   │   ├── ProjectionExtensions.cs
-│   │   └── ReplayService.cs
-│   ├── Tenancy/
-│   │   ├── TenantContext.cs
-│   │   ├── ITenantResolver.cs
-│   │   ├── ITenantDataSourceFactory.cs
-│   │   ├── TenantDataSourceFactory.cs
-│   │   └── TenantMiddleware.cs
-│   └── Gdpr/
-│       └── GdprProcessor.cs
+Papuma.Kernel.slnx
 │
-├── App/                            ← Anwendungslogik, Features
-│   ├── Features/
-│   │   ├── Users/
-│   │   │   ├── Events/
-│   │   │   │   ├── UserEmailUpdatedV1.cs
-│   │   │   │   └── UserEmailUpdatedV2.cs
-│   │   │   ├── Projections/
-│   │   │   │   ├── UserReadModelProjection.cs
-│   │   │   │   └── Handlers/
-│   │   │   │       ├── UserEmailUpdatedV1Handler.cs
-│   │   │   │       └── UserEmailUpdatedV2Handler.cs
-│   │   │   ├── UpdateUserEmailHandler.cs
-│   │   │   └── UserDeletionService.cs
-│   │   └── Assets/
-│   │       ├── Events/
-│   │       └── Projections/
-│   ├── Tenancy/
-│   │   ├── HeaderTenantResolver.cs
-│   │   └── JwtClaimTenantResolver.cs
-│   ├── HealthChecks/
-│   │   └── ProjectionHealthCheck.cs
-│   └── Program.cs
+├── src/
+│   └── Papuma.Kernel/              ← NuGet-Package (eigenständige Library)
+│       ├── Papuma.Kernel.csproj
+│       ├── ChangeFeed/
+│       │   ├── ChangeRecord.cs
+│       │   ├── ChangeWriter.cs
+│       │   └── ChangeWriterOptions.cs
+│       ├── Events/
+│       │   ├── BusinessEventWriter.cs
+│       │   └── OutboxWriter.cs
+│       ├── Transactions/
+│       │   ├── IUnitOfWork.cs
+│       │   ├── NpgsqlUnitOfWork.cs
+│       │   └── UnitOfWorkOptions.cs
+│       ├── Projections/
+│       │   ├── IProjectionHandler.cs
+│       │   ├── IExternalProjectionHandler.cs
+│       │   ├── IReplayableProjection.cs
+│       │   ├── IVersionedHandler.cs
+│       │   ├── ProjectionWorker.cs
+│       │   ├── ProjectionWorkerOptions.cs
+│       │   ├── ProjectionRegistry.cs
+│       │   ├── ProjectionExtensions.cs
+│       │   └── ReplayService.cs
+│       ├── Tenancy/
+│       │   ├── TenantContext.cs
+│       │   ├── ITenantResolver.cs
+│       │   ├── ITenantDataSourceFactory.cs
+│       │   ├── TenantDataSourceFactory.cs
+│       │   └── TenantMiddleware.cs
+│       ├── Gdpr/
+│       │   └── GdprProcessor.cs
+│       └── Schema/
+│           └── schema.sql          ← Init-Skript (als Embedded Resource)
 │
-└── Infrastructure/
-    └── Postgres/
-        └── schema.sql              ← Init-Skript (aus 02-datenbank.md)
+├── tests/
+│   └── Papuma.Kernel.Tests/        ← Unit- und Integrationstests für den Kernel
+│       └── Papuma.Kernel.Tests.csproj
+│
+└── docs/
+    └── implementation/             ← diese Dokumentation
+```
+
+### Wie die konsumierende App aussieht (Beispiel)
+
+Die App ist ein **separates Repository/Projekt**, das `Papuma.Kernel` als NuGet-Package oder Projekt-Referenz einbindet:
+
+```
+MyApp.slnx
+│
+├── src/
+│   └── MyApp/
+│       ├── MyApp.csproj            ← referenziert Papuma.Kernel
+│       ├── Features/
+│       │   ├── Users/
+│       │   │   ├── Events/
+│       │   │   │   ├── UserEmailUpdatedV1.cs
+│       │   │   │   └── UserEmailUpdatedV2.cs
+│       │   │   ├── Projections/
+│       │   │   │   ├── UserReadModelProjection.cs
+│       │   │   │   └── Handlers/
+│       │   │   │       ├── UserEmailUpdatedV1Handler.cs
+│       │   │   │       └── UserEmailUpdatedV2Handler.cs
+│       │   │   ├── UpdateUserEmailHandler.cs
+│       │   │   └── UserDeletionService.cs
+│       │   └── Assets/
+│       │       ├── Events/
+│       │       └── Projections/
+│       ├── Tenancy/
+│       │   ├── HeaderTenantResolver.cs
+│       │   └── JwtClaimTenantResolver.cs
+│       ├── HealthChecks/
+│       │   └── ProjectionHealthCheck.cs
+│       └── Program.cs
+│
+└── tests/
+    └── MyApp.Tests/
+```
+
+```xml
+<!-- MyApp.csproj -->
+<ItemGroup>
+    <!-- Option 1: NuGet-Package (empfohlen für Produktion) -->
+    <PackageReference Include="Papuma.Kernel" Version="0.1.0" />
+
+    <!-- Option 2: Projekt-Referenz (während der Entwicklung) -->
+    <!-- <ProjectReference Include="../../Papuma.Kernel/src/Papuma.Kernel/Papuma.Kernel.csproj" /> -->
+</ItemGroup>
 ```
 
 ### Die wichtigste Konvention
 
-> **Features besitzen ihre Projections.**
+> **Features besitzen ihre Projections. Der Kernel besitzt keine.**
 
 Nicht:
 ```
-Kernel/Projections/UserProjection.cs  ← falsch
+Papuma.Kernel/Projections/UserProjection.cs  ← falsch (Feature-Code im Kernel)
 ```
 
 Sondern:
 ```
-App/Features/Users/Projections/UserReadModelProjection.cs  ← richtig
+MyApp/Features/Users/Projections/UserReadModelProjection.cs  ← richtig (Feature-Code in der App)
 ```
 
 **Warum?** Sobald der Kernel Feature-spezifische Projections enthält, wird er zum "Marten 2" – einem Framework, das zu viel weiß. Der Kernel stellt nur die Infrastruktur bereit. Features entscheiden, wie sie den Feed interpretieren.
+
+### Was gehört in den Kernel, was in die App?
+
+| Kernel (`Papuma.Kernel`) | App (`MyApp`) |
+|---|---|
+| `ChangeRecord`, `ChangeWriter` | `UserEmailUpdatedV1`, `UserEmailUpdatedV2` |
+| `ProjectionWorker`, `IProjectionHandler` | `UserReadModelProjection` |
+| `GdprProcessor` | `UserDeletionService` |
+| `TenantContext`, `ITenantResolver`, `TenantMiddleware` | `JwtClaimTenantResolver`, `HeaderTenantResolver` |
+| `IUnitOfWork`, `NpgsqlUnitOfWork` | `UpdateUserEmailHandler` |
+| `ProjectionExtensions` (DI-Helper) | `Program.cs` (Registrierung) |
+| `schema.sql` (Kernel-Tabellen) | Domain-Tabellen (`users`, `assets`, etc.) |
 
 ---
 
@@ -106,11 +164,12 @@ App/Features/Users/Projections/UserReadModelProjection.cs  ← richtig
 15. Health-Check-Endpoint für Projection-Lag
 
 **Noch nicht:**
-- Keine generischen Abstraktionen
-- Kein NuGet-Package
+- Keine generischen Abstraktionen über das Dokumentierte hinaus
 - Kein versionierter Payload (Version = 1 reicht)
 - Kein Database-per-Tenant (Shared Database reicht)
 - Keine Snapshots
+
+> **Hinweis:** `Papuma.Kernel` wird von Anfang an als eigenständige Library entwickelt und kann ab Phase 1 als NuGet-Package oder Projekt-Referenz von der App konsumiert werden. Die "Kernelisierung" in Phase 4 bezieht sich auf das Extrahieren von **Patterns und Conventions**, nicht auf die Package-Struktur.
 
 **Warum mehr als vorher in Phase 1?**
 Sicherheitsgrundlagen (`actorId`, Validierung, RLS) und Multi-Tenancy nachträglich einzuführen ist extrem teuer. Diese Dinge müssen von Anfang an im Kern sein. Der Aufwand ist überschaubar, der Nutzen enorm.
@@ -155,16 +214,16 @@ Erst jetzt:
 
 ---
 
-### Phase 4 – Kernelisierung
+### Phase 4 – Stabilisierung und Erweiterung
 
 Erst wenn sich Patterns stabil wiederholen:
-- Base Classes/Helpers extrahieren
-- Conventions dokumentieren
-- Optional: als NuGet-Package herauslösen (`Papuma.Kernel`)
+- Base Classes/Helpers im Kernel extrahieren
+- Conventions dokumentieren und als Teil des NuGet-Packages ausliefern
+- Erstes stabiles Release (`1.0.0`) des NuGet-Packages
 - Hybrid-Multi-Tenancy (Shared + Database-per-Tenant je nach Tier)
 - Schema-Registry für Event-Typen (bei >10 Event-Typen)
 
-**Die häufigste Falle:** Viele Frameworks sterben daran, dass zuerst abstrahiert wird und dann reale Probleme gesucht werden. Dieser Phasenplan dreht das bewusst um.
+**Die häufigste Falle:** Viele Frameworks sterben daran, dass zuerst abstrahiert wird und dann reale Probleme gesucht werden. Dieser Phasenplan dreht das bewusst um – die Package-Struktur steht von Anfang an, aber die **API-Stabilisierung** erfolgt erst nach realer Nutzung.
 
 ---
 
@@ -172,8 +231,10 @@ Erst wenn sich Patterns stabil wiederholen:
 
 ### Schritt 1: Schema anlegen
 
+Das Init-Skript liegt im Kernel-Package unter `Schema/schema.sql`:
+
 ```bash
-psql -U postgres -d mydb -f src/Infrastructure/Postgres/schema.sql
+psql -U postgres -d mydb -f src/Papuma.Kernel/Schema/schema.sql
 ```
 
 ### Schritt 2: Verbindung und Tenancy konfigurieren
@@ -226,15 +287,44 @@ Starte den Worker. Er sollte alle Events neu verarbeiten – und am Ende zum ide
 
 ## NuGet-Pakete
 
+### `Papuma.Kernel` (die Library)
+
 ```xml
-<!-- src/Kernel/Kernel.csproj -->
-<ItemGroup>
+<!-- src/Papuma.Kernel/Papuma.Kernel.csproj -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Papuma.Kernel</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Papuma</Authors>
+    <Description>Minimal event-informed architecture kernel: Change Feed, Projections, Multi-Tenancy, GDPR.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
     <PackageReference Include="Npgsql" Version="10.*" />
     <PackageReference Include="Npgsql.DependencyInjection" Version="10.*" />
-    <PackageReference Include="Dapper" Version="2.*" />          <!-- optional, für Read-Queries -->
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.*" />
+  </ItemGroup>
+
+  <!-- Schema als Embedded Resource ausliefern -->
+  <ItemGroup>
+    <EmbeddedResource Include="Schema/schema.sql" />
+  </ItemGroup>
+</Project>
+```
+
+### Konsumierende App
+
+```xml
+<!-- MyApp/MyApp.csproj -->
+<ItemGroup>
+    <PackageReference Include="Papuma.Kernel" Version="0.1.0" />
+    <PackageReference Include="Dapper" Version="2.*" />          <!-- optional, für Read-Queries in der App -->
 </ItemGroup>
 ```
+
+> **Beachte:** `Dapper` ist eine App-Abhängigkeit, nicht eine Kernel-Abhängigkeit. Der Kernel verwendet nur `Npgsql` direkt. Die App kann Dapper für ihre Read-Queries verwenden, aber der Kernel erzwingt es nicht.
 
 `System.Text.Json` ist im .NET 10 SDK bereits enthalten.
 

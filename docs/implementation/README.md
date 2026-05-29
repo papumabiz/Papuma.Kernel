@@ -2,7 +2,9 @@
 
 ## Was hier gebaut wird
 
-Dieses Tutorial beschreibt die Implementierung eines **minimal event-informierten Architektur-Kernels** auf Basis von PostgreSQL, Npgsql und .NET 10. Es ist kein klassisches Event Sourcing Framework – und das ist eine bewusste Entscheidung.
+Dieses Tutorial beschreibt die Implementierung von **`Papuma.Kernel`** – einer eigenständigen .NET-Library für einen **minimal event-informierten Architektur-Kernel** auf Basis von PostgreSQL, Npgsql und .NET 10. Es ist kein klassisches Event Sourcing Framework – und das ist eine bewusste Entscheidung.
+
+`Papuma.Kernel` wird von Anfang an als **eigenständiges NuGet-Package** entwickelt, das von beliebigen Applikationen konsumiert werden kann. Der Kernel kennt keine Features, keine Entities, keine Business-Logik – er stellt nur Infrastruktur bereit.
 
 ## Warum kein Marten, warum kein vollständiges Event Sourcing?
 
