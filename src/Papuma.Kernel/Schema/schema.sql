@@ -65,8 +65,10 @@ CREATE TABLE event_outbox (
     event_id       UUID        NOT NULL,
     event_type     TEXT        NOT NULL,
     payload        JSONB       NOT NULL,
-    status         TEXT        NOT NULL DEFAULT 'Pending',
-    attempts       INT         NOT NULL DEFAULT 0,
+    status         TEXT        NOT NULL DEFAULT 'Pending'
+                   CHECK (status IN ('Pending', 'Sent', 'Failed')),
+    attempts       INT         NOT NULL DEFAULT 0
+                   CHECK (attempts >= 0),
     next_retry_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_error     TEXT        NULL,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
