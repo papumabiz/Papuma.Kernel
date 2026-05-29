@@ -4,8 +4,8 @@
     <IsPackable>true</IsPackable>
     <PackageId>Papuma.Kernel</PackageId>
     <Version>0.1.0</Version>
-    <Authors>Papuma</Authors>
-    <Description>Kernel-Bibliothek fuer Papuma.</Description>
+    <Authors>Harald Lapp</Authors>
+    <Description>Kernel library for Papuma.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
 
