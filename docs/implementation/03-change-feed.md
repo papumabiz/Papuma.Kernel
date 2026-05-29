@@ -43,10 +43,47 @@ Identifiziert den Akteur, der die Änderung ausgelöst hat. Das ist kein fachlic
 
 Der `ChangeWriter` ist für das atomare Schreiben zuständig: CRUD-Mutation und Change Feed Append passieren in **einer** Datenbanktransaktion. Entweder beides, oder nichts.
 
+### Validierungsregeln (Pflicht)
+
+Der `ChangeWriter` validiert alle Eingaben **vor** dem Schreiben. Das verhindert korrupte Daten im Feed und schützt gegen Log-Injection, XSS in Admin-UIs und semantisch ungültige Events.
+
+| Parameter | Regel | Begründung |
+|---|---|---|
+| `entity` | Regex: `^[A-Za-z][A-Za-z0-9_]{1,100}$` | Verhindert Sonderzeichen, Log-Injection |
+| `entityId` | Nicht leer, max. 200 Zeichen | Verhindert leere IDs und überlange Strings |
+| `eventType` | Regex: `^[A-Za-z][A-Za-z0-9_]{2,100}$` | Verhindert Sonderzeichen, Log-Injection, XSS |
+| `actorId` | **Pflichtfeld**, nicht leer, max. 200 Zeichen | Audit-Trail darf keine Lücken haben |
+| `payloadJson` | Max. 256 KB (konfigurierbar) | Verhindert DoS durch überdimensionierte Payloads |
+| `version` | `>= 1` | Semantisch ungültige Versionen verhindern |
+
+> ⚠️ **`actorId` ist ein Pflichtfeld.** Jede Änderung im System muss einem Akteur zugeordnet werden können. Ohne `actorId` ist der Audit-Trail unvollständig und Forensik bei Sicherheitsvorfällen unmöglich. Für automatische Prozesse: `"system:scheduler"`, `"system:migration"`, etc.
+
+```csharp
+// src/Kernel/ChangeFeed/ChangeWriterOptions.cs
+public class ChangeWriterOptions
+{
+    /// <summary>
+    /// Maximale Payload-Größe in Bytes. Default: 256 KB.
+    /// Für größere Daten: Referenz-Pattern verwenden (Payload enthält URL/ID, Daten in Blob-Storage).
+    /// </summary>
+    public int MaxPayloadSizeBytes { get; set; } = 256 * 1024;
+}
+```
+
 ```csharp
 // src/Kernel/ChangeFeed/ChangeWriter.cs
 public class ChangeWriter
 {
+    private static readonly Regex ValidNamePattern = new(
+        @"^[A-Za-z][A-Za-z0-9_]{1,100}$", RegexOptions.Compiled);
+
+    private readonly ChangeWriterOptions _options;
+
+    public ChangeWriter(ChangeWriterOptions? options = null)
+    {
+        _options = options ?? new ChangeWriterOptions();
+    }
+
     public async Task AppendAsync(
         NpgsqlTransaction transaction,
         string entity,
@@ -54,11 +91,14 @@ public class ChangeWriter
         string eventType,
         int version,
         string payloadJson,
+        string actorId,
         string? correlationId = null,
         string? causationId = null,
-        string? actorId = null,
         CancellationToken ct = default)
     {
+        // Validierung (Defense in Depth)
+        ValidateInputs(entity, entityId, eventType, version, payloadJson, actorId);
+
         await using var cmd = transaction.Connection!.CreateCommand();
         cmd.Transaction = transaction;
         cmd.CommandText = """
@@ -74,13 +114,48 @@ public class ChangeWriter
         cmd.Parameters.AddWithValue("version",       version);
         cmd.Parameters.AddWithValue("correlationId", (object?)correlationId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("causationId",   (object?)causationId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("actorId",       (object?)actorId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("actorId",       actorId);
         cmd.Parameters.AddWithValue("payload",       payloadJson);
 
         await cmd.ExecuteNonQueryAsync(ct);
     }
+
+    private void ValidateInputs(
+        string entity, string entityId, string eventType,
+        int version, string payloadJson, string actorId)
+    {
+        if (!ValidNamePattern.IsMatch(entity))
+            throw new ArgumentException(
+                $"Invalid entity name '{entity}'. Must match [A-Za-z][A-Za-z0-9_]{{1,100}}.", nameof(entity));
+
+        if (string.IsNullOrWhiteSpace(entityId) || entityId.Length > 200)
+            throw new ArgumentException(
+                "entityId must not be empty and max 200 characters.", nameof(entityId));
+
+        if (!ValidNamePattern.IsMatch(eventType))
+            throw new ArgumentException(
+                $"Invalid eventType '{eventType}'. Must match [A-Za-z][A-Za-z0-9_]{{2,100}}.", nameof(eventType));
+
+        if (version < 1)
+            throw new ArgumentException("version must be >= 1.", nameof(version));
+
+        if (string.IsNullOrWhiteSpace(actorId) || actorId.Length > 200)
+            throw new ArgumentException(
+                "actorId is required and must not exceed 200 characters.", nameof(actorId));
+
+        if (payloadJson.Length > _options.MaxPayloadSizeBytes)
+            throw new ArgumentException(
+                $"Payload exceeds maximum size of {_options.MaxPayloadSizeBytes} bytes ({payloadJson.Length} bytes).",
+                nameof(payloadJson));
+    }
 }
 ```
+
+**Wichtige Änderungen gegenüber der Minimalversion:**
+
+1. **`actorId` ist jetzt Pflichtparameter** (nicht mehr optional mit Default `null`). Er steht vor den optionalen Parametern.
+2. **Eingabevalidierung** schützt gegen korrupte Daten, Log-Injection und überdimensionierte Payloads.
+3. **Konfigurierbare Payload-Größe** über `ChangeWriterOptions`.
 
 `ChangeWriter` ist hier bewusst transaktionsbasiert und zustandslos. Er bekommt die Transaktion vom aufrufenden Use-Case und verwendet keine eigene Connection.
 
@@ -105,36 +180,86 @@ public interface IUnitOfWork
         CancellationToken ct = default);
 }
 
+// src/Kernel/Transactions/UnitOfWorkOptions.cs
+public class UnitOfWorkOptions
+{
+    /// <summary>
+    /// Maximale Anzahl Retries bei transienten Datenbankfehlern (Deadlock, Serialization Failure).
+    /// </summary>
+    public int MaxRetries { get; set; } = 3;
+
+    /// <summary>
+    /// Basis-Delay zwischen Retries. Jitter wird automatisch hinzugefügt.
+    /// </summary>
+    public TimeSpan BaseRetryDelay { get; set; } = TimeSpan.FromMilliseconds(100);
+}
+
 // src/Kernel/Transactions/NpgsqlUnitOfWork.cs
 public class NpgsqlUnitOfWork : IUnitOfWork
 {
     private readonly NpgsqlDataSource _dataSource;
+    private readonly UnitOfWorkOptions _options;
+    private readonly ILogger<NpgsqlUnitOfWork>? _logger;
 
-    public NpgsqlUnitOfWork(NpgsqlDataSource dataSource)
+    // PostgreSQL-Fehlercodes, die transient sind und einen Retry rechtfertigen
+    private static readonly HashSet<string> TransientSqlStates = new()
+    {
+        "40001", // serialization_failure
+        "40P01", // deadlock_detected
+        "08006", // connection_failure
+        "08001", // sqlclient_unable_to_establish_sqlconnection
+        "57P03", // cannot_connect_now
+    };
+
+    public NpgsqlUnitOfWork(
+        NpgsqlDataSource dataSource,
+        UnitOfWorkOptions? options = null,
+        ILogger<NpgsqlUnitOfWork>? logger = null)
     {
         _dataSource = dataSource;
+        _options = options ?? new UnitOfWorkOptions();
+        _logger = logger;
     }
 
     public async Task ExecuteAsync(
         Func<NpgsqlConnection, NpgsqlTransaction, CancellationToken, Task> action,
         CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
+        for (int attempt = 1; ; attempt++)
+        {
+            await using var conn = await _dataSource.OpenConnectionAsync(ct);
+            await using var tx = await conn.BeginTransactionAsync(ct);
 
-        try
-        {
-            await action(conn, tx, ct);
-            await tx.CommitAsync(ct);
-        }
-        catch
-        {
-            await tx.RollbackAsync(ct);
-            throw;
+            try
+            {
+                await action(conn, tx, ct);
+                await tx.CommitAsync(ct);
+                return; // Erfolg
+            }
+            catch (NpgsqlException ex) when (
+                attempt < _options.MaxRetries &&
+                ex.SqlState is not null &&
+                TransientSqlStates.Contains(ex.SqlState))
+            {
+                await tx.RollbackAsync(ct);
+                var delay = _options.BaseRetryDelay * Math.Pow(2, attempt - 1);
+                var jitter = TimeSpan.FromMilliseconds(Random.Shared.Next(0, 50));
+                _logger?.LogWarning(
+                    "Transient DB error (SqlState={SqlState}, attempt {Attempt}/{Max}), retrying in {Delay}ms.",
+                    ex.SqlState, attempt, _options.MaxRetries, (delay + jitter).TotalMilliseconds);
+                await Task.Delay(delay + jitter, ct);
+            }
+            catch
+            {
+                await tx.RollbackAsync(ct);
+                throw;
+            }
         }
     }
 }
 ```
+
+> **Warum Retry im Unit of Work?** Transiente Datenbankfehler (Deadlocks, Serialization Failures, kurzzeitige Connection-Probleme) sind in Produktion unter Last **normal**. Ohne Retry schlagen diese Operationen sofort fehl und der Fehler propagiert zum Client. Mit Retry werden die meisten transienten Fehler transparent aufgelöst. Jitter verhindert Thundering-Herd-Effekte bei gleichzeitigen Retries.
 
 Nutzung im Use Case:
 
@@ -168,7 +293,12 @@ public class UpdateUserEmailHandler
         _changeWriter = changeWriter;
     }
 
-    public async Task HandleAsync(Guid userId, string newEmail, CancellationToken ct = default)
+    public async Task HandleAsync(
+        Guid userId,
+        string newEmail,
+        string actorId,              // Pflicht: wer löst die Änderung aus?
+        string? correlationId = null, // optional: z.B. Request-ID für Tracing
+        CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var tx   = await conn.BeginTransactionAsync(ct);
@@ -195,9 +325,8 @@ public class UpdateUserEmailHandler
             eventType:     "UserEmailUpdated",
             version:       1,
             payloadJson:   payload,
-            correlationId: null,   // optional: z.B. Request-ID für Tracing
-            causationId:   null,   // optional: sequence_id des auslösenden Events
-            actorId:       null,   // optional: z.B. "user:550e8400-..." oder "system"
+            actorId:       actorId,        // Pflicht: z.B. "user:550e8400-..." oder "admin:..."
+            correlationId: correlationId,   // optional: Request-ID für Tracing
             ct:            ct
         );
 
@@ -206,6 +335,8 @@ public class UpdateUserEmailHandler
     }
 }
 ```
+
+> **Beachte:** `actorId` wird vom Use-Case-Handler als Pflichtparameter entgegengenommen. In der Praxis kommt dieser Wert aus dem Authentication-Context (z.B. `HttpContext.User`). Eine Middleware oder Pipeline kann den `actorId` automatisch aus dem JWT-Token extrahieren und an den Handler übergeben.
 
 **Das ist der entscheidende Punkt:** Schritt 1 und 2 sind atomar. Es gibt keinen Zustand, in dem die E-Mail aktualisiert wurde, aber kein Feed-Eintrag existiert – und umgekehrt.
 
@@ -282,7 +413,9 @@ public class BusinessEventWriter
     public async Task<Guid> AppendAsync(
         NpgsqlTransaction transaction,
         string eventType,
-        string? aggregateId,
+        string actorId,
+        string? entity = null,
+        string? entityId = null,
         string payloadJson,
         string? correlationId = null,
         string? causationId = null,
@@ -294,14 +427,18 @@ public class BusinessEventWriter
         cmd.Transaction = transaction;
         cmd.CommandText = """
             INSERT INTO business_event_log
-                (event_id, event_type, aggregate_id, correlation_id, causation_id, payload)
+                (event_id, event_type, entity, entity_id, actor_id,
+                 correlation_id, causation_id, payload)
             VALUES
-                (@eventId, @eventType, @aggregateId, @correlationId, @causationId, @payload::jsonb)
+                (@eventId, @eventType, @entity, @entityId, @actorId,
+                 @correlationId, @causationId, @payload::jsonb)
             """;
 
         cmd.Parameters.AddWithValue("eventId", eventId);
         cmd.Parameters.AddWithValue("eventType", eventType);
-        cmd.Parameters.AddWithValue("aggregateId", (object?)aggregateId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("entity", (object?)entity ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("entityId", (object?)entityId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("actorId", actorId);
         cmd.Parameters.AddWithValue("correlationId", (object?)correlationId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("causationId", (object?)causationId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("payload", payloadJson);
@@ -311,6 +448,10 @@ public class BusinessEventWriter
     }
 }
 ```
+
+**Änderungen gegenüber der Minimalversion:**
+- `aggregate_id` → `entity` + `entity_id` (konsistent mit `change_feed`)
+- `actorId` ist Pflichtparameter
 
 ## Outbox fuer externe Verarbeitung
 
@@ -346,14 +487,13 @@ public class OutboxWriter
 ## Beispiel: Login-Event ohne Domain-Mutation
 
 ```csharp
-public async Task HandleLoginAsync(Guid userId, string ip, CancellationToken ct)
+public async Task HandleLoginAsync(Guid userId, string ip, string actorId, CancellationToken ct)
 {
     await using var conn = await _dataSource.OpenConnectionAsync(ct);
     await using var tx = await conn.BeginTransactionAsync(ct);
 
     var payload = JsonSerializer.Serialize(new
     {
-        UserId = userId,
         Ip = ip,
         LoggedInAt = DateTimeOffset.UtcNow
     });
@@ -361,7 +501,9 @@ public async Task HandleLoginAsync(Guid userId, string ip, CancellationToken ct)
     var eventId = await _businessEventWriter.AppendAsync(
         transaction: tx,
         eventType: "UserLoggedIn",
-        aggregateId: userId.ToString(),
+        actorId: actorId,              // Pflicht: wer loggt sich ein?
+        entity: "User",                // konsistent mit change_feed
+        entityId: userId.ToString(),
         payloadJson: payload,
         ct: ct);
 
@@ -375,5 +517,7 @@ public async Task HandleLoginAsync(Guid userId, string ip, CancellationToken ct)
     await tx.CommitAsync(ct);
 }
 ```
+
+> **Beachte:** `UserId` ist nicht mehr im Payload, weil es bereits als `entityId` im Event-Metadatum steht. Payload enthält nur die **zusätzlichen** Informationen (IP, Zeitpunkt). Das vermeidet Redundanz und hält den Payload minimal.
 
 Damit bleibt die Erzeugung des Events robust, auch wenn der externe Publisher gerade nicht verfuegbar ist.

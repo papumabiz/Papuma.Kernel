@@ -2,7 +2,9 @@
 
 ## Überblick
 
-Das System nutzt ausschließlich PostgreSQL. Es gibt keine ORMs, keine Migration-Frameworks – nur direkte SQL-Skripte, die du einmal ausführst (oder in dein Migrations-Setup einbindest, z.B. mit [Flyway](https://flywaydb.org/) oder einfach als Init-Skripte).
+Das System nutzt ausschließlich **PostgreSQL ≥ 14** (wegen `pg_current_snapshot()` und `xmin`-basiertem Sichtbarkeitsfilter, siehe [04-projections.md](04-projections.md)). Es gibt keine ORMs, keine Migration-Frameworks – nur direkte SQL-Skripte, die du einmal ausführst (oder in dein Migrations-Setup einbindest, z.B. mit [Flyway](https://flywaydb.org/) oder einfach als Init-Skripte).
+
+> ⚠️ **Minimale PostgreSQL-Version: 14.** Ältere Versionen unterstützen `pg_current_snapshot()` nicht (dort hieß es `txid_current_snapshot()`). Der `xmin`-basierte Sichtbarkeitsfilter im Projection Worker setzt PG ≥ 13 voraus, PG ≥ 14 wird empfohlen.
 
 ## Tabellen
 
@@ -17,7 +19,7 @@ CREATE TABLE change_feed (
     version        INT         NOT NULL DEFAULT 1,
     correlation_id TEXT        NULL,
     causation_id   TEXT        NULL,
-    actor_id       TEXT        NULL,
+    actor_id       TEXT        NOT NULL,
     payload        JSONB       NOT NULL,
     timestamp      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     redacted       BOOLEAN     NOT NULL DEFAULT FALSE
@@ -28,7 +30,7 @@ CREATE INDEX idx_change_feed_entity_id     ON change_feed (entity, entity_id);
 CREATE INDEX idx_change_feed_event_type    ON change_feed (event_type);
 CREATE INDEX idx_change_feed_not_redacted  ON change_feed (sequence_id) WHERE redacted = FALSE;
 CREATE INDEX idx_change_feed_correlation   ON change_feed (correlation_id) WHERE correlation_id IS NOT NULL;
-CREATE INDEX idx_change_feed_actor         ON change_feed (actor_id) WHERE actor_id IS NOT NULL;
+CREATE INDEX idx_change_feed_actor         ON change_feed (actor_id);
 ```
 
 **Spalten erklärt:**
@@ -42,7 +44,7 @@ CREATE INDEX idx_change_feed_actor         ON change_feed (actor_id) WHERE actor
 | `version` | `INT` | Schema-Version des Payloads. Beginnt bei 1. Wird erhöht, wenn sich die Payload-Struktur ändert. |
 | `correlation_id` | `TEXT` | Optional. Verknüpft zusammengehörige Änderungen über mehrere Entitäten hinweg (z.B. eine fachliche Operation, die User + Asset ändert). Typischerweise eine Request-ID oder Prozess-ID. |
 | `causation_id` | `TEXT` | Optional. Referenziert das Event, das dieses Event **direkt ausgelöst** hat. Ermöglicht die Rekonstruktion von Kausalketten (Event A → Event B → Event C). Siehe Abschnitt "Correlation vs. Causation" unten. |
-| `actor_id` | `TEXT` | Optional. Identifiziert den Akteur, der die Änderung ausgelöst hat – z.B. eine User-ID, `"system"`, `"migration"`, `"scheduler"`. Unverzichtbar für Audit-Trails und Nachvollziehbarkeit. |
+| `actor_id` | `TEXT` | **Pflichtfeld.** Identifiziert den Akteur, der die Änderung ausgelöst hat – z.B. eine User-ID, `"system"`, `"migration"`, `"scheduler"`. Unverzichtbar für Audit-Trails und Nachvollziehbarkeit. Ohne `actor_id` ist Forensik bei Sicherheitsvorfällen unmöglich. |
 | `payload` | `JSONB` | Nutzdaten des Events als JSON. JSONB ermöglicht indexierte Queries auf Felder. |
 | `timestamp` | `TIMESTAMPTZ` | Zeitpunkt des Events, immer UTC. |
 | `redacted` | `BOOLEAN` | DSGVO: wurde dieses Event auf Wunsch des Nutzers gelöscht/unkenntlich gemacht? |
@@ -56,7 +58,7 @@ CREATE INDEX idx_change_feed_actor         ON change_feed (actor_id) WHERE actor
 | `idx_change_feed_event_type` | Filtern nach Event-Typ (für Projections mit `EventTypes`-Filter) |
 | `idx_change_feed_not_redacted` | **Partieller Index**: Nur nicht-redacted Events. Beschleunigt die Polling-Query der Projections erheblich, da redacted Events aus dem Index ausgeschlossen werden. |
 | `idx_change_feed_correlation` | **Partieller Index**: Nur Events mit `correlation_id`. Ermöglicht schnelles Nachverfolgen zusammengehöriger Änderungen. |
-| `idx_change_feed_actor` | **Partieller Index**: Nur Events mit `actor_id`. Ermöglicht schnelle Abfrage aller Änderungen eines bestimmten Akteurs. |
+| `idx_change_feed_actor` | Ermöglicht schnelle Abfrage aller Änderungen eines bestimmten Akteurs (z.B. "Zeige alle Änderungen von User X"). |
 
 ### Correlation vs. Causation
 
@@ -193,21 +195,33 @@ Diese Tabelle speichert Business Events wie `UserLoggedIn`, `OrderPlaced`, `Paym
 
 ```sql
 CREATE TABLE business_event_log (
-    event_id      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    event_type    TEXT        NOT NULL,
-    aggregate_id  TEXT        NULL,
-    correlation_id TEXT       NULL,
-    causation_id   TEXT       NULL,
-    payload       JSONB       NOT NULL,
-    occurred_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    event_id       UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_type     TEXT        NOT NULL,
+    entity         TEXT        NULL,
+    entity_id      TEXT        NULL,
+    actor_id       TEXT        NOT NULL,
+    correlation_id TEXT        NULL,
+    causation_id   TEXT        NULL,
+    payload        JSONB       NOT NULL,
+    occurred_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    redacted       BOOLEAN     NOT NULL DEFAULT FALSE
 );
 
 CREATE INDEX idx_business_event_type        ON business_event_log (event_type);
 CREATE INDEX idx_business_event_occurred_at ON business_event_log (occurred_at);
-CREATE INDEX idx_business_event_aggregate   ON business_event_log (aggregate_id);
+CREATE INDEX idx_business_event_entity      ON business_event_log (entity, entity_id);
+CREATE INDEX idx_business_event_actor       ON business_event_log (actor_id);
 ```
 
-`aggregate_id` ist optional, weil manche Events keinen konkreten Aggregate-State betreffen.
+**Änderungen gegenüber der Minimalversion:**
+
+| Änderung | Begründung |
+|---|---|
+| `aggregate_id` → `entity` + `entity_id` | Konsistente Namensgebung mit `change_feed`. Ermöglicht übergreifende Queries. |
+| `actor_id NOT NULL` | Pflichtfeld wie im `change_feed`. Jedes Event muss einem Akteur zugeordnet sein. |
+| `redacted BOOLEAN` | DSGVO: Business Events können personenbezogene Daten enthalten (z.B. IP-Adresse in `UserLoggedIn`). Ohne `redacted`-Flag ist eine vollständige DSGVO-Löschung nicht möglich. |
+
+`entity` und `entity_id` sind optional, weil manche Events keinen konkreten Entity-Bezug haben (z.B. `SystemHealthCheckFailed`).
 
 ---
 
@@ -264,7 +278,7 @@ CREATE TABLE change_feed (
     version        INT         NOT NULL DEFAULT 1,
     correlation_id TEXT        NULL,
     causation_id   TEXT        NULL,
-    actor_id       TEXT        NULL,
+    actor_id       TEXT        NOT NULL,
     payload        JSONB       NOT NULL,
     timestamp      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     redacted       BOOLEAN     NOT NULL DEFAULT FALSE
@@ -275,7 +289,7 @@ CREATE INDEX idx_change_feed_entity_id     ON change_feed (entity, entity_id);
 CREATE INDEX idx_change_feed_event_type    ON change_feed (event_type);
 CREATE INDEX idx_change_feed_not_redacted  ON change_feed (sequence_id) WHERE redacted = FALSE;
 CREATE INDEX idx_change_feed_correlation   ON change_feed (correlation_id) WHERE correlation_id IS NOT NULL;
-CREATE INDEX idx_change_feed_actor         ON change_feed (actor_id) WHERE actor_id IS NOT NULL;
+CREATE INDEX idx_change_feed_actor         ON change_feed (actor_id);
 
 -- projection_checkpoint
 CREATE TABLE projection_checkpoint (
@@ -299,18 +313,22 @@ CREATE TABLE projection_failures (
 
 -- business_event_log
 CREATE TABLE business_event_log (
-    event_id      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    event_type    TEXT        NOT NULL,
-    aggregate_id  TEXT        NULL,
-    correlation_id TEXT       NULL,
-    causation_id   TEXT       NULL,
-    payload       JSONB       NOT NULL,
-    occurred_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    event_id       UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_type     TEXT        NOT NULL,
+    entity         TEXT        NULL,
+    entity_id      TEXT        NULL,
+    actor_id       TEXT        NOT NULL,
+    correlation_id TEXT        NULL,
+    causation_id   TEXT        NULL,
+    payload        JSONB       NOT NULL,
+    occurred_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    redacted       BOOLEAN     NOT NULL DEFAULT FALSE
 );
 
 CREATE INDEX idx_business_event_type        ON business_event_log (event_type);
 CREATE INDEX idx_business_event_occurred_at ON business_event_log (occurred_at);
-CREATE INDEX idx_business_event_aggregate   ON business_event_log (aggregate_id);
+CREATE INDEX idx_business_event_entity      ON business_event_log (entity, entity_id);
+CREATE INDEX idx_business_event_actor       ON business_event_log (actor_id);
 
 -- event_outbox
 CREATE TABLE event_outbox (

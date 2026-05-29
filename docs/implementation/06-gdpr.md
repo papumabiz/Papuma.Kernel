@@ -39,85 +39,200 @@ WHERE sequence_id > @lastSeen
 
 ## Der `GdprProcessor`
 
+### Sicherheitsanforderungen (Pflicht)
+
+Der `GdprProcessor` hat Zugriff auf **alle personenbezogenen Daten** im System. Deshalb gelten folgende Regeln:
+
+| Anforderung | Begründung |
+|---|---|
+| **`actorId` ist Pflichtparameter** | Jede Redaktion muss einem Akteur zugeordnet sein (wer hat die Löschung durchgeführt?) |
+| **`reason` ist Pflichtparameter** | Nachvollziehbarkeit: DSGVO-Antrag, Ticket-Nummer, rechtliche Grundlage |
+| **Jede Redaktion wird als Business Event protokolliert** | Audit-Trail der Löschung selbst |
+| **`business_event_log` wird mitredacted** | Business Events können personenbezogene Daten enthalten (z.B. IP in `UserLoggedIn`) |
+| **Change Feed + Business Event Log in einer Transaktion** | Keine Teilredaktion bei Crash |
+
+> ⚠️ **Der `GdprProcessor` darf nur über autorisierte Endpoints aufgerufen werden.** Rate-Limiting ist empfohlen, um Missbrauch (massenhafte Redaktion als DoS-Vektor) zu verhindern.
+
 ```csharp
 // src/Kernel/Gdpr/GdprProcessor.cs
 public class GdprProcessor
 {
     private readonly NpgsqlDataSource _dataSource;
+    private readonly BusinessEventWriter _businessEventWriter;
+    private readonly ILogger<GdprProcessor> _logger;
 
-    public GdprProcessor(NpgsqlDataSource dataSource)
+    public GdprProcessor(
+        NpgsqlDataSource dataSource,
+        BusinessEventWriter businessEventWriter,
+        ILogger<GdprProcessor> logger)
     {
         _dataSource = dataSource;
+        _businessEventWriter = businessEventWriter;
+        _logger = logger;
     }
 
     /// <summary>
-    /// Redacts all Change Feed entries for a specific entity.
-    /// The event records remain (for audit), but payload is cleared.
+    /// Redacts all Change Feed AND Business Event Log entries for a specific entity.
+    /// Both tables are redacted in ONE transaction. The redaction itself is logged as a Business Event.
     /// </summary>
-    public async Task RedactEntityAsync(
+    public async Task<RedactionResult> RedactEntityAsync(
         string entity,
         string entityId,
+        string actorId,
+        string reason,
         CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var cmd  = conn.CreateCommand();
+        if (string.IsNullOrWhiteSpace(actorId))
+            throw new ArgumentException("actorId is required for GDPR redaction.", nameof(actorId));
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new ArgumentException("reason is required for GDPR redaction.", nameof(reason));
 
-        cmd.CommandText = """
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        // 1. Change Feed redacten
+        await using var feedCmd = conn.CreateCommand();
+        feedCmd.Transaction = tx;
+        feedCmd.CommandText = """
             UPDATE change_feed
             SET payload  = '{"redacted": true}'::jsonb,
                 redacted = TRUE
             WHERE entity    = @entity
               AND entity_id = @entityId
+              AND redacted  = FALSE
             """;
+        feedCmd.Parameters.AddWithValue("entity", entity);
+        feedCmd.Parameters.AddWithValue("entityId", entityId);
+        var feedAffected = await feedCmd.ExecuteNonQueryAsync(ct);
 
-        cmd.Parameters.AddWithValue("entity",   entity);
-        cmd.Parameters.AddWithValue("entityId", entityId);
+        // 2. Business Event Log redacten
+        await using var belCmd = conn.CreateCommand();
+        belCmd.Transaction = tx;
+        belCmd.CommandText = """
+            UPDATE business_event_log
+            SET payload  = '{"redacted": true}'::jsonb,
+                redacted = TRUE
+            WHERE entity    = @entity
+              AND entity_id = @entityId
+              AND redacted  = FALSE
+            """;
+        belCmd.Parameters.AddWithValue("entity", entity);
+        belCmd.Parameters.AddWithValue("entityId", entityId);
+        var belAffected = await belCmd.ExecuteNonQueryAsync(ct);
 
-        var affected = await cmd.ExecuteNonQueryAsync(ct);
+        // 3. Redaktion selbst als Business Event protokollieren (Audit der Löschung)
+        var auditPayload = JsonSerializer.Serialize(new
+        {
+            RedactedEntity = entity,
+            RedactedEntityId = entityId,
+            Reason = reason,
+            FeedEventsRedacted = feedAffected,
+            BusinessEventsRedacted = belAffected,
+            RedactedAt = DateTimeOffset.UtcNow
+        });
+
+        await _businessEventWriter.AppendAsync(
+            transaction: tx,
+            eventType: "EntityRedacted",
+            actorId: actorId,
+            payloadJson: auditPayload,
+            ct: ct);
+
+        await tx.CommitAsync(ct);
+
+        _logger.LogInformation(
+            "GDPR redaction completed: entity={Entity}, entityId={EntityId}, actor={ActorId}, " +
+            "feedEvents={FeedAffected}, businessEvents={BelAffected}, reason={Reason}",
+            entity, entityId, actorId, feedAffected, belAffected, reason);
+
+        return new RedactionResult(feedAffected, belAffected);
     }
 
     /// <summary>
     /// Returns all change feed entries for a specific entity (for GDPR Art. 15 – right of access).
+    /// Includes both Change Feed and Business Event Log entries.
     /// </summary>
-    public async Task<List<ChangeRecord>> GetEntityHistoryAsync(
+    public async Task<EntityHistory> GetEntityHistoryAsync(
         string entity,
         string entityId,
         CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var cmd  = conn.CreateCommand();
 
-        cmd.CommandText = """
+        // Change Feed History
+        await using var feedCmd = conn.CreateCommand();
+        feedCmd.CommandText = """
             SELECT sequence_id, entity, entity_id, event_type, version,
-                   payload::text, timestamp
+                   correlation_id, causation_id, actor_id, payload::text, timestamp
             FROM change_feed
             WHERE entity    = @entity
               AND entity_id = @entityId
             ORDER BY sequence_id
             """;
+        feedCmd.Parameters.AddWithValue("entity", entity);
+        feedCmd.Parameters.AddWithValue("entityId", entityId);
 
-        cmd.Parameters.AddWithValue("entity",   entity);
-        cmd.Parameters.AddWithValue("entityId", entityId);
-
-        var records = new List<ChangeRecord>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+        var changeRecords = new List<ChangeRecord>();
+        await using var feedReader = await feedCmd.ExecuteReaderAsync(ct);
+        while (await feedReader.ReadAsync(ct))
         {
-            records.Add(new ChangeRecord(
-                SequenceId:  reader.GetInt64(0),
-                Entity:      reader.GetString(1),
-                EntityId:    reader.GetString(2),
-                EventType:   reader.GetString(3),
-                Version:     reader.GetInt32(4),
-                PayloadJson: reader.GetString(5),
-                Timestamp:   reader.GetFieldValue<DateTimeOffset>(6)
+            changeRecords.Add(new ChangeRecord(
+                SequenceId:    feedReader.GetInt64(0),
+                Entity:        feedReader.GetString(1),
+                EntityId:      feedReader.GetString(2),
+                EventType:     feedReader.GetString(3),
+                Version:       feedReader.GetInt32(4),
+                CorrelationId: feedReader.IsDBNull(5) ? null : feedReader.GetString(5),
+                CausationId:   feedReader.IsDBNull(6) ? null : feedReader.GetString(6),
+                ActorId:       feedReader.GetString(7),
+                PayloadJson:   feedReader.GetString(8),
+                Timestamp:     feedReader.GetFieldValue<DateTimeOffset>(9)
             ));
         }
 
-        return records;
+        // Business Event Log History
+        await using var belCmd = conn.CreateCommand();
+        belCmd.CommandText = """
+            SELECT event_id, event_type, actor_id, payload::text, occurred_at
+            FROM business_event_log
+            WHERE entity    = @entity
+              AND entity_id = @entityId
+            ORDER BY occurred_at
+            """;
+        belCmd.Parameters.AddWithValue("entity", entity);
+        belCmd.Parameters.AddWithValue("entityId", entityId);
+
+        var businessEvents = new List<BusinessEventRecord>();
+        await using var belReader = await belCmd.ExecuteReaderAsync(ct);
+        while (await belReader.ReadAsync(ct))
+        {
+            businessEvents.Add(new BusinessEventRecord(
+                EventId:     belReader.GetGuid(0),
+                EventType:   belReader.GetString(1),
+                ActorId:     belReader.GetString(2),
+                PayloadJson: belReader.GetString(3),
+                OccurredAt:  belReader.GetFieldValue<DateTimeOffset>(4)
+            ));
+        }
+
+        return new EntityHistory(changeRecords, businessEvents);
     }
 }
+
+// Ergebnis-Typen
+public record RedactionResult(int FeedEventsRedacted, int BusinessEventsRedacted);
+public record BusinessEventRecord(Guid EventId, string EventType, string ActorId, string PayloadJson, DateTimeOffset OccurredAt);
+public record EntityHistory(List<ChangeRecord> ChangeRecords, List<BusinessEventRecord> BusinessEvents);
 ```
+
+**Wichtige Änderungen gegenüber der Minimalversion:**
+
+1. **`actorId` und `reason` sind Pflichtparameter** – Nachvollziehbarkeit der Löschung
+2. **`business_event_log` wird mitredacted** – keine DSGVO-Lücke bei personenbezogenen Business Events
+3. **Alles in einer Transaktion** – keine Teilredaktion bei Crash
+4. **Redaktion wird als Business Event protokolliert** – Audit-Trail der Löschung selbst
+5. **`GetEntityHistoryAsync` liest beide Tabellen** – vollständiges Bild für Art. 15 Auskunft
+6. **`ChangeRecord` wird mit allen Feldern gelesen** – konsistent mit der Definition in `03-change-feed.md`
 
 ---
 
@@ -127,15 +242,21 @@ public class GdprProcessor
 
 ```csharp
 // Wenn ein User die Löschung beantragt:
-await gdprProcessor.RedactEntityAsync("User", userId.ToString(), ct);
+var result = await gdprProcessor.RedactEntityAsync(
+    entity:   "User",
+    entityId: userId.ToString(),
+    actorId:  "admin:current-admin-id",       // Pflicht: wer führt die Löschung durch?
+    reason:   "DSGVO Art. 17, Ticket #12345", // Pflicht: warum?
+    ct:       ct);
 
-// Außerdem: den User selbst aus der Domain-Tabelle löschen
-// (das ist normales CRUD, kein Kernel-Thema)
+// result.FeedEventsRedacted = Anzahl redacted Events im Change Feed
+// result.BusinessEventsRedacted = Anzahl redacted Events im Business Event Log
 ```
 
 Nach der Redaktion:
-- Alle Feed-Einträge für diesen User haben `redacted = TRUE`
+- Alle Feed-Einträge für diesen User haben `redacted = TRUE` (in **beiden** Tabellen)
 - Der Payload ist durch `{"redacted": true}` ersetzt
+- Die Redaktion selbst ist als `EntityRedacted`-Event im Business Event Log protokolliert
 - Projections ignorieren redacted Events beim nächsten Rebuild
 - Die Sequenz-IDs bleiben erhalten (kein Loch in der Timeline, kein referenzieller Schaden)
 
@@ -143,22 +264,40 @@ Nach der Redaktion:
 
 ```csharp
 var history = await gdprProcessor.GetEntityHistoryAsync("User", userId.ToString(), ct);
-// Liefert alle (noch nicht redigierten) Events für diesen User
+// history.ChangeRecords = alle Change-Feed-Einträge (inkl. redacted)
+// history.BusinessEvents = alle Business-Event-Log-Einträge (inkl. redacted)
 ```
 
-### Art. 5 Abs. 1 lit. e – Speicherbegrenzung
+> **Beachte:** Art. 15 erfordert die Auskunft über **alle** gespeicherten Daten. Deshalb liefert `GetEntityHistoryAsync` sowohl Change Feed als auch Business Event Log.
 
-Events, die nicht mehr benötigt werden, können nach einer definierten Aufbewahrungsfrist redacted werden – z.B. via Scheduled Job:
+### Art. 5 Abs. 1 lit. e – Speicherbegrenzung (Retention Policy)
+
+Events, die nicht mehr benötigt werden, können nach einer definierten Aufbewahrungsfrist redacted werden. Eine Retention Policy sollte als **Betriebsinvariante** definiert werden:
 
 ```sql
--- Events älter als 3 Jahre für gelöschte User redacten
+-- Retention: Events älter als 3 Jahre für gelöschte User redacten
+-- Beide Tabellen berücksichtigen!
+
+-- Change Feed
 UPDATE change_feed
 SET payload = '{"redacted": true}'::jsonb, redacted = TRUE
 WHERE timestamp < NOW() - INTERVAL '3 years'
+  AND redacted = FALSE
+  AND entity_id IN (
+      SELECT id::text FROM deleted_users
+  );
+
+-- Business Event Log
+UPDATE business_event_log
+SET payload = '{"redacted": true}'::jsonb, redacted = TRUE
+WHERE occurred_at < NOW() - INTERVAL '3 years'
+  AND redacted = FALSE
   AND entity_id IN (
       SELECT id::text FROM deleted_users
   );
 ```
+
+> **Empfehlung für große Systeme:** PostgreSQL Table Partitioning nach `timestamp`/`occurred_at` (monatlich oder jährlich). Damit können alte Partitionen effizient archiviert oder gelöscht werden, ohne den aktiven Datenbestand zu belasten.
 
 ---
 
@@ -174,30 +313,54 @@ WHERE timestamp < NOW() - INTERVAL '3 years'
 
 ### Read Model nach Redaktion bereinigen (Pflicht)
 
-Die Bereinigung der Read Models ist Aufgabe der jeweiligen Feature-Schicht, nicht des Kernels. **Alle drei Schritte sind verbindlich:**
+Die Bereinigung der Read Models ist Aufgabe der jeweiligen Feature-Schicht, nicht des Kernels. Der vollständige Löschprozess muss **so atomar wie möglich** sein:
 
 ```csharp
 // src/App/Features/Users/UserDeletionService.cs
-public async Task DeleteUserAsync(Guid userId, CancellationToken ct = default)
+public class UserDeletionService
 {
-    // 1. Domain-Daten löschen (CRUD Truth)
-    await DeleteFromUsersTable(userId, ct);
+    private readonly NpgsqlDataSource _dataSource;
+    private readonly GdprProcessor _gdprProcessor;
+    private readonly ReplayService _replayService;
 
-    // 2. Change Feed redacten
-    await _gdprProcessor.RedactEntityAsync("User", userId.ToString(), ct);
+    public async Task DeleteUserAsync(
+        Guid userId,
+        string actorId,
+        string reason,
+        CancellationToken ct = default)
+    {
+        // 1. Domain-Daten löschen + Change Feed/Business Event Log redacten
+        //    (GdprProcessor macht beides in einer Transaktion)
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
 
-    // 3. Read Models EXPLIZIT bereinigen (PFLICHT, nicht optional)
-    await DeleteFromSearchIndex(userId, ct);
-    await DeleteFromAnalytics(userId, ct);
+        // Domain-Löschung in derselben Transaktion wie die Redaktion
+        await using var deleteCmd = conn.CreateCommand();
+        deleteCmd.Transaction = tx;
+        deleteCmd.CommandText = "DELETE FROM users WHERE id = @id";
+        deleteCmd.Parameters.AddWithValue("id", userId);
+        await deleteCmd.ExecuteNonQueryAsync(ct);
 
-    // 4. Optional: Replay der betroffenen Projections anfordern,
-    //    um sicherzustellen, dass keine Restdaten in Read Models verbleiben
-    // await _replayService.RequestReplayAsync("user_read_model", ct);
-    // await _replayService.RequestReplayAsync("user_search_index", ct);
+        await tx.CommitAsync(ct);
+
+        // 2. Feed-Redaktion (eigene Transaktion im GdprProcessor)
+        var result = await _gdprProcessor.RedactEntityAsync(
+            "User", userId.ToString(), actorId, reason, ct);
+
+        // 3. Read Models EXPLIZIT bereinigen (PFLICHT, nicht optional)
+        await DeleteFromSearchIndex(userId, ct);
+        await DeleteFromAnalytics(userId, ct);
+
+        // 4. Replay der betroffenen Projections anfordern (EMPFOHLEN)
+        //    Stellt sicher, dass auch Events, die zwischen Redaktion und
+        //    Bereinigung verarbeitet wurden, korrekt behandelt werden.
+        await _replayService.RequestReplayAsync("user_read_model", ct);
+        await _replayService.RequestReplayAsync("user_search_index", ct);
+    }
 }
 ```
 
-> **Empfehlung:** Für kritische DSGVO-Löschungen sollte nach der expliziten Bereinigung zusätzlich ein Replay der betroffenen Projections angefordert werden. Das stellt sicher, dass auch Events, die zwischen Redaktion und Bereinigung verarbeitet wurden, korrekt behandelt werden.
+> **Empfehlung:** Für kritische DSGVO-Löschungen ist der Replay der betroffenen Projections **nicht optional, sondern empfohlen**. Das stellt sicher, dass auch Events, die zwischen Redaktion und Bereinigung verarbeitet wurden, korrekt behandelt werden.
 
 ---
 
@@ -219,7 +382,27 @@ Jede Löschung muss folgende Schritte durchlaufen:
 
 - [ ] Domain-Daten aus CRUD-Tabellen gelöscht
 - [ ] Change Feed für die Entity redacted (`redacted = TRUE`, Payload ersetzt)
-- [ ] Business Event Log für die Entity bereinigt (falls personenbezogene Daten enthalten)
+- [ ] Business Event Log für die Entity redacted (`redacted = TRUE`, Payload ersetzt)
+- [ ] Redaktion als `EntityRedacted`-Event protokolliert (mit `actorId` und `reason`)
 - [ ] Alle Read Models explizit bereinigt
-- [ ] Optional: Replay der betroffenen Projections angefordert
+- [ ] Replay der betroffenen Projections angefordert
 - [ ] Löschung dokumentiert (Audit-Log, Ticket-Referenz)
+
+### Testbarkeit
+
+Jeder Schritt der Checkliste sollte durch einen Integrationstest abgedeckt sein:
+
+```csharp
+[Fact]
+public async Task DeleteUser_RedactsAllPersonalData()
+{
+    // Arrange: User anlegen, Events erzeugen
+    // Act: DeleteUserAsync aufrufen
+    // Assert:
+    //   - users-Tabelle: kein Eintrag mehr
+    //   - change_feed: alle Events für diesen User haben redacted = TRUE
+    //   - business_event_log: alle Events für diesen User haben redacted = TRUE
+    //   - EntityRedacted-Event existiert im business_event_log
+    //   - Read Models: keine Daten mehr für diesen User
+}
+```

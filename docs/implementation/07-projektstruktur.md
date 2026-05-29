@@ -7,14 +7,31 @@ src/
 ├── Kernel/                         ← wiederverwendbare Bausteine (kein Business-Code)
 │   ├── ChangeFeed/
 │   │   ├── ChangeRecord.cs
-│   │   └── ChangeWriter.cs
+│   │   ├── ChangeWriter.cs
+│   │   └── ChangeWriterOptions.cs
+│   ├── Events/
+│   │   ├── BusinessEventWriter.cs
+│   │   └── OutboxWriter.cs
+│   ├── Transactions/
+│   │   ├── IUnitOfWork.cs
+│   │   ├── NpgsqlUnitOfWork.cs
+│   │   └── UnitOfWorkOptions.cs
 │   ├── Projections/
 │   │   ├── IProjectionHandler.cs
+│   │   ├── IExternalProjectionHandler.cs
+│   │   ├── IReplayableProjection.cs
 │   │   ├── IVersionedHandler.cs
 │   │   ├── ProjectionWorker.cs
+│   │   ├── ProjectionWorkerOptions.cs
 │   │   ├── ProjectionRegistry.cs
 │   │   ├── ProjectionExtensions.cs
 │   │   └── ReplayService.cs
+│   ├── Tenancy/
+│   │   ├── TenantContext.cs
+│   │   ├── ITenantResolver.cs
+│   │   ├── ITenantDataSourceFactory.cs
+│   │   ├── TenantDataSourceFactory.cs
+│   │   └── TenantMiddleware.cs
 │   └── Gdpr/
 │       └── GdprProcessor.cs
 │
@@ -34,6 +51,11 @@ src/
 │   │   └── Assets/
 │   │       ├── Events/
 │   │       └── Projections/
+│   ├── Tenancy/
+│   │   ├── HeaderTenantResolver.cs
+│   │   └── JwtClaimTenantResolver.cs
+│   ├── HealthChecks/
+│   │   └── ProjectionHealthCheck.cs
 │   └── Program.cs
 │
 └── Infrastructure/
@@ -63,28 +85,35 @@ App/Features/Users/Projections/UserReadModelProjection.cs  ← richtig
 
 ### Phase 1 – Foundation (baue das zuerst)
 
-**Ziel:** Ein echtes Ende-zu-Ende-System, minimal aber funktional.
+**Ziel:** Ein echtes Ende-zu-Ende-System, minimal aber funktional. **Inklusive Sicherheitsgrundlagen und Multi-Tenancy.**
 
 **Scope:**
 
-1. Datenbank-Schema anlegen (aus [02-datenbank.md](02-datenbank.md))
-2. `ChangeRecord` implementieren
-3. `ChangeWriter` implementieren
-4. `UpdateUserEmail` als erste echte Mutation implementieren (CRUD + Feed in einer Transaktion)
-5. `ProjectionWorker` implementieren
-6. `UserReadModelProjection` – erste echte Projection
-7. Replay manuell testen: Checkpoint auf 0 zurücksetzen, Worker läuft durch
-8. Idempotenz für Projection-Write-Paths sicherstellen (`ON CONFLICT DO UPDATE`)
-9. `projection_failures` Tabelle anlegen (ohne Dead-Letter-Überspringen im ersten Schritt)
+1. Datenbank-Schema anlegen mit `tenant_id` (aus [02-datenbank.md](02-datenbank.md) + [08-multi-tenancy.md](08-multi-tenancy.md))
+2. Row-Level Security (RLS) für alle Tabellen aktivieren
+3. `TenantContext`, `ITenantResolver`, `TenantMiddleware` implementieren
+4. `ChangeRecord` implementieren
+5. `ChangeWriter` implementieren **mit Eingabevalidierung** (Event-Type-Regex, Payload-Größenlimit, `actorId` als Pflichtfeld)
+6. `ChangeWriterOptions` implementieren
+7. `UpdateUserEmail` als erste echte Mutation implementieren (CRUD + Feed in einer Transaktion, mit `actorId` und `tenantId`)
+8. `ProjectionWorker` implementieren (mit `xmin`-Sichtbarkeitsfilter)
+9. `UserReadModelProjection` – erste echte Projection
+10. Replay manuell testen: Checkpoint auf 0 zurücksetzen, Worker läuft durch
+11. Idempotenz für Projection-Write-Paths sicherstellen (`ON CONFLICT DO UPDATE`)
+12. `projection_failures` Tabelle anlegen (mit exponentiellem Backoff)
+13. `GdprProcessor` implementieren (mit `actorId`, `reason`, Business-Event-Log-Redaktion)
+14. `NpgsqlUnitOfWork` mit Retry-Logik für transiente Fehler
+15. Health-Check-Endpoint für Projection-Lag
 
 **Noch nicht:**
 - Keine generischen Abstraktionen
 - Kein NuGet-Package
 - Kein versionierter Payload (Version = 1 reicht)
-- Keine DSGVO
+- Kein Database-per-Tenant (Shared Database reicht)
+- Keine Snapshots
 
-**Warum so minimal?**  
-Du brauchst ein echtes Problem, bevor du abstrahierst. Wenn du eine Projection gebaut hast, verstehst du, was der Kernel leisten muss. Vorher ist es Spekulation.
+**Warum mehr als vorher in Phase 1?**
+Sicherheitsgrundlagen (`actorId`, Validierung, RLS) und Multi-Tenancy nachträglich einzuführen ist extrem teuer. Diese Dinge müssen von Anfang an im Kern sein. Der Aufwand ist überschaubar, der Nutzen enorm.
 
 ---
 
@@ -97,17 +126,20 @@ Beispiele:
 - `ActivityFeedProjection` → baut einen Activity-Stream
 - `NotificationProjection` → sendet Push-Notifications
 
-Ergaenzung in Phase 2:
+Ergänzungen in Phase 2:
 
-- `business_event_log` fuer fachliche Ereignisse ohne zwingende Mutation
-- `event_outbox` fuer robuste externe Zustellung (Broker/Webhook)
+- `business_event_log` für fachliche Ereignisse ohne zwingende Mutation
+- `event_outbox` für robuste externe Zustellung (Broker/Webhook)
 - Publisher-Worker mit Retry und idempotenter Zustellung
+- Dead-Letter-Alerting (Log-Level Critical, Metrik)
+- Admin-Endpoint für manuellen Retry von Dead-Letter-Events
+- OpenTelemetry-Integration (Metriken, Tracing mit `correlation_id`)
 
 **Wichtig:** Erst nach 3 echten Projections abstrahieren. Nicht vorher. Sonst abstrahiert man Fantasie.
 
 ---
 
-### Phase 3 – Versionierung und Replay-Tooling
+### Phase 3 – Versionierung, Replay-Tooling und Enterprise-Features
 
 Erst jetzt:
 - `version` in Payloads nutzen
@@ -115,7 +147,11 @@ Erst jetzt:
 - `ProjectionRegistry` für Dispatch
 - `ReplayService` fertig stellen
 - CLI-Tool oder Admin-Endpoint für Replay: `replay --projection user_read_model`
-- Snapshot-Strategie evaluieren und nur bei Bedarf einfuehren (Projection Snapshots)
+- Snapshot-Strategie evaluieren und nur bei Bedarf einführen (Projection Snapshots)
+- Database-per-Tenant als Alternative zu Shared Database (siehe [08-multi-tenancy.md](08-multi-tenancy.md))
+- `ITenantDataSourceFactory` für Database-per-Tenant
+- Retention-Policy für Change Feed und Business Event Log (Partitionierung)
+- Idempotenz im `ChangeWriter` (Unique-Constraint auf `correlation_id`)
 
 ---
 
@@ -125,6 +161,8 @@ Erst wenn sich Patterns stabil wiederholen:
 - Base Classes/Helpers extrahieren
 - Conventions dokumentieren
 - Optional: als NuGet-Package herauslösen (`Papuma.Kernel`)
+- Hybrid-Multi-Tenancy (Shared + Database-per-Tenant je nach Tier)
+- Schema-Registry für Event-Typen (bei >10 Event-Typen)
 
 **Die häufigste Falle:** Viele Frameworks sterben daran, dass zuerst abstrahiert wird und dann reale Probleme gesucht werden. Dieser Phasenplan dreht das bewusst um.
 
@@ -138,7 +176,7 @@ Erst wenn sich Patterns stabil wiederholen:
 psql -U postgres -d mydb -f src/Infrastructure/Postgres/schema.sql
 ```
 
-### Schritt 2: Verbindung konfigurieren
+### Schritt 2: Verbindung und Tenancy konfigurieren
 
 ```csharp
 // Program.cs
@@ -147,7 +185,14 @@ var connectionString = builder.Configuration.GetConnectionString("Postgres")
 
 builder.Services.AddNpgsqlDataSource(connectionString);
 builder.Services.AddSingleton<ChangeWriter>();
-// GdprProcessor erst ab Phase 3/4 registrieren
+builder.Services.AddSingleton<BusinessEventWriter>();
+builder.Services.AddSingleton<GdprProcessor>();
+builder.Services.AddScoped<ITenantResolver, HeaderTenantResolver>();
+builder.Services.AddSingleton<IUnitOfWork>(sp => new NpgsqlUnitOfWork(
+    sp.GetRequiredService<NpgsqlDataSource>()));
+
+var app = builder.Build();
+app.UseTenantResolution();
 ```
 
 ```json
@@ -202,10 +247,12 @@ Diese Dinge werden **nicht** in Phase 1–2 gebaut, können aber später ergänz
 | Feature | Wann sinnvoll |
 |---|---|
 | `LISTEN/NOTIFY` (Postgres Push) | Wenn Polling-Latenz >200ms zu viel wird |
-| Projection Leasing | Bei horizontaler Skalierung (mehrere App-Instanzen) |
+| Projection Leasing / Advisory Locks | Bei horizontaler Skalierung (mehrere App-Instanzen) |
 | Snapshotting | Bei sehr langen Streams (>100k Events pro Entity) |
 | DotNetCore.CAP / Wolverine | Als Dispatcher, wenn externe Services benötigt werden |
-| Schlanke Unit of Work | Wenn sich Connection/Transaction Boilerplate in vielen Use Cases wiederholt |
+| Database-per-Tenant | Bei Enterprise-Kunden mit regulatorischen Anforderungen |
+| Table Partitioning | Bei >10M Events im Change Feed (Retention, Performance) |
+| Schema-Registry | Bei >10 Event-Typen (zentrale Dokumentation der Payload-Schemas) |
 
 ## Betriebsinvarianten (nicht optional)
 
@@ -218,6 +265,11 @@ Diese Regeln gelten ab dem ersten produktiven Einsatz:
 5. Neue Event-Versionen werden erst nach Consumer-Readiness ausgerollt.
 6. Connection-Pool ist auf mindestens `Anzahl Projections + Headroom für HTTP-Requests` dimensioniert.
 7. DSGVO-Löschungen folgen der vollständigen Checkliste (siehe [06-gdpr.md](06-gdpr.md)).
+8. **`actor_id` ist Pflichtfeld** – keine Änderung ohne Akteur-Zuordnung.
+9. **Eingabevalidierung** im `ChangeWriter` ist aktiv (Event-Type-Regex, Payload-Größenlimit).
+10. **Row-Level Security** ist für alle Tabellen aktiviert (Multi-Tenancy).
+11. **PostgreSQL ≥ 14** wird verwendet (wegen `pg_current_snapshot()` und `xmin`-Filter).
+12. **In Phase 1–2 läuft genau eine App-Instanz.** Vor Multi-Instance-Deployment muss Projection Leasing implementiert werden.
 
 ---
 
@@ -328,12 +380,14 @@ builder.Services.AddHealthChecks()
 
 | Aspekt | Beschreibung |
 |---|---|
-| **Storage** | PostgreSQL JSONB – kein Event Store, kein Marten |
-| **Write** | CRUD + Change Feed Append, atomar in einer Transaktion |
+| **Storage** | PostgreSQL ≥ 14, JSONB – kein Event Store, kein Marten |
+| **Write** | CRUD + Change Feed Append, atomar in einer Transaktion, mit Eingabevalidierung |
 | **Read** | Projections bauen Read Models asynchron auf |
 | **Replay** | Über Worker-Signal, kein direkter Checkpoint-Reset |
 | **Migration** | Nur in Projections, nicht in Events |
-| **DSGVO** | Explizite Redaktion, transparent und testbar |
+| **DSGVO** | Explizite Redaktion mit Autorisierung, Audit und atomarer Löschung |
+| **Multi-Tenancy** | Shared Database + RLS (Phase 1), Database-per-Tenant (Phase 3+) |
+| **Sicherheit** | `actor_id` Pflichtfeld, Event-Type-Validierung, Payload-Größenlimit |
 | **Skalierung** | Jede Projection ein eigener Worker, beliebig viele parallel |
 | **Monitoring** | Projection-Lag, Fehler-Tracking, Health-Check-Endpoint |
 

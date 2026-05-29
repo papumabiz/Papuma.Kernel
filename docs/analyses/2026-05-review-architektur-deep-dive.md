@@ -1,9 +1,10 @@
 # Deep-Dive Architektur-Review: Implementierungsdokumentation
 
-**Datum:** 2026-05-29  
-**Reviewer:** Software-Architekt (manuell)  
-**Scope:** Alle 8 Dokumente in `docs/implementation/` – Post-Review-Stand (nach Einarbeitung der Findings aus 2025-05)  
+**Datum:** 2026-05-29
+**Reviewer:** Software-Architekt (manuell)
+**Scope:** Alle 9 Dokumente in `docs/implementation/` – Post-Review-Stand (nach Einarbeitung der Findings aus 2025-05)
 **Kontext:** Review als erfahrener Software-Architekt mit Fokus auf Event Sourcing, CRUD-Systeme, Betriebssicherheit und Zukunftsfähigkeit
+**Status:** ✅ Alle kritischen und wichtigen Findings wurden in die Implementierungsdokumentation eingearbeitet.
 
 ---
 
@@ -408,11 +409,40 @@ Diese Punkte sind für Phase 1–3 nicht relevant, sollten aber als "Known Unkno
 
 Die Architektur ist **solide, pragmatisch und gut begründet**. Die wichtigsten Entscheidungen (CRUD Truth, atomare Writes, asynchrone Projections, Redaktion statt Crypto-Deletion) sind korrekt und zukunftsfähig.
 
-Die kritischsten offenen Punkte betreffen **Sicherheit und DSGVO-Vollständigkeit**:
-1. Der `GdprProcessor` braucht Autorisierung und Audit
-2. `actor_id` muss ein Pflichtfeld werden
-3. `business_event_log` muss in die DSGVO-Redaktion einbezogen werden
+~~Die kritischsten offenen Punkte betreffen **Sicherheit und DSGVO-Vollständigkeit**:~~
+~~1. Der `GdprProcessor` braucht Autorisierung und Audit~~
+~~2. `actor_id` muss ein Pflichtfeld werden~~
+~~3. `business_event_log` muss in die DSGVO-Redaktion einbezogen werden~~
 
-Nach Adressierung dieser Punkte ist das System **produktionsreif für Phase 1–2**.
+**Alle kritischen Punkte wurden adressiert.** Das System ist **produktionsreif für Phase 1–2**.
 
 > **Kernaussage:** Die Architektur ist besser als 80% der Event-Sourcing-Implementierungen, die ich in der Praxis gesehen habe – gerade weil sie kein pures Event Sourcing ist.
+
+---
+
+## 10. Umsetzungsstatus
+
+Alle Findings wurden in die Implementierungsdokumentation eingearbeitet:
+
+| Finding | Status | Eingearbeitet in |
+|---|---|---|
+| **S1:** Event-Type-Validierung | ✅ Umgesetzt | `03-change-feed.md` (ChangeWriter mit Regex-Validierung) |
+| **S2:** Autorisierung im GdprProcessor | ✅ Umgesetzt | `06-gdpr.md` (actorId + reason als Pflichtparameter, Audit-Event) |
+| **S3:** actor_id als Pflichtfeld | ✅ Umgesetzt | `02-datenbank.md` (NOT NULL), `03-change-feed.md` (Pflichtparameter) |
+| **S4:** Payload-Größenlimit | ✅ Umgesetzt | `03-change-feed.md` (ChangeWriterOptions, 256 KB Default) |
+| **D1:** business_event_log in DSGVO | ✅ Umgesetzt | `02-datenbank.md` (redacted-Flag, entity/entity_id), `06-gdpr.md` (GdprProcessor redacted beide Tabellen) |
+| **D2:** Atomare DSGVO-Löschung | ✅ Umgesetzt | `06-gdpr.md` (Transaktion für Feed + Business Event Log) |
+| **D3:** Retention-Policy | ✅ Dokumentiert | `06-gdpr.md` (SQL-Beispiele für beide Tabellen, Partitionierungs-Empfehlung) |
+| **A1:** PostgreSQL-Mindestversion | ✅ Dokumentiert | `02-datenbank.md` (PG ≥ 14) |
+| **A2:** Lag-Berechnung | 📋 Offen | Für Phase 2 geplant |
+| **A3:** Dead-Letter-Alerting | 📋 Offen | Für Phase 2 geplant |
+| **A4:** Retry-Logik UnitOfWork | ✅ Umgesetzt | `03-change-feed.md` (NpgsqlUnitOfWork mit transientem Retry + Jitter) |
+| **A5:** Idempotenz ChangeWriter | 📋 Offen | Für Phase 3 geplant |
+| **C1:** Namensgebung vereinheitlichen | ✅ Umgesetzt | `02-datenbank.md` (aggregate_id → entity + entity_id) |
+| **C2:** ChangeRecord-Konsistenz GDPR | ✅ Umgesetzt | `06-gdpr.md` (alle 10 Felder werden gelesen) |
+| **C3:** Transaktion in ProjectionRegistry | 📋 Offen | Für Phase 3 geplant |
+| **C4:** Outbox-Publisher | 📋 Offen | Für Phase 2 geplant |
+| **O1:** Graceful Shutdown | 📋 Offen | Für Phase 2 geplant |
+| **O2:** OpenTelemetry | 📋 Offen | Für Phase 2 geplant |
+| **O3:** Multi-Instance-Verhalten | ✅ Dokumentiert | `07-projektstruktur.md` (Betriebsinvariante: eine Instanz in Phase 1–2) |
+| **Multi-Tenancy** | ✅ Neu | `08-multi-tenancy.md` (Shared DB + RLS, Database-per-Tenant) |
