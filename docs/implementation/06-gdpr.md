@@ -165,28 +165,39 @@ WHERE timestamp < NOW() - INTERVAL '3 years'
 ## Was nach einer Redaktion passiert
 
 1. Der Worker verarbeitet redacted Events nicht mehr (Filter im SQL)
-2. Bestehende Read Models in Projections müssen separat bereinigt werden
+2. Bestehende Read Models in Projections **müssen** separat bereinigt werden
 3. Beim nächsten Replay werden redacted Events automatisch übersprungen
 
-### Read Model nach Redaktion bereinigen
+> ⚠️ **Wichtig: Laufende Projections und Redaktion**
+>
+> Wenn eine Projection gerade Events für einen User verarbeitet, hat sie den **originalen Payload** bereits im Speicher geladen. Die Redaktion im Change Feed hat keinen Effekt auf bereits geladene Events. Deshalb ist die Read-Model-Bereinigung nach einer Redaktion **Pflicht**, nicht optional.
 
-Das ist Aufgabe der jeweiligen Feature-Schicht, nicht des Kernels:
+### Read Model nach Redaktion bereinigen (Pflicht)
+
+Die Bereinigung der Read Models ist Aufgabe der jeweiligen Feature-Schicht, nicht des Kernels. **Alle drei Schritte sind verbindlich:**
 
 ```csharp
 // src/App/Features/Users/UserDeletionService.cs
 public async Task DeleteUserAsync(Guid userId, CancellationToken ct = default)
 {
-    // 1. Domain-Daten löschen
+    // 1. Domain-Daten löschen (CRUD Truth)
     await DeleteFromUsersTable(userId, ct);
 
     // 2. Change Feed redacten
     await _gdprProcessor.RedactEntityAsync("User", userId.ToString(), ct);
 
-    // 3. Read Models explizit bereinigen (optional: via Projection Replay)
+    // 3. Read Models EXPLIZIT bereinigen (PFLICHT, nicht optional)
     await DeleteFromSearchIndex(userId, ct);
     await DeleteFromAnalytics(userId, ct);
+
+    // 4. Optional: Replay der betroffenen Projections anfordern,
+    //    um sicherzustellen, dass keine Restdaten in Read Models verbleiben
+    // await _replayService.RequestReplayAsync("user_read_model", ct);
+    // await _replayService.RequestReplayAsync("user_search_index", ct);
 }
 ```
+
+> **Empfehlung:** Für kritische DSGVO-Löschungen sollte nach der expliziten Bereinigung zusätzlich ein Replay der betroffenen Projections angefordert werden. Das stellt sicher, dass auch Events, die zwischen Redaktion und Bereinigung verarbeitet wurden, korrekt behandelt werden.
 
 ---
 
@@ -201,3 +212,14 @@ public async Task DeleteUserAsync(Guid userId, CancellationToken ct = default)
 ## Wichtige Erkenntnis
 
 DSGVO-Compliance muss **explizit und testbar** sein. Ein KI-generierter Layer, der "irgendwie" Löschung abstrahiert, ist hier nicht akzeptabel. Jeder Schritt ist sichtbar, nachvollziehbar und im Code direkt auffindbar.
+
+### Checkliste für DSGVO-Löschung
+
+Jede Löschung muss folgende Schritte durchlaufen:
+
+- [ ] Domain-Daten aus CRUD-Tabellen gelöscht
+- [ ] Change Feed für die Entity redacted (`redacted = TRUE`, Payload ersetzt)
+- [ ] Business Event Log für die Entity bereinigt (falls personenbezogene Daten enthalten)
+- [ ] Alle Read Models explizit bereinigt
+- [ ] Optional: Replay der betroffenen Projections angefordert
+- [ ] Löschung dokumentiert (Audit-Log, Ticket-Referenz)

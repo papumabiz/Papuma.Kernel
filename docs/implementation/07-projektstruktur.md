@@ -216,6 +216,111 @@ Diese Regeln gelten ab dem ersten produktiven Einsatz:
 3. Für Poison Events existiert ein operativer Pfad (`projection_failures` Monitoring + Manual/Auto Skip).
 4. Replay wird in Staging regelmäßig geprobt.
 5. Neue Event-Versionen werden erst nach Consumer-Readiness ausgerollt.
+6. Connection-Pool ist auf mindestens `Anzahl Projections + Headroom für HTTP-Requests` dimensioniert.
+7. DSGVO-Löschungen folgen der vollständigen Checkliste (siehe [06-gdpr.md](06-gdpr.md)).
+
+---
+
+## Monitoring und Health-Checks
+
+### Projection-Lag überwachen
+
+Der wichtigste operative Indikator ist der **Projection-Lag**: die Differenz zwischen dem neuesten Event im Change Feed und dem Checkpoint jeder Projection.
+
+```sql
+-- Projection-Lag für alle Projections
+SELECT
+    pc.projection_name,
+    pc.last_sequence_id,
+    cf.max_sequence_id,
+    cf.max_sequence_id - pc.last_sequence_id AS lag,
+    pc.updated_at AS last_activity
+FROM projection_checkpoint pc
+CROSS JOIN (SELECT MAX(sequence_id) AS max_sequence_id FROM change_feed) cf
+ORDER BY lag DESC;
+```
+
+**Empfohlene Schwellwerte:**
+
+| Lag | Bedeutung | Aktion |
+|---|---|---|
+| 0–10 | Normal | Keine |
+| 10–1000 | Leicht hinterher | Beobachten |
+| >1000 | Deutlich hinterher | Untersuchen (Performance, Fehler) |
+| Wächst stetig | Projection kann nicht mithalten | Alarm, Ursache beheben |
+
+### Fehler-Monitoring
+
+```sql
+-- Aktive Fehler pro Projection
+SELECT
+    projection_name,
+    COUNT(*) AS failed_events,
+    MAX(attempts) AS max_attempts,
+    MIN(next_retry_at) AS next_retry
+FROM projection_failures
+GROUP BY projection_name;
+
+-- Poison Events (maximale Versuche erreicht)
+SELECT *
+FROM projection_failures
+WHERE attempts >= 10
+ORDER BY updated_at DESC;
+```
+
+### Health-Check-Endpoint (Beispiel)
+
+```csharp
+// src/App/HealthChecks/ProjectionHealthCheck.cs
+public class ProjectionHealthCheck : IHealthCheck
+{
+    private readonly NpgsqlDataSource _dataSource;
+    private readonly long _maxAcceptableLag;
+
+    public ProjectionHealthCheck(NpgsqlDataSource dataSource, long maxAcceptableLag = 1000)
+    {
+        _dataSource = dataSource;
+        _maxAcceptableLag = maxAcceptableLag;
+    }
+
+    public async Task<HealthCheckResult> CheckHealthAsync(
+        HealthCheckContext context,
+        CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT
+                pc.projection_name,
+                COALESCE(cf.max_seq, 0) - pc.last_sequence_id AS lag
+            FROM projection_checkpoint pc
+            CROSS JOIN (SELECT MAX(sequence_id) AS max_seq FROM change_feed) cf
+            WHERE COALESCE(cf.max_seq, 0) - pc.last_sequence_id > @maxLag
+            """;
+        cmd.Parameters.AddWithValue("maxLag", _maxAcceptableLag);
+
+        var unhealthy = new List<string>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            unhealthy.Add($"{reader.GetString(0)}: lag={reader.GetInt64(1)}");
+        }
+
+        return unhealthy.Count == 0
+            ? HealthCheckResult.Healthy("All projections within acceptable lag.")
+            : HealthCheckResult.Degraded(
+                $"Projections behind: {string.Join(", ", unhealthy)}");
+    }
+}
+```
+
+Registrierung:
+
+```csharp
+// Program.cs
+builder.Services.AddHealthChecks()
+    .AddCheck<ProjectionHealthCheck>("projections");
+```
 
 ---
 
@@ -226,9 +331,10 @@ Diese Regeln gelten ab dem ersten produktiven Einsatz:
 | **Storage** | PostgreSQL JSONB – kein Event Store, kein Marten |
 | **Write** | CRUD + Change Feed Append, atomar in einer Transaktion |
 | **Read** | Projections bauen Read Models asynchron auf |
-| **Replay** | Checkpoint zurücksetzen, Worker läuft durch |
+| **Replay** | Über Worker-Signal, kein direkter Checkpoint-Reset |
 | **Migration** | Nur in Projections, nicht in Events |
 | **DSGVO** | Explizite Redaktion, transparent und testbar |
 | **Skalierung** | Jede Projection ein eigener Worker, beliebig viele parallel |
+| **Monitoring** | Projection-Lag, Fehler-Tracking, Health-Check-Endpoint |
 
 > Writes commit facts. Projections converge asynchronously.

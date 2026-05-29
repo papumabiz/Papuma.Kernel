@@ -167,10 +167,11 @@ public class ProjectionRegistry
 public class UserProjection : IProjectionHandler
 {
     public string Name => "user_read_model";
+    public IReadOnlyCollection<string> EventTypes => new[] { "UserEmailUpdated" };
 
     private readonly ProjectionRegistry _registry;
 
-    public UserProjection(NpgsqlDataSource dataSource)
+    public UserProjection()
     {
         _registry = new ProjectionRegistry();
         _registry.Register("UserEmailUpdated", new UserEmailUpdatedV1Handler());
@@ -178,7 +179,11 @@ public class UserProjection : IProjectionHandler
         // weitere Handler...
     }
 
-    public Task HandleAsync(ChangeRecord record, CancellationToken ct = default)
+    public Task HandleAsync(
+        ChangeRecord record,
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        CancellationToken ct = default)
         => _registry.DispatchAsync(record, ct);
 }
 ```

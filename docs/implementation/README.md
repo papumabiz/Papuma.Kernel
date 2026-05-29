@@ -23,11 +23,12 @@ Die Konsequenz: Das bestehende KI-generierte Framework wird **verworfen**. Statt
 |---|---|---|
 | Persistenz | PostgreSQL (raw, Npgsql) | Marten, Entity Framework |
 | Serialisierung | `System.Text.Json` (JSON/JSONB) | Protobuf, XML |
-| Messaging | Polling Workers | Kafka, RabbitMQ, Akka |
+| Messaging | Polling Workers mit `xmin`-Sichtbarkeitsfilter | Kafka, RabbitMQ, Akka |
 | Schema-Evolution | Projection-seitige Interpretation | Upcasting-Pipeline |
-| Projektionen | Async, entkoppelt vom Write | Synchron im Write-Transaction |
+| Projektionen | Async, entkoppelt vom Write, transaktional mit Checkpoint | Synchron im Write-Transaction |
 | Abstraktion | Wird erst nach Phase 3 extrahiert | Framework-first Ansatz |
 | Event-Klassifikation | Change Events + Business Events getrennt | Ein Event-Typ fuer alles |
+| Replay-Steuerung | Über Worker-Signal (Channel) | Direkter Checkpoint-Reset |
 
 ## Warum JSON statt Protobuf?
 

@@ -7,23 +7,27 @@
 ```csharp
 // src/Kernel/ChangeFeed/ChangeRecord.cs
 public record ChangeRecord(
-    long     SequenceId,
-    string   Entity,
-    string   EntityId,
-    string   EventType,
-    int      Version,
-    string   PayloadJson,
-    DateTimeOffset Timestamp
+    long            SequenceId,
+    string          Entity,
+    string          EntityId,
+    string          EventType,
+    int             Version,
+    string?         CorrelationId,
+    string          PayloadJson,
+    DateTimeOffset  Timestamp
 );
 ```
 
 `DateTimeOffset` passt besser zu `TIMESTAMPTZ` als `DateTime`, weil Offset/UTC-Semantik explizit bleibt.
 
-**Warum ein `record`?**  
+**Warum ein `record`?**
 `record` ist in C# semantisch immutable und hat eingebaute value equality. Das passt perfekt zu einem Event, das niemals verändert werden soll.
 
-**Warum `PayloadJson` als `string` und nicht als generisches `T`?**  
+**Warum `PayloadJson` als `string` und nicht als generisches `T`?**
 Weil der Kernel nicht wissen muss, was im Payload steckt. Das ist Aufgabe der Projection. Der Kernel speichert und transportiert – nicht mehr. Typisierung passiert bei der Interpretation, nicht im Speichermechanismus.
+
+**Warum `CorrelationId`?**
+Ermöglicht das Nachverfolgen zusammengehöriger Änderungen über mehrere Entitäten hinweg. Wenn z.B. eine fachliche Operation sowohl einen User als auch ein Asset ändert, erhalten beide Change-Feed-Einträge dieselbe `CorrelationId`. Das ist besonders wertvoll für Debugging, Tracing und die Rekonstruktion fachlicher Abläufe.
 
 ---
 
@@ -42,20 +46,22 @@ public class ChangeWriter
         string eventType,
         int version,
         string payloadJson,
+        string? correlationId = null,
         CancellationToken ct = default)
     {
         await using var cmd = transaction.Connection!.CreateCommand();
         cmd.Transaction = transaction;
         cmd.CommandText = """
-            INSERT INTO change_feed (entity, entity_id, event_type, version, payload)
-            VALUES (@entity, @entityId, @eventType, @version, @payload::jsonb)
+            INSERT INTO change_feed (entity, entity_id, event_type, version, correlation_id, payload)
+            VALUES (@entity, @entityId, @eventType, @version, @correlationId, @payload::jsonb)
             """;
 
-        cmd.Parameters.AddWithValue("entity",    entity);
-        cmd.Parameters.AddWithValue("entityId",  entityId);
-        cmd.Parameters.AddWithValue("eventType", eventType);
-        cmd.Parameters.AddWithValue("version",   version);
-        cmd.Parameters.AddWithValue("payload",   payloadJson);
+        cmd.Parameters.AddWithValue("entity",        entity);
+        cmd.Parameters.AddWithValue("entityId",      entityId);
+        cmd.Parameters.AddWithValue("eventType",     eventType);
+        cmd.Parameters.AddWithValue("version",       version);
+        cmd.Parameters.AddWithValue("correlationId", (object?)correlationId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("payload",       payloadJson);
 
         await cmd.ExecuteNonQueryAsync(ct);
     }
@@ -169,13 +175,14 @@ public class UpdateUserEmailHandler
         var payload = JsonSerializer.Serialize(new { Email = newEmail });
 
         await _changeWriter.AppendAsync(
-            transaction: tx,
-            entity:      "User",
-            entityId:    userId.ToString(),
-            eventType:   "UserEmailUpdated",
-            version:     1,
-            payloadJson: payload,
-            ct:          ct
+            transaction:   tx,
+            entity:        "User",
+            entityId:      userId.ToString(),
+            eventType:     "UserEmailUpdated",
+            version:       1,
+            payloadJson:   payload,
+            correlationId: null,   // optional: z.B. Request-ID für Tracing
+            ct:            ct
         );
 
         // 3. Commit – atomarer Abschluss

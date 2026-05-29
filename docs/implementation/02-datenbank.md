@@ -10,19 +10,22 @@ Das System nutzt ausschließlich PostgreSQL. Es gibt keine ORMs, keine Migration
 
 ```sql
 CREATE TABLE change_feed (
-    sequence_id   BIGSERIAL PRIMARY KEY,
-    entity        TEXT        NOT NULL,
-    entity_id     TEXT        NOT NULL,
-    event_type    TEXT        NOT NULL,
-    version       INT         NOT NULL DEFAULT 1,
-    payload       JSONB       NOT NULL,
-    timestamp     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    redacted      BOOLEAN     NOT NULL DEFAULT FALSE
+    sequence_id    BIGSERIAL   PRIMARY KEY,
+    entity         TEXT        NOT NULL,
+    entity_id      TEXT        NOT NULL,
+    event_type     TEXT        NOT NULL,
+    version        INT         NOT NULL DEFAULT 1,
+    correlation_id TEXT        NULL,
+    payload        JSONB       NOT NULL,
+    timestamp      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    redacted       BOOLEAN     NOT NULL DEFAULT FALSE
 );
 
-CREATE INDEX idx_change_feed_sequence   ON change_feed (sequence_id);
-CREATE INDEX idx_change_feed_entity_id  ON change_feed (entity, entity_id);
-CREATE INDEX idx_change_feed_event_type ON change_feed (event_type);
+CREATE INDEX idx_change_feed_sequence      ON change_feed (sequence_id);
+CREATE INDEX idx_change_feed_entity_id     ON change_feed (entity, entity_id);
+CREATE INDEX idx_change_feed_event_type    ON change_feed (event_type);
+CREATE INDEX idx_change_feed_not_redacted  ON change_feed (sequence_id) WHERE redacted = FALSE;
+CREATE INDEX idx_change_feed_correlation   ON change_feed (correlation_id) WHERE correlation_id IS NOT NULL;
 ```
 
 **Spalten erklärt:**
@@ -34,9 +37,20 @@ CREATE INDEX idx_change_feed_event_type ON change_feed (event_type);
 | `entity_id` | `TEXT` | ID der Entität, z.B. die UUID des Users |
 | `event_type` | `TEXT` | Name des Events, z.B. `"UserEmailUpdated"`, `"AssetCreated"` |
 | `version` | `INT` | Schema-Version des Payloads. Beginnt bei 1. Wird erhöht, wenn sich die Payload-Struktur ändert. |
+| `correlation_id` | `TEXT` | Optional. Verknüpft zusammengehörige Änderungen über mehrere Entitäten hinweg (z.B. eine fachliche Operation, die User + Asset ändert). Nützlich für Debugging und Tracing. |
 | `payload` | `JSONB` | Nutzdaten des Events als JSON. JSONB ermöglicht indexierte Queries auf Felder. |
 | `timestamp` | `TIMESTAMPTZ` | Zeitpunkt des Events, immer UTC. |
 | `redacted` | `BOOLEAN` | DSGVO: wurde dieses Event auf Wunsch des Nutzers gelöscht/unkenntlich gemacht? |
+
+**Indizes erklärt:**
+
+| Index | Zweck |
+|---|---|
+| `idx_change_feed_sequence` | Effizientes Polling mit `WHERE sequence_id > @last_seen` |
+| `idx_change_feed_entity_id` | Schnelle Abfrage aller Events einer Entität (z.B. für DSGVO-Auskunft) |
+| `idx_change_feed_event_type` | Filtern nach Event-Typ (für Projections mit `EventTypes`-Filter) |
+| `idx_change_feed_not_redacted` | **Partieller Index**: Nur nicht-redacted Events. Beschleunigt die Polling-Query der Projections erheblich, da redacted Events aus dem Index ausgeschlossen werden. |
+| `idx_change_feed_correlation` | **Partieller Index**: Nur Events mit `correlation_id`. Ermöglicht schnelles Nachverfolgen zusammengehöriger Änderungen. |
 
 ### Warum `BIGSERIAL` und nicht UUID?
 
@@ -44,6 +58,20 @@ CREATE INDEX idx_change_feed_event_type ON change_feed (event_type);
 - Polling mit `WHERE sequence_id > @last_seen` extrem effizient ist
 - Reihenfolge garantiert ist (UUIDs haben keine natürliche Ordnung)
 - Kein Sortierungs-Overhead entsteht
+
+> ⚠️ **Wichtig: Sequence-Gaps bei parallelen Writes**
+>
+> PostgreSQL-Sequenzen (`BIGSERIAL`) sind **nicht transaktional**. Das bedeutet: Wenn zwei Transaktionen gleichzeitig in den Change Feed schreiben, kann Transaktion B (`sequence_id = 43`) vor Transaktion A (`sequence_id = 42`) committen. Ein Projection Worker, der zu diesem Zeitpunkt pollt, würde `43` sehen, aber `42` noch nicht – und könnte den Checkpoint auf `43` setzen, wodurch `42` **nie verarbeitet** wird.
+>
+> **Lösung:** Der `ProjectionWorker` verwendet einen `xmin`-basierten Sichtbarkeitsfilter (siehe [04-projections.md](04-projections.md)), der nur Events lädt, deren Transaktion für alle Sessions sichtbar ist. Damit werden uncommitted Events automatisch ausgeschlossen.
+
+### Warum `entity_id` als `TEXT`?
+
+`entity_id` ist bewusst als `TEXT` definiert, nicht als `UUID`. Das ermöglicht:
+- Verschiedene ID-Formate pro Entity-Typ (UUID, Integer, Composite Keys)
+- Keine Typ-Konvertierung beim Schreiben
+
+**Trade-off:** Bei Systemen, die ausschließlich UUIDs verwenden, wäre `UUID` effizienter (16 Bytes vs. 36 Bytes als Text). Falls alle Entity-IDs UUIDs sind, kann `entity_id UUID NOT NULL` verwendet werden – die Entscheidung sollte bewusst getroffen und hier dokumentiert werden.
 
 ### Warum `JSONB` statt `TEXT`?
 
@@ -166,19 +194,22 @@ CREATE TABLE users (
 ```sql
 -- change_feed
 CREATE TABLE change_feed (
-    sequence_id   BIGSERIAL   PRIMARY KEY,
-    entity        TEXT        NOT NULL,
-    entity_id     TEXT        NOT NULL,
-    event_type    TEXT        NOT NULL,
-    version       INT         NOT NULL DEFAULT 1,
-    payload       JSONB       NOT NULL,
-    timestamp     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    redacted      BOOLEAN     NOT NULL DEFAULT FALSE
+    sequence_id    BIGSERIAL   PRIMARY KEY,
+    entity         TEXT        NOT NULL,
+    entity_id      TEXT        NOT NULL,
+    event_type     TEXT        NOT NULL,
+    version        INT         NOT NULL DEFAULT 1,
+    correlation_id TEXT        NULL,
+    payload        JSONB       NOT NULL,
+    timestamp      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    redacted       BOOLEAN     NOT NULL DEFAULT FALSE
 );
 
-CREATE INDEX idx_change_feed_sequence   ON change_feed (sequence_id);
-CREATE INDEX idx_change_feed_entity_id  ON change_feed (entity, entity_id);
-CREATE INDEX idx_change_feed_event_type ON change_feed (event_type);
+CREATE INDEX idx_change_feed_sequence      ON change_feed (sequence_id);
+CREATE INDEX idx_change_feed_entity_id     ON change_feed (entity, entity_id);
+CREATE INDEX idx_change_feed_event_type    ON change_feed (event_type);
+CREATE INDEX idx_change_feed_not_redacted  ON change_feed (sequence_id) WHERE redacted = FALSE;
+CREATE INDEX idx_change_feed_correlation   ON change_feed (correlation_id) WHERE correlation_id IS NOT NULL;
 
 -- projection_checkpoint
 CREATE TABLE projection_checkpoint (
