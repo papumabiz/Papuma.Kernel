@@ -208,7 +208,7 @@ public class ProjectionWorker : BackgroundService
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT sequence_id, entity, entity_id, event_type, version,
-                   correlation_id, payload::text, timestamp
+                   correlation_id, causation_id, actor_id, payload::text, timestamp
             FROM change_feed
             WHERE sequence_id > @lastSeen
               AND redacted = FALSE
@@ -242,8 +242,10 @@ public class ProjectionWorker : BackgroundService
                 EventType:     reader.GetString(3),
                 Version:       reader.GetInt32(4),
                 CorrelationId: reader.IsDBNull(5) ? null : reader.GetString(5),
-                PayloadJson:   reader.GetString(6),
-                Timestamp:     reader.GetFieldValue<DateTimeOffset>(7)
+                CausationId:   reader.IsDBNull(6) ? null : reader.GetString(6),
+                ActorId:       reader.IsDBNull(7) ? null : reader.GetString(7),
+                PayloadJson:   reader.GetString(8),
+                Timestamp:     reader.GetFieldValue<DateTimeOffset>(9)
             ));
         }
 

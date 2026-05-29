@@ -13,6 +13,8 @@ public record ChangeRecord(
     string          EventType,
     int             Version,
     string?         CorrelationId,
+    string?         CausationId,
+    string?         ActorId,
     string          PayloadJson,
     DateTimeOffset  Timestamp
 );
@@ -27,7 +29,13 @@ public record ChangeRecord(
 Weil der Kernel nicht wissen muss, was im Payload steckt. Das ist Aufgabe der Projection. Der Kernel speichert und transportiert – nicht mehr. Typisierung passiert bei der Interpretation, nicht im Speichermechanismus.
 
 **Warum `CorrelationId`?**
-Ermöglicht das Nachverfolgen zusammengehöriger Änderungen über mehrere Entitäten hinweg. Wenn z.B. eine fachliche Operation sowohl einen User als auch ein Asset ändert, erhalten beide Change-Feed-Einträge dieselbe `CorrelationId`. Das ist besonders wertvoll für Debugging, Tracing und die Rekonstruktion fachlicher Abläufe.
+Verknüpft alle Events, die zu **einem übergeordneten Vorgang** gehören. Typischerweise die Request-ID oder eine Prozess-ID. Wenn z.B. eine fachliche Operation sowohl einen User als auch ein Asset ändert, erhalten beide Change-Feed-Einträge dieselbe `CorrelationId`.
+
+**Warum `CausationId`?**
+Referenziert das Event, das dieses Event **direkt ausgelöst** hat. Bildet eine Kausalkette: Wenn eine Projection aus Event A ein Folge-Event B erzeugt, ist `CausationId` von B die `SequenceId` von A. Ermöglicht die Rekonstruktion von "Warum existiert dieses Event?" (siehe [02-datenbank.md](02-datenbank.md#correlation-vs-causation)).
+
+**Warum `ActorId`?**
+Identifiziert den Akteur, der die Änderung ausgelöst hat. Das ist kein fachlicher Payload-Inhalt, sondern ein Metadatum auf derselben Ebene wie `Timestamp`. Ermöglicht systemweite Queries wie "Zeige alle Änderungen von User X" oder "Zeige alle System-generierten Events" – ohne Payload-Parsing. Typische Werte: `"user:550e8400-..."`, `"system"`, `"migration"`, `"admin:..."`.
 
 ---
 
@@ -47,13 +55,17 @@ public class ChangeWriter
         int version,
         string payloadJson,
         string? correlationId = null,
+        string? causationId = null,
+        string? actorId = null,
         CancellationToken ct = default)
     {
         await using var cmd = transaction.Connection!.CreateCommand();
         cmd.Transaction = transaction;
         cmd.CommandText = """
-            INSERT INTO change_feed (entity, entity_id, event_type, version, correlation_id, payload)
-            VALUES (@entity, @entityId, @eventType, @version, @correlationId, @payload::jsonb)
+            INSERT INTO change_feed
+                (entity, entity_id, event_type, version, correlation_id, causation_id, actor_id, payload)
+            VALUES
+                (@entity, @entityId, @eventType, @version, @correlationId, @causationId, @actorId, @payload::jsonb)
             """;
 
         cmd.Parameters.AddWithValue("entity",        entity);
@@ -61,6 +73,8 @@ public class ChangeWriter
         cmd.Parameters.AddWithValue("eventType",     eventType);
         cmd.Parameters.AddWithValue("version",       version);
         cmd.Parameters.AddWithValue("correlationId", (object?)correlationId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("causationId",   (object?)causationId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("actorId",       (object?)actorId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("payload",       payloadJson);
 
         await cmd.ExecuteNonQueryAsync(ct);
@@ -182,6 +196,8 @@ public class UpdateUserEmailHandler
             version:       1,
             payloadJson:   payload,
             correlationId: null,   // optional: z.B. Request-ID für Tracing
+            causationId:   null,   // optional: sequence_id des auslösenden Events
+            actorId:       null,   // optional: z.B. "user:550e8400-..." oder "system"
             ct:            ct
         );
 

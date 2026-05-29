@@ -16,6 +16,8 @@ CREATE TABLE change_feed (
     event_type     TEXT        NOT NULL,
     version        INT         NOT NULL DEFAULT 1,
     correlation_id TEXT        NULL,
+    causation_id   TEXT        NULL,
+    actor_id       TEXT        NULL,
     payload        JSONB       NOT NULL,
     timestamp      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     redacted       BOOLEAN     NOT NULL DEFAULT FALSE
@@ -26,6 +28,7 @@ CREATE INDEX idx_change_feed_entity_id     ON change_feed (entity, entity_id);
 CREATE INDEX idx_change_feed_event_type    ON change_feed (event_type);
 CREATE INDEX idx_change_feed_not_redacted  ON change_feed (sequence_id) WHERE redacted = FALSE;
 CREATE INDEX idx_change_feed_correlation   ON change_feed (correlation_id) WHERE correlation_id IS NOT NULL;
+CREATE INDEX idx_change_feed_actor         ON change_feed (actor_id) WHERE actor_id IS NOT NULL;
 ```
 
 **Spalten erklärt:**
@@ -37,7 +40,9 @@ CREATE INDEX idx_change_feed_correlation   ON change_feed (correlation_id) WHERE
 | `entity_id` | `TEXT` | ID der Entität, z.B. die UUID des Users |
 | `event_type` | `TEXT` | Name des Events, z.B. `"UserEmailUpdated"`, `"AssetCreated"` |
 | `version` | `INT` | Schema-Version des Payloads. Beginnt bei 1. Wird erhöht, wenn sich die Payload-Struktur ändert. |
-| `correlation_id` | `TEXT` | Optional. Verknüpft zusammengehörige Änderungen über mehrere Entitäten hinweg (z.B. eine fachliche Operation, die User + Asset ändert). Nützlich für Debugging und Tracing. |
+| `correlation_id` | `TEXT` | Optional. Verknüpft zusammengehörige Änderungen über mehrere Entitäten hinweg (z.B. eine fachliche Operation, die User + Asset ändert). Typischerweise eine Request-ID oder Prozess-ID. |
+| `causation_id` | `TEXT` | Optional. Referenziert das Event, das dieses Event **direkt ausgelöst** hat. Ermöglicht die Rekonstruktion von Kausalketten (Event A → Event B → Event C). Siehe Abschnitt "Correlation vs. Causation" unten. |
+| `actor_id` | `TEXT` | Optional. Identifiziert den Akteur, der die Änderung ausgelöst hat – z.B. eine User-ID, `"system"`, `"migration"`, `"scheduler"`. Unverzichtbar für Audit-Trails und Nachvollziehbarkeit. |
 | `payload` | `JSONB` | Nutzdaten des Events als JSON. JSONB ermöglicht indexierte Queries auf Felder. |
 | `timestamp` | `TIMESTAMPTZ` | Zeitpunkt des Events, immer UTC. |
 | `redacted` | `BOOLEAN` | DSGVO: wurde dieses Event auf Wunsch des Nutzers gelöscht/unkenntlich gemacht? |
@@ -51,6 +56,53 @@ CREATE INDEX idx_change_feed_correlation   ON change_feed (correlation_id) WHERE
 | `idx_change_feed_event_type` | Filtern nach Event-Typ (für Projections mit `EventTypes`-Filter) |
 | `idx_change_feed_not_redacted` | **Partieller Index**: Nur nicht-redacted Events. Beschleunigt die Polling-Query der Projections erheblich, da redacted Events aus dem Index ausgeschlossen werden. |
 | `idx_change_feed_correlation` | **Partieller Index**: Nur Events mit `correlation_id`. Ermöglicht schnelles Nachverfolgen zusammengehöriger Änderungen. |
+| `idx_change_feed_actor` | **Partieller Index**: Nur Events mit `actor_id`. Ermöglicht schnelle Abfrage aller Änderungen eines bestimmten Akteurs. |
+
+### Correlation vs. Causation
+
+Diese beiden IDs werden oft verwechselt, haben aber unterschiedliche Aufgaben:
+
+```
+HTTP Request (correlation_id = "req-abc-123")
+  │
+  ├─ UserEmailUpdated  (causation_id = null,              correlation_id = "req-abc-123")
+  │     │
+  │     └─ NotificationSent (causation_id = "seq-42",     correlation_id = "req-abc-123")
+  │           │
+  │           └─ AuditLogWritten (causation_id = "seq-43", correlation_id = "req-abc-123")
+  │
+  └─ UserProfileUpdated (causation_id = null,             correlation_id = "req-abc-123")
+```
+
+- **`correlation_id`** = "Zu welchem übergeordneten Vorgang gehört dieses Event?" → Alle Events einer fachlichen Operation teilen dieselbe `correlation_id`. Typischerweise die Request-ID oder eine Prozess-ID.
+- **`causation_id`** = "Welches Event hat dieses Event **direkt** ausgelöst?" → Bildet eine Kausalkette. Wenn Event B nur existiert, weil Event A verarbeitet wurde, dann ist `causation_id` von B die `sequence_id` von A.
+
+**Wann braucht man `causation_id`?**
+- Wenn Projections oder Sagas **Folge-Events** erzeugen (z.B. eine Notification-Projection schreibt ein `NotificationSent`-Event)
+- Für Debugging: "Warum existiert dieses Event?" → Kausalkette rückwärts verfolgen
+- Für Idempotenz: Prüfen ob ein Folge-Event bereits erzeugt wurde
+
+**Wann reicht `correlation_id` allein?**
+- Wenn Events nur durch HTTP-Requests entstehen (keine Event-getriebenen Folge-Events)
+- In Phase 1–2 ist `correlation_id` oft ausreichend; `causation_id` wird relevant, sobald Projections oder Sagas selbst Events erzeugen
+
+### Actor-ID: Wer hat die Änderung ausgelöst?
+
+`actor_id` beantwortet die Frage: **Wer ist verantwortlich?**
+
+| `actor_id` | Bedeutung |
+|---|---|
+| `"user:550e8400-..."` | Ein authentifizierter Benutzer |
+| `"system"` | Automatischer Systemprozess |
+| `"migration"` | Datenmigration |
+| `"scheduler"` | Geplanter Job |
+| `"admin:..."` | Admin-Eingriff |
+| `"api-key:..."` | Externer API-Client |
+
+**Warum nicht im Payload?**
+- `actor_id` ist **Metadatum**, kein fachlicher Inhalt. Es gehört auf dieselbe Ebene wie `timestamp` und `correlation_id`.
+- Ermöglicht systemweite Queries: "Zeige alle Änderungen von User X" – ohne jeden Payload parsen zu müssen.
+- Unverzichtbar für Audit-Trails, Compliance und Forensik.
 
 ### Warum `BIGSERIAL` und nicht UUID?
 
@@ -200,6 +252,8 @@ CREATE TABLE change_feed (
     event_type     TEXT        NOT NULL,
     version        INT         NOT NULL DEFAULT 1,
     correlation_id TEXT        NULL,
+    causation_id   TEXT        NULL,
+    actor_id       TEXT        NULL,
     payload        JSONB       NOT NULL,
     timestamp      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     redacted       BOOLEAN     NOT NULL DEFAULT FALSE
@@ -210,6 +264,7 @@ CREATE INDEX idx_change_feed_entity_id     ON change_feed (entity, entity_id);
 CREATE INDEX idx_change_feed_event_type    ON change_feed (event_type);
 CREATE INDEX idx_change_feed_not_redacted  ON change_feed (sequence_id) WHERE redacted = FALSE;
 CREATE INDEX idx_change_feed_correlation   ON change_feed (correlation_id) WHERE correlation_id IS NOT NULL;
+CREATE INDEX idx_change_feed_actor         ON change_feed (actor_id) WHERE actor_id IS NOT NULL;
 
 -- projection_checkpoint
 CREATE TABLE projection_checkpoint (

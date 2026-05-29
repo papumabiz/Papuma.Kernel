@@ -171,9 +171,15 @@ CREATE INDEX idx_change_feed_not_redacted ON change_feed (sequence_id) WHERE red
 
 Flexibel, aber bei UUID-basierten Systemen: Verlust von Typ-Sicherheit und Storage-Effizienz (UUID = 16 Bytes, TEXT-UUID = 36 Bytes). Bewusste Entscheidung dokumentieren.
 
-### 🟢 F3: Kein `correlation_id` im Change Feed
+### 🟢 F3: Fehlende Tracing-Metadaten im Change Feed (`correlation_id`, `causation_id`, `actor_id`)
 
-Der `business_event_log` hat `correlation_id` und `causation_id`, der `change_feed` nicht. Für Debugging und Tracing wäre eine `correlation_id` im Change Feed hilfreich, um zusammengehörige Änderungen über mehrere Entitäten nachzuverfolgen.
+Der `business_event_log` hatte bereits `correlation_id` und `causation_id`, der `change_feed` nicht. Für ein vollständiges Tracing- und Audit-Bild wurden drei Metadaten-Spalten ergänzt:
+
+- **`correlation_id`**: Verknüpft alle Events einer fachlichen Operation (z.B. Request-ID)
+- **`causation_id`**: Referenziert das Event, das dieses Event direkt ausgelöst hat (Kausalkette)
+- **`actor_id`**: Identifiziert den Akteur (User, System, Migration, Scheduler)
+
+Diese Metadaten sind keine fachlichen Payload-Inhalte, sondern systemweite Kontextinformationen, die auf derselben Ebene wie `timestamp` leben.
 
 ### 🟢 F4: Kein Health-Check / Monitoring
 
@@ -196,5 +202,5 @@ Alle Findings wurden in die jeweiligen Implementierungsdokumente eingearbeitet:
 | W4: Redaktion + Replay | `06-gdpr.md` |
 | F1: Partieller Index | `02-datenbank.md` |
 | F2: entity_id TEXT vs UUID | `02-datenbank.md` |
-| F3: correlation_id im Feed | `02-datenbank.md`, `03-change-feed.md` |
+| F3: Tracing-Metadaten (correlation_id, causation_id, actor_id) | `02-datenbank.md`, `03-change-feed.md`, `04-projections.md` |
 | F4: Monitoring | `07-projektstruktur.md` |
