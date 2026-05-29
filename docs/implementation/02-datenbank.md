@@ -104,6 +104,17 @@ HTTP Request (correlation_id = "req-abc-123")
 - Ermöglicht systemweite Queries: "Zeige alle Änderungen von User X" – ohne jeden Payload parsen zu müssen.
 - Unverzichtbar für Audit-Trails, Compliance und Forensik.
 
+**Designentscheidung: Ein Feld mit Prefix statt zwei Felder (`actor_type` + `actor_id`)**
+
+Die Alternative wäre eine Auftrennung in `actor_type TEXT` (z.B. `'user'`, `'system'`) und `actor_id TEXT` (z.B. die UUID). Bewusst gewählt wurde **ein Feld mit Prefix-Konvention**, weil:
+
+- **Konsistenz mit dem Gesamtdesign:** Das System vermeidet bewusst Over-Engineering. Ein Feld reicht.
+- **Keine Schema-Migration bei neuen Actor-Typen:** Ein neuer Typ wie `"webhook:..."` braucht keine Datenbankänderung.
+- **Seltene Queries auf Actor-Typ:** In der Praxis fragt man meistens "Was hat User X gemacht?" (`WHERE actor_id = 'user:...'`), nicht "Wie viele System-Events gibt es?".
+- **Einfache Konvention:** Format ist `type:id` oder nur `type` (bei Akteuren ohne eigene ID wie `"system"`).
+
+Die Auftrennung in zwei Felder lohnt sich erst, wenn man **regelmäßig nach Actor-Typ filtern** muss (z.B. ein Dashboard "System vs. User-Änderungen") oder wenn man **FK-Constraints** auf die Users-Tabelle braucht. Beides ist in Phase 1–2 unwahrscheinlich.
+
 ### Warum `BIGSERIAL` und nicht UUID?
 
 `BIGSERIAL` erzeugt eine monoton steigende Integer-Sequenz. Das ist für den Change Feed wichtig, weil:
