@@ -137,10 +137,82 @@ public interface ITenantResolver
 }
 ```
 
-### Beispiel-Implementierungen
+### Sicherheit der Tenant-Auflösung (kritisch)
+
+> ⚠️ **Die Tenant-Auflösung ist die wichtigste Sicherheitsentscheidung im Multi-Tenancy-System.** Ein manipulierter Tenant-Header ermöglicht Cross-Tenant-Zugriff auf alle Daten.
+
+#### Wann ist welcher Resolver sicher?
+
+| Resolver | Sicher? | Anwendungsfall |
+|---|---|---|
+| **JWT-Claim** (`tenant_id` im Token) | ✅ **Empfohlen** | SPAs, Mobile Apps, API-Clients – der Tenant ist kryptografisch im Token signiert |
+| **Header** (`X-Tenant-Id`) | ⚠️ **Nur hinter vertrauenswürdigem Gateway** | Service-to-Service-Kommunikation, wo ein API-Gateway den Header setzt und validiert |
+| **Subdomain** (`tenant-a.app.example.com`) | ✅ Sicher | SaaS mit Subdomain-Routing (DNS + Reverse-Proxy kontrollieren die Zuordnung) |
+| **Session** (serverseitige Session) | ✅ Sicher | Klassische Server-Rendered Apps (MVC, Razor Pages) |
+
+#### Warum ist der Header-Resolver allein unsicher?
+
+Ein HTTP-Header kann von **jedem Client** beliebig gesetzt werden:
+
+```
+# Angreifer setzt fremden Tenant:
+curl -H "X-Tenant-Id: fremder-tenant" https://api.example.com/users
+```
+
+Ohne weitere Validierung sieht der Server den Request als `fremder-tenant` und gibt dessen Daten zurück. **Das ist ein vollständiger Tenant-Escape.**
+
+#### Die sichere Lösung: JWT-Claim-basierte Auflösung
+
+Bei SPAs und API-Clients ist der **JWT-Claim** die richtige Strategie. Der Tenant wird beim Login in den Token geschrieben und ist kryptografisch signiert – der Client kann ihn nicht manipulieren:
+
+```
+JWT Payload:
+{
+  "sub": "user:550e8400-...",
+  "tenant_id": "acme-corp",
+  "role": "admin",
+  "exp": 1735689600
+}
+```
+
+Der Server extrahiert den Tenant aus dem **validierten** Token, nicht aus einem Header:
 
 ```csharp
-// src/App/Tenancy/HeaderTenantResolver.cs
+// src/App/Tenancy/JwtClaimTenantResolver.cs – EMPFOHLEN für SPAs/APIs
+public class JwtClaimTenantResolver : ITenantResolver
+{
+    public TenantContext Resolve(HttpContext context)
+    {
+        // context.User ist bereits durch die JWT-Middleware validiert und signaturgeprüft.
+        // Der Claim kann nicht vom Client manipuliert werden.
+        var tenantId = context.User.FindFirst("tenant_id")?.Value
+            ?? throw new UnauthorizedAccessException("Missing tenant_id claim in JWT.");
+        return TenantContext.Create(tenantId);
+    }
+}
+```
+
+**Warum ist das sicher?**
+1. Der JWT wird vom Identity Provider (z.B. Keycloak, Auth0, eigener AuthServer) signiert
+2. Die ASP.NET Core JWT-Middleware validiert die Signatur **vor** dem Resolver
+3. Der Client kann den `tenant_id`-Claim nicht ändern, ohne die Signatur zu brechen
+4. Der Tenant ist an die Authentifizierung gekoppelt – kein Zugriff ohne gültigen Token
+
+#### Wann ist der Header-Resolver akzeptabel?
+
+Nur in **zwei** Szenarien:
+
+**1. Service-to-Service hinter einem API-Gateway:**
+```
+Client → API-Gateway (validiert JWT, setzt X-Tenant-Id) → Backend-Service (liest Header)
+```
+Das Gateway ist vertrauenswürdig und setzt den Header basierend auf dem validierten Token. Der Backend-Service akzeptiert den Header, weil er nur vom Gateway erreichbar ist (Netzwerk-Isolation).
+
+**2. Lokale Entwicklung / Tests:**
+Für schnelles Testen ohne JWT-Setup. **Niemals in Produktion.**
+
+```csharp
+// src/App/Tenancy/HeaderTenantResolver.cs – NUR für Development/Testing
 public class HeaderTenantResolver : ITenantResolver
 {
     public TenantContext Resolve(HttpContext context)
@@ -150,18 +222,58 @@ public class HeaderTenantResolver : ITenantResolver
         return TenantContext.Create(tenantId);
     }
 }
+```
 
-// src/App/Tenancy/JwtClaimTenantResolver.cs
-public class JwtClaimTenantResolver : ITenantResolver
+```csharp
+// Program.cs – Resolver je nach Environment wählen
+if (builder.Environment.IsDevelopment())
+    builder.Services.AddScoped<ITenantResolver, HeaderTenantResolver>();
+else
+    builder.Services.AddScoped<ITenantResolver, JwtClaimTenantResolver>();
+```
+
+#### Und die serverseitige Session?
+
+Bei klassischen Server-Rendered Apps (Razor Pages, MVC mit Cookie-Auth) ist der Tenant typischerweise in der Session oder im Authentication-Cookie gespeichert. Das ist sicher, weil die Session serverseitig verwaltet wird:
+
+```csharp
+// src/App/Tenancy/SessionTenantResolver.cs – für Server-Rendered Apps
+public class SessionTenantResolver : ITenantResolver
 {
     public TenantContext Resolve(HttpContext context)
     {
+        // Tenant aus dem authentifizierten User-Claim (Cookie-Auth)
         var tenantId = context.User.FindFirst("tenant_id")?.Value
-            ?? throw new UnauthorizedAccessException("Missing tenant_id claim in JWT.");
+            ?? throw new UnauthorizedAccessException("Missing tenant_id in session.");
         return TenantContext.Create(tenantId);
     }
 }
 ```
+
+> **Fazit:** In der Praxis ist `JwtClaimTenantResolver` und `SessionTenantResolver` technisch identisch – beide lesen aus `context.User`. Der Unterschied liegt in der Authentifizierungsmethode (JWT-Bearer vs. Cookie), nicht im Resolver.
+
+#### Zusammenfassung: Empfohlene Konfiguration
+
+| Szenario | Resolver | Auth-Methode |
+|---|---|---|
+| SPA + API | `JwtClaimTenantResolver` | JWT Bearer Token |
+| Mobile App + API | `JwtClaimTenantResolver` | JWT Bearer Token |
+| Server-Rendered (MVC/Razor) | `JwtClaimTenantResolver` | Cookie Auth (Claim im Cookie) |
+| Service-to-Service | `HeaderTenantResolver` | mTLS + Gateway-Validierung |
+| Lokale Entwicklung | `HeaderTenantResolver` | Kein Auth |
+
+#### Zusätzliche Absicherung: Cross-Check mit RLS
+
+Selbst wenn der Resolver korrekt arbeitet, bietet Row-Level Security eine **zweite Verteidigungslinie**:
+
+```sql
+-- RLS prüft auf DB-Ebene, unabhängig vom Application-Code
+ALTER TABLE change_feed ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON change_feed
+    USING (tenant_id = current_setting('app.current_tenant'));
+```
+
+Wenn ein Programmierfehler den falschen Tenant-Context setzt, verhindert RLS trotzdem den Cross-Tenant-Zugriff – vorausgesetzt, `SET LOCAL app.current_tenant` wird korrekt am Anfang jeder Transaktion gesetzt.
 
 ### Middleware: Tenant-Context setzen
 
@@ -573,7 +685,7 @@ app.UseTenantResolution();
 | Komponente | Phase 1 | Später |
 |---|---|---|
 | `TenantContext` | ✅ | |
-| `ITenantResolver` | ✅ (Header-basiert) | JWT-basiert, Subdomain-basiert |
+| `ITenantResolver` | ✅ (`JwtClaimTenantResolver` für Produktion, `HeaderTenantResolver` nur für Dev) | Subdomain-basiert |
 | `TenantMiddleware` | ✅ | |
 | `tenant_id` in allen Tabellen | ✅ (Shared Database) | |
 | Row-Level Security | ✅ | |
@@ -583,7 +695,7 @@ app.UseTenantResolution();
 | Hybrid-Ansatz | | ✅ (Phase 4+) |
 | Dynamische Worker pro Tenant | | ✅ (Phase 3+) |
 
-> **Empfehlung:** In Phase 1 mit Shared Database + RLS starten. Das deckt 90% der Anwendungsfälle ab. Database-per-Tenant wird erst relevant, wenn Enterprise-Kunden mit regulatorischen Anforderungen hinzukommen.
+> **Empfehlung:** In Phase 1 mit Shared Database + RLS + `JwtClaimTenantResolver` starten. Das deckt 90% der Anwendungsfälle ab. `HeaderTenantResolver` nur für lokale Entwicklung verwenden. Database-per-Tenant wird erst relevant, wenn Enterprise-Kunden mit regulatorischen Anforderungen hinzukommen.
 
 ---
 
