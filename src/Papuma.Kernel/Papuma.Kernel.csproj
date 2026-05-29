@@ -6,6 +6,7 @@
     <Version>0.1.0</Version>
     <Authors>Papuma</Authors>
     <Description>Kernel-Bibliothek fuer Papuma.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
 
   <ItemGroup>
