@@ -19,23 +19,38 @@ public class BusinessEventWriterTests
             payloadJson: "{}"));
     }
 
-    [Fact]
-    public async Task AppendAsync_ThrowsForNullEventType()
+    [Theory]
+    [InlineData("Up")]
+    [InlineData("1UserLoggedIn")]
+    [InlineData("User-Logged-In")]
+    public async Task AppendAsync_ThrowsForInvalidEventType(string eventType)
     {
-        await Assert.ThrowsAsync<ArgumentNullException>(() => _sut.AppendAsync(
+        await Assert.ThrowsAsync<ArgumentException>(() => _sut.AppendAsync(
             transaction: null!,
-            eventType: null!,
+            eventType: eventType,
             actorId: "user:123",
             payloadJson: "{}"));
     }
 
-    [Fact]
-    public async Task AppendAsync_ThrowsForNullActorId()
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task AppendAsync_ThrowsForEmptyActorId(string actorId)
     {
-        await Assert.ThrowsAsync<ArgumentNullException>(() => _sut.AppendAsync(
+        await Assert.ThrowsAsync<ArgumentException>(() => _sut.AppendAsync(
             transaction: null!,
             eventType: "UserLoggedIn",
-            actorId: null!,
+            actorId: actorId,
+            payloadJson: "{}"));
+    }
+
+    [Fact]
+    public async Task AppendAsync_ThrowsForTooLongActorId()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() => _sut.AppendAsync(
+            transaction: null!,
+            eventType: "UserLoggedIn",
+            actorId: new string('a', 201),
             payloadJson: "{}"));
     }
 
@@ -47,5 +62,58 @@ public class BusinessEventWriterTests
             eventType: "UserLoggedIn",
             actorId: "user:123",
             payloadJson: null!));
+    }
+
+    [Fact]
+    public async Task AppendAsync_ThrowsForPayloadOverConfiguredByteLimit()
+    {
+        var sut = new BusinessEventWriter(new BusinessEventWriterOptions { MaxPayloadSizeBytes = 5 });
+
+        await Assert.ThrowsAsync<ArgumentException>(() => sut.AppendAsync(
+            transaction: null!,
+            eventType: "UserLoggedIn",
+            actorId: "user:123",
+            payloadJson: "123456"));
+    }
+
+    [Theory]
+    [InlineData("1Entity")]
+    [InlineData("E")]
+    [InlineData("Entity-Name")]
+    public async Task AppendAsync_ThrowsForInvalidEntity(string entity)
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() => _sut.AppendAsync(
+            transaction: null!,
+            eventType: "UserLoggedIn",
+            actorId: "user:123",
+            payloadJson: "{}",
+            entity: entity));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task AppendAsync_ThrowsForInvalidEntityId(string entityId)
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() => _sut.AppendAsync(
+            transaction: null!,
+            eventType: "UserLoggedIn",
+            actorId: "user:123",
+            payloadJson: "{}",
+            entity: "User",
+            entityId: entityId));
+    }
+
+    [Fact]
+    public async Task AppendAsync_AllowsNullEntityAndEntityId()
+    {
+        // Should fail on null transaction, not on validation – entity/entityId are optional.
+        await Assert.ThrowsAsync<ArgumentNullException>(() => _sut.AppendAsync(
+            transaction: null!,
+            eventType: "UserLoggedIn",
+            actorId: "user:123",
+            payloadJson: "{}",
+            entity: null,
+            entityId: null));
     }
 }

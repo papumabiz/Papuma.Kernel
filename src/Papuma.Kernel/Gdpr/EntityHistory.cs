@@ -9,5 +9,5 @@ namespace Papuma.Kernel.Gdpr;
 /// Represents the stored history for one entity across change feed and business events.
 /// </summary>
 public sealed record EntityHistory(
-    List<ChangeRecord> ChangeRecords,
-    List<BusinessEventRecord> BusinessEvents);
+    IReadOnlyList<ChangeRecord> ChangeRecords,
+    IReadOnlyList<BusinessEventRecord> BusinessEvents);

@@ -18,6 +18,8 @@ namespace Papuma.Kernel.Projections;
 /// </summary>
 public sealed class ProjectionWorker : BackgroundService
 {
+    private static readonly TimeSpan MinErrorDelay = TimeSpan.FromSeconds(5);
+
     private readonly IProjectionHandler _handler;
     private readonly NpgsqlDataSource _dataSource;
     private readonly ILogger<ProjectionWorker> _logger;
@@ -33,6 +35,7 @@ public sealed class ProjectionWorker : BackgroundService
     /// <param name="dataSource">The data source used to load and checkpoint records.</param>
     /// <param name="logger">The logger used for worker diagnostics.</param>
     /// <param name="options">Optional polling and retry configuration.</param>
+    /// <param name="tenant">Optional tenant scope for this worker.</param>
     public ProjectionWorker(
         IProjectionHandler handler,
         NpgsqlDataSource dataSource,
@@ -66,7 +69,7 @@ public sealed class ProjectionWorker : BackgroundService
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("ProjectionWorker [{Name}] started.", _handler.Name);
+        _logger.LogInformation("ProjectionWorker [{Name}] started.", _projectionName);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -98,8 +101,11 @@ public sealed class ProjectionWorker : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error in ProjectionWorker [{Name}]", _handler.Name);
-                await Task.Delay(_options.PollInterval, stoppingToken);
+                _logger.LogError(ex, "Error in ProjectionWorker [{Name}]", _projectionName);
+
+                // Use at least 5 seconds to avoid log flooding when the database is unreachable.
+                var errorDelay = _options.PollInterval < MinErrorDelay ? MinErrorDelay : _options.PollInterval;
+                await Task.Delay(errorDelay, stoppingToken);
             }
         }
 
@@ -127,6 +133,11 @@ public sealed class ProjectionWorker : BackgroundService
             {
                 await tx.RollbackAsync(ct);
 
+                // RegisterFailureAsync runs outside the rolled-back transaction.
+                // If the worker crashes between here and the next loop iteration the
+                // failure row is persisted but the checkpoint is not advanced.  On
+                // restart the event will be reloaded and the attempts counter will be
+                // incremented again – this is correct at-least-once behaviour.
                 var movedToDeadLetter = await RegisterFailureAsync(conn, change, ex, ct);
                 if (movedToDeadLetter)
                 {
@@ -164,11 +175,11 @@ public sealed class ProjectionWorker : BackgroundService
     {
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-             SELECT sequence_id, tenant_id, entity, entity_id, event_type, version,
-                 correlation_id, causation_id, actor_id, payload::text, timestamp
+            SELECT sequence_id, tenant_id, entity, entity_id, event_type, version,
+                   correlation_id, causation_id, actor_id, payload::text, timestamp
             FROM change_feed
             WHERE sequence_id > @lastSeen
-            AND (@tenantId IS NULL OR tenant_id = @tenantId)
+              AND (@tenantId IS NULL OR tenant_id = @tenantId)
               AND redacted = FALSE
               AND event_type = ANY(@eventTypes)
               AND xmin::text::bigint < pg_snapshot_xmin(pg_current_snapshot())::text::bigint
@@ -186,8 +197,8 @@ public sealed class ProjectionWorker : BackgroundService
             """;
 
         cmd.Parameters.AddWithValue("lastSeen", fromSequenceId);
-    cmd.Parameters.AddWithValue("tenantId", (object?)_tenant?.TenantId ?? DBNull.Value);
-    cmd.Parameters.AddWithValue("name", _projectionName);
+        cmd.Parameters.AddWithValue("tenantId", (object?)_tenant?.TenantId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("name", _projectionName);
         cmd.Parameters.AddWithValue("maxAttempts", _options.MaxAttemptsPerEvent);
         cmd.Parameters.AddWithValue("eventTypes", _handler.EventTypes.ToArray());
         cmd.Parameters.AddWithValue("batchSize", _options.BatchSize);
@@ -246,7 +257,7 @@ public sealed class ProjectionWorker : BackgroundService
             WHERE projection_name = @name
               AND sequence_id = @sequenceId
             """;
-                cmd.Parameters.AddWithValue("name", _projectionName);
+        cmd.Parameters.AddWithValue("name", _projectionName);
         cmd.Parameters.AddWithValue("sequenceId", sequenceId);
 
         await cmd.ExecuteNonQueryAsync(ct);

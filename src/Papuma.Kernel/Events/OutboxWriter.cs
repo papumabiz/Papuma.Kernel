@@ -13,6 +13,17 @@ namespace Papuma.Kernel.Events;
 /// </summary>
 public sealed class OutboxWriter
 {
+    private readonly OutboxWriterOptions _options;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="OutboxWriter"/> class.
+    /// </summary>
+    /// <param name="options">Optional writer configuration.</param>
+    public OutboxWriter(OutboxWriterOptions? options = null)
+    {
+        _options = options ?? new OutboxWriterOptions();
+    }
+
     /// <summary>
     /// Enqueues an outbox message in the current transaction.
     /// </summary>

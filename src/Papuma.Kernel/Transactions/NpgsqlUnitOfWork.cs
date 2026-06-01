@@ -9,7 +9,7 @@ using Npgsql;
 /// <summary>
 /// Executes database work in a transaction and retries transient PostgreSQL failures.
 /// </summary>
-public class NpgsqlUnitOfWork : IUnitOfWork
+public sealed class NpgsqlUnitOfWork : IUnitOfWork
 {
     private readonly NpgsqlDataSource _dataSource;
     private readonly UnitOfWorkOptions _options;
@@ -72,7 +72,7 @@ public class NpgsqlUnitOfWork : IUnitOfWork
             {
                 await action(conn, tx, ct);
                 await tx.CommitAsync(ct);
-                
+
                 return; // Success
             }
             catch (NpgsqlException ex) when (
@@ -80,21 +80,30 @@ public class NpgsqlUnitOfWork : IUnitOfWork
                 ex.SqlState is not null &&
                 TransientSqlStates.Contains(ex.SqlState))
             {
-                await tx.RollbackAsync(ct);
+                try { await tx.RollbackAsync(ct); }
+                catch (Exception rollbackEx)
+                {
+                    _logger?.LogDebug(rollbackEx, "Rollback failed after transient error (connection may already be broken).");
+                }
 
                 var exponentialBackoffFactor = Math.Pow(2, attempt - 1);
                 var delay = TimeSpan.FromMilliseconds(_options.BaseRetryDelay.TotalMilliseconds * exponentialBackoffFactor);
                 var jitter = TimeSpan.FromMilliseconds(Random.Shared.Next(0, 50));
-                
+
                 _logger?.LogWarning(
                     "Transient DB error (SqlState={SqlState}, attempt {Attempt}/{Max}), retrying in {Delay}ms.",
                     ex.SqlState, attempt, _options.MaxRetries, (delay + jitter).TotalMilliseconds);
-                
+
                 await Task.Delay(delay + jitter, ct);
             }
             catch
             {
-                await tx.RollbackAsync(ct);
+                try { await tx.RollbackAsync(ct); }
+                catch (Exception rollbackEx)
+                {
+                    _logger?.LogDebug(rollbackEx, "Rollback failed (connection may already be broken).");
+                }
+
                 throw;
             }
         }

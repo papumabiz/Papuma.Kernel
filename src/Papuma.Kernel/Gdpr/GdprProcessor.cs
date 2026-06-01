@@ -16,6 +16,7 @@ namespace Papuma.Kernel.Gdpr;
 
 /// <summary>
 /// Provides GDPR-oriented history and redaction operations for stored events.
+/// Callers should enforce authorization and rate-limiting before invoking redaction methods.
 /// </summary>
 public sealed class GdprProcessor
 {
@@ -101,12 +102,12 @@ public sealed class GdprProcessor
             UPDATE change_feed
             SET payload  = '{"redacted": true}'::jsonb,
                 redacted = TRUE
-                        WHERE tenant_id = @tenantId
-                            AND entity    = @entity
+            WHERE tenant_id = @tenantId
+              AND entity    = @entity
               AND entity_id = @entityId
               AND redacted  = FALSE
             """;
-                feedCmd.Parameters.AddWithValue("tenantId", tenant.TenantId);
+        feedCmd.Parameters.AddWithValue("tenantId", tenant.TenantId);
         feedCmd.Parameters.AddWithValue("entity", entity);
         feedCmd.Parameters.AddWithValue("entityId", entityId);
         var feedAffected = await feedCmd.ExecuteNonQueryAsync(ct);
@@ -117,12 +118,12 @@ public sealed class GdprProcessor
             UPDATE business_event_log
             SET payload  = '{"redacted": true}'::jsonb,
                 redacted = TRUE
-                        WHERE tenant_id = @tenantId
-                            AND entity    = @entity
+            WHERE tenant_id = @tenantId
+              AND entity    = @entity
               AND entity_id = @entityId
               AND redacted  = FALSE
             """;
-                belCmd.Parameters.AddWithValue("tenantId", tenant.TenantId);
+        belCmd.Parameters.AddWithValue("tenantId", tenant.TenantId);
         belCmd.Parameters.AddWithValue("entity", entity);
         belCmd.Parameters.AddWithValue("entityId", entityId);
         var businessEventsAffected = await belCmd.ExecuteNonQueryAsync(ct);
@@ -197,14 +198,14 @@ public sealed class GdprProcessor
         await using var feedCmd = conn.CreateCommand();
         feedCmd.CommandText = """
             SELECT sequence_id, entity, entity_id, event_type, version,
-                                     correlation_id, causation_id, actor_id, payload::text, timestamp, tenant_id
+                   correlation_id, causation_id, actor_id, payload::text, timestamp, tenant_id
             FROM change_feed
-                        WHERE tenant_id = @tenantId
-                            AND entity    = @entity
+            WHERE tenant_id = @tenantId
+              AND entity    = @entity
               AND entity_id = @entityId
             ORDER BY sequence_id
             """;
-                feedCmd.Parameters.AddWithValue("tenantId", tenant.TenantId);
+        feedCmd.Parameters.AddWithValue("tenantId", tenant.TenantId);
         feedCmd.Parameters.AddWithValue("entity", entity);
         feedCmd.Parameters.AddWithValue("entityId", entityId);
 
@@ -232,12 +233,12 @@ public sealed class GdprProcessor
         belCmd.CommandText = """
             SELECT event_id, event_type, actor_id, payload::text, occurred_at
             FROM business_event_log
-                        WHERE tenant_id = @tenantId
-                            AND entity    = @entity
+            WHERE tenant_id = @tenantId
+              AND entity    = @entity
               AND entity_id = @entityId
             ORDER BY occurred_at
             """;
-                belCmd.Parameters.AddWithValue("tenantId", tenant.TenantId);
+        belCmd.Parameters.AddWithValue("tenantId", tenant.TenantId);
         belCmd.Parameters.AddWithValue("entity", entity);
         belCmd.Parameters.AddWithValue("entityId", entityId);
 

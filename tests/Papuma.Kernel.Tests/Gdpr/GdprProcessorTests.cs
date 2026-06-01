@@ -113,6 +113,36 @@ public class GdprProcessorTests
             entityId: "user-1"));
     }
 
+    [Theory]
+    [InlineData("1User")]
+    [InlineData("U")]
+    [InlineData("User-Profile")]
+    public async Task RedactEntityAsync_ThrowsForInvalidEntity(string entity)
+    {
+        using var dataSource = CreateDataSource();
+        var sut = CreateSut(dataSource);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => sut.RedactEntityAsync(
+            entity: entity,
+            entityId: "user-1",
+            actorId: "admin:1",
+            reason: "GDPR request"));
+    }
+
+    [Theory]
+    [InlineData("1User")]
+    [InlineData("U")]
+    [InlineData("User-Profile")]
+    public async Task GetEntityHistoryAsync_ThrowsForInvalidEntity(string entity)
+    {
+        using var dataSource = CreateDataSource();
+        var sut = CreateSut(dataSource);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => sut.GetEntityHistoryAsync(
+            entity: entity,
+            entityId: "user-1"));
+    }
+
     private static GdprProcessor CreateSut(NpgsqlDataSource dataSource) =>
         new(dataSource, new BusinessEventWriter(), NullLogger<GdprProcessor>.Instance);
 

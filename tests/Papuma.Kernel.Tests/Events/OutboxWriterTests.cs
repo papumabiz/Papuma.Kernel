@@ -19,13 +19,16 @@ public class OutboxWriterTests
             payloadJson: "{}"));
     }
 
-    [Fact]
-    public async Task EnqueueAsync_ThrowsForNullEventType()
+    [Theory]
+    [InlineData("Up")]
+    [InlineData("1UserLoggedIn")]
+    [InlineData("User-Logged-In")]
+    public async Task EnqueueAsync_ThrowsForInvalidEventType(string eventType)
     {
-        await Assert.ThrowsAsync<ArgumentNullException>(() => _sut.EnqueueAsync(
+        await Assert.ThrowsAsync<ArgumentException>(() => _sut.EnqueueAsync(
             transaction: null!,
             eventId: Guid.NewGuid(),
-            eventType: null!,
+            eventType: eventType,
             payloadJson: "{}"));
     }
 
@@ -37,5 +40,17 @@ public class OutboxWriterTests
             eventId: Guid.NewGuid(),
             eventType: "UserLoggedIn",
             payloadJson: null!));
+    }
+
+    [Fact]
+    public async Task EnqueueAsync_ThrowsForPayloadOverConfiguredByteLimit()
+    {
+        var sut = new OutboxWriter(new OutboxWriterOptions { MaxPayloadSizeBytes = 5 });
+
+        await Assert.ThrowsAsync<ArgumentException>(() => sut.EnqueueAsync(
+            transaction: null!,
+            eventId: Guid.NewGuid(),
+            eventType: "UserLoggedIn",
+            payloadJson: "123456"));
     }
 }
