@@ -7,6 +7,7 @@ Papuma Kernel is a small .NET 10 library for a PostgreSQL-based, event-informed 
 ## Contents
 
 - `src/Papuma.Kernel`: core library
+- `src/Papuma.Kernel.AspNetCore`: optional ASP.NET Core integration (tenant resolution middleware)
 - `tests/Papuma.Kernel.Tests`: automated tests
 - `docs/implementation`: detailed implementation documentation
 
