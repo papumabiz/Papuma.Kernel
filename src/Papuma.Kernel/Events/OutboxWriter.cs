@@ -4,6 +4,7 @@
 using Npgsql;
 
 using Papuma.Kernel.Tenancy;
+using Papuma.Kernel.Validation;
 
 namespace Papuma.Kernel.Events;
 
@@ -51,10 +52,11 @@ public sealed class OutboxWriter
         string payloadJson,
         CancellationToken ct = default)
     {
+        InputValidator.ValidateEventType(eventType);
+        InputValidator.ValidatePayloadSize(payloadJson, _options.MaxPayloadSizeBytes);
+
         ArgumentNullException.ThrowIfNull(transaction);
         ArgumentNullException.ThrowIfNull(tenant);
-        ArgumentNullException.ThrowIfNull(eventType);
-        ArgumentNullException.ThrowIfNull(payloadJson);
 
         await using var cmd = transaction.Connection!.CreateCommand();
         cmd.Transaction = transaction;

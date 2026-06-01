@@ -1,12 +1,10 @@
 // Copyright (c) 2026- by Harald Lapp.
 // Licensed under the MIT License. See LICENSE in the repository root for details.
 
-using System.Text;
-using System.Text.RegularExpressions;
-
 using Npgsql;
 
 using Papuma.Kernel.Tenancy;
+using Papuma.Kernel.Validation;
 
 namespace Papuma.Kernel.ChangeFeed;
 
@@ -15,16 +13,6 @@ namespace Papuma.Kernel.ChangeFeed;
 /// </summary>
 public sealed class ChangeWriter
 {
-    private static readonly Regex ValidEntityPattern = new(
-        @"^[A-Za-z][A-Za-z0-9_]{1,100}$",
-        RegexOptions.Compiled,
-        TimeSpan.FromMilliseconds(100));
-
-    private static readonly Regex ValidEventTypePattern = new(
-        @"^[A-Za-z][A-Za-z0-9_]{2,100}$",
-        RegexOptions.Compiled,
-        TimeSpan.FromMilliseconds(100));
-
     private readonly ChangeWriterOptions _options;
 
     /// <summary>
@@ -157,46 +145,11 @@ public sealed class ChangeWriter
         string payloadJson,
         string actorId)
     {
-        ArgumentNullException.ThrowIfNull(payloadJson);
-
-        if (!ValidEntityPattern.IsMatch(entity))
-        {
-            throw new ArgumentException(
-                $"Invalid entity name '{entity}'. Must match [A-Za-z][A-Za-z0-9_]{{1,100}}.",
-                nameof(entity));
-        }
-
-        if (string.IsNullOrWhiteSpace(entityId) || entityId.Length > 200)
-        {
-            throw new ArgumentException(
-                "entityId must not be empty and max 200 characters.",
-                nameof(entityId));
-        }
-
-        if (!ValidEventTypePattern.IsMatch(eventType))
-        {
-            throw new ArgumentException(
-                $"Invalid eventType '{eventType}'. Must match [A-Za-z][A-Za-z0-9_]{{2,100}}.",
-                nameof(eventType));
-        }
-
-        if (version < 1)
-        {
-            throw new ArgumentException("version must be >= 1.", nameof(version));
-        }
-
-        if (string.IsNullOrWhiteSpace(actorId) || actorId.Length > 200)
-        {
-            throw new ArgumentException(
-                "actorId is required and must not exceed 200 characters.",
-                nameof(actorId));
-        }
-
-        if (Encoding.UTF8.GetByteCount(payloadJson) > _options.MaxPayloadSizeBytes)
-        {
-            throw new ArgumentException(
-                $"Payload exceeds maximum size of {_options.MaxPayloadSizeBytes} bytes ({Encoding.UTF8.GetByteCount(payloadJson)} bytes).",
-                nameof(payloadJson));
-        }
+        InputValidator.ValidateEntity(entity);
+        InputValidator.ValidateEntityId(entityId);
+        InputValidator.ValidateEventType(eventType);
+        InputValidator.ValidateVersion(version);
+        InputValidator.ValidateActorId(actorId);
+        InputValidator.ValidatePayloadSize(payloadJson, _options.MaxPayloadSizeBytes);
     }
 }

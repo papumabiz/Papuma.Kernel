@@ -10,6 +10,7 @@ using Npgsql;
 using Papuma.Kernel.ChangeFeed;
 using Papuma.Kernel.Events;
 using Papuma.Kernel.Tenancy;
+using Papuma.Kernel.Validation;
 
 namespace Papuma.Kernel.Gdpr;
 
@@ -82,12 +83,9 @@ public sealed class GdprProcessor
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(tenant);
-        ValidateEntityReference(entity, entityId);
-
-        if (string.IsNullOrWhiteSpace(actorId))
-        {
-            throw new ArgumentException("actorId is required for GDPR redaction.", nameof(actorId));
-        }
+        InputValidator.ValidateEntity(entity);
+        InputValidator.ValidateEntityId(entityId);
+        InputValidator.ValidateActorId(actorId);
 
         if (string.IsNullOrWhiteSpace(reason))
         {
@@ -191,7 +189,8 @@ public sealed class GdprProcessor
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(tenant);
-        ValidateEntityReference(entity, entityId);
+        InputValidator.ValidateEntity(entity);
+        InputValidator.ValidateEntityId(entityId);
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
 
@@ -257,18 +256,5 @@ public sealed class GdprProcessor
         }
 
         return new EntityHistory(changeRecords, businessEvents);
-    }
-
-    private static void ValidateEntityReference(string entity, string entityId)
-    {
-        if (string.IsNullOrWhiteSpace(entity))
-        {
-            throw new ArgumentException("entity is required.", nameof(entity));
-        }
-
-        if (string.IsNullOrWhiteSpace(entityId))
-        {
-            throw new ArgumentException("entityId is required.", nameof(entityId));
-        }
     }
 }

@@ -4,6 +4,7 @@
 using Npgsql;
 
 using Papuma.Kernel.Tenancy;
+using Papuma.Kernel.Validation;
 
 namespace Papuma.Kernel.Events;
 
@@ -12,6 +13,17 @@ namespace Papuma.Kernel.Events;
 /// </summary>
 public sealed class BusinessEventWriter
 {
+    private readonly BusinessEventWriterOptions _options;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="BusinessEventWriter"/> class.
+    /// </summary>
+    /// <param name="options">Optional writer configuration.</param>
+    public BusinessEventWriter(BusinessEventWriterOptions? options = null)
+    {
+        _options = options ?? new BusinessEventWriterOptions();
+    }
+
     /// <summary>
     /// Appends a business event to the current transaction.
     /// </summary>
@@ -73,11 +85,22 @@ public sealed class BusinessEventWriter
         string? causationId = null,
         CancellationToken ct = default)
     {
+        InputValidator.ValidateEventType(eventType);
+        InputValidator.ValidateActorId(actorId);
+        InputValidator.ValidatePayloadSize(payloadJson, _options.MaxPayloadSizeBytes);
+
+        if (entity is not null)
+        {
+            InputValidator.ValidateEntity(entity);
+        }
+
+        if (entityId is not null)
+        {
+            InputValidator.ValidateEntityId(entityId);
+        }
+
         ArgumentNullException.ThrowIfNull(transaction);
         ArgumentNullException.ThrowIfNull(tenant);
-        ArgumentNullException.ThrowIfNull(eventType);
-        ArgumentNullException.ThrowIfNull(actorId);
-        ArgumentNullException.ThrowIfNull(payloadJson);
 
         var eventId = Guid.NewGuid();
 
