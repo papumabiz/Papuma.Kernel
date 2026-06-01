@@ -27,7 +27,7 @@ This document defines the working rules for GitHub Copilot and other agents in t
 
 - Every hand-written source file should start with a short header that points to the root `LICENSE` file.
 - Suitable standard for C# files:
-  - `// Copyright (c) 2026 Papuma.`
+  - `// Copyright (c) 2026- by Harald Lapp.`
   - `// Licensed under the MIT License. See LICENSE in the repository root for details.`
 - Generated files, build artifacts, and external third-party files should not be rewritten.
 

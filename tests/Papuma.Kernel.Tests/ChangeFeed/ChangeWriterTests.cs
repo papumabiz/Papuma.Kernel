@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Papuma.
+// Copyright (c) 2026- by Harald Lapp.
 // Licensed under the MIT License. See LICENSE in the repository root for details.
 
 using Papuma.Kernel.ChangeFeed;
