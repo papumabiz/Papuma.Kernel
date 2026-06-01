@@ -326,8 +326,8 @@ public class ProjectionWorker : BackgroundService
     }
 }
 
-// Marker-Record für den Replay-Channel
-public record ReplayRequest;
+// Marker-Record für den Replay-Channel (intern, nicht Teil der öffentlichen API)
+private sealed record ReplayRequest;
 ```
 
 ---

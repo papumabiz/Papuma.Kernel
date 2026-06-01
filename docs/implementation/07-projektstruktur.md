@@ -20,47 +20,66 @@ Der Kernel wird **von Anfang an** als eigenständige Library entwickelt – nich
 Papuma.Kernel.slnx
 │
 ├── src/
-│   └── Papuma.Kernel/              ← NuGet-Package (eigenständige Library)
-│       ├── Papuma.Kernel.csproj
-│       ├── ChangeFeed/
-│       │   ├── ChangeRecord.cs
-│       │   ├── ChangeWriter.cs
-│       │   └── ChangeWriterOptions.cs
-│       ├── Events/
-│       │   ├── BusinessEventWriter.cs
-│       │   └── OutboxWriter.cs
-│       ├── Transactions/
-│       │   ├── IUnitOfWork.cs
-│       │   ├── NpgsqlUnitOfWork.cs
-│       │   └── UnitOfWorkOptions.cs
-│       ├── Projections/
-│       │   ├── IProjectionHandler.cs
-│       │   ├── IExternalProjectionHandler.cs
-│       │   ├── IReplayableProjection.cs
-│       │   ├── IVersionedHandler.cs
-│       │   ├── ProjectionWorker.cs
-│       │   ├── ProjectionWorkerOptions.cs
-│       │   ├── ProjectionRegistry.cs
-│       │   ├── ProjectionExtensions.cs
-│       │   └── ReplayService.cs
-│       ├── Tenancy/
-│       │   ├── TenantContext.cs
-│       │   ├── ITenantResolver.cs
-│       │   ├── ITenantDataSourceFactory.cs
-│       │   ├── TenantDataSourceFactory.cs
-│       │   └── TenantMiddleware.cs
-│       ├── Gdpr/
-│       │   └── GdprProcessor.cs
-│       └── Schema/
-│           └── schema.sql          ← Init-Skript (als Embedded Resource)
+│   ├── Papuma.Kernel/              ← NuGet-Package (Infrastruktur-Kern)
+│   │   ├── Papuma.Kernel.csproj
+│   │   ├── PapumaKernelOptions.cs
+│   │   ├── ServiceCollectionExtensions.cs
+│   │   ├── ChangeFeed/
+│   │   │   ├── ChangeRecord.cs
+│   │   │   ├── ChangeWriter.cs
+│   │   │   └── ChangeWriterOptions.cs
+│   │   ├── Events/
+│   │   │   ├── BusinessEventWriter.cs
+│   │   │   ├── BusinessEventWriterOptions.cs
+│   │   │   ├── IOutboxPublisher.cs
+│   │   │   ├── OutboxWriter.cs
+│   │   │   └── OutboxWriterOptions.cs
+│   │   ├── Transactions/
+│   │   │   ├── IUnitOfWork.cs
+│   │   │   ├── NpgsqlUnitOfWork.cs
+│   │   │   └── UnitOfWorkOptions.cs
+│   │   ├── Projections/
+│   │   │   ├── IProjectionHandler.cs
+│   │   │   ├── IExternalProjectionHandler.cs
+│   │   │   ├── IReplayableProjection.cs
+│   │   │   ├── IVersionedHandler.cs
+│   │   │   ├── ProjectionWorker.cs
+│   │   │   ├── ProjectionWorkerOptions.cs
+│   │   │   ├── ProjectionRegistry.cs
+│   │   │   ├── ProjectionExtensions.cs
+│   │   │   └── ReplayService.cs
+│   │   ├── Tenancy/
+│   │   │   ├── TenantContext.cs
+│   │   │   ├── ITenantDataSourceFactory.cs
+│   │   │   └── TenantDataSourceFactory.cs
+│   │   ├── Validation/
+│   │   │   └── InputValidator.cs
+│   │   ├── Gdpr/
+│   │   │   ├── GdprProcessor.cs
+│   │   │   ├── EntityHistory.cs
+│   │   │   ├── BusinessEventRecord.cs
+│   │   │   └── RedactionResult.cs
+│   │   └── Schema/
+│   │       └── schema.sql          ← Init-Skript (als Embedded Resource)
+│   │
+│   └── Papuma.Kernel.AspNetCore/   ← HTTP-Integration (separates Package)
+│       ├── Papuma.Kernel.AspNetCore.csproj
+│       └── Tenancy/
+│           ├── ITenantResolver.cs
+│           ├── TenantMiddleware.cs
+│           └── TenantMiddlewareExtensions.cs
 │
 ├── tests/
-│   └── Papuma.Kernel.Tests/        ← Unit- und Integrationstests für den Kernel
-│       └── Papuma.Kernel.Tests.csproj
+│   ├── Papuma.Kernel.Tests/        ← Unit- und Integrationstests für den Kernel
+│   │   └── Papuma.Kernel.Tests.csproj
+│   └── Papuma.Kernel.AspNetCore.Tests/  ← Tests für das AspNetCore-Package
+│       └── Papuma.Kernel.AspNetCore.Tests.csproj
 │
 └── docs/
     └── implementation/             ← diese Dokumentation
 ```
+
+> **Hinweis:** `ITenantResolver` und `TenantMiddleware` leben in `Papuma.Kernel.AspNetCore`, weil sie von `Microsoft.AspNetCore.Http` abhängen. Der Kern-Package `Papuma.Kernel` hat keine ASP.NET Core-Abhängigkeit und kann auch in Konsolen-Apps oder Worker-Services verwendet werden.
 
 ### Wie die konsumierende App aussieht (Beispiel)
 
@@ -127,15 +146,15 @@ MyApp/Features/Users/Projections/UserReadModelProjection.cs  ← richtig (Featur
 
 ### Was gehört in den Kernel, was in die App?
 
-| Kernel (`Papuma.Kernel`) | App (`MyApp`) |
-|---|---|
-| `ChangeRecord`, `ChangeWriter` | `UserEmailUpdatedV1`, `UserEmailUpdatedV2` |
-| `ProjectionWorker`, `IProjectionHandler` | `UserReadModelProjection` |
-| `GdprProcessor` | `UserDeletionService` |
-| `TenantContext`, `ITenantResolver`, `TenantMiddleware` | `JwtClaimTenantResolver`, `HeaderTenantResolver` |
-| `IUnitOfWork`, `NpgsqlUnitOfWork` | `UpdateUserEmailHandler` |
-| `ProjectionExtensions` (DI-Helper) | `Program.cs` (Registrierung) |
-| `schema.sql` (Kernel-Tabellen) | Domain-Tabellen (`users`, `assets`, etc.) |
+| Kernel (`Papuma.Kernel`) | AspNetCore (`Papuma.Kernel.AspNetCore`) | App (`MyApp`) |
+|---|---|---|
+| `ChangeRecord`, `ChangeWriter` | | `UserEmailUpdatedV1`, `UserEmailUpdatedV2` |
+| `ProjectionWorker`, `IProjectionHandler` | | `UserReadModelProjection` |
+| `GdprProcessor` | | `UserDeletionService` |
+| `TenantContext`, `ITenantDataSourceFactory` | `ITenantResolver`, `TenantMiddleware` | `JwtClaimTenantResolver`, `HeaderTenantResolver` |
+| `IUnitOfWork`, `NpgsqlUnitOfWork` | | `UpdateUserEmailHandler` |
+| `AddPapumaKernel()`, `AddProjection<T>()`, `AddReplayService()` | `AddPapumaTenancy<T>()`, `UseTenantResolution()` | `Program.cs` (Registrierung) |
+| `schema.sql` (Kernel-Tabellen) | | Domain-Tabellen (`users`, `assets`, etc.) |
 
 ---
 
@@ -245,12 +264,16 @@ var connectionString = builder.Configuration.GetConnectionString("Postgres")
     ?? throw new InvalidOperationException("Connection string 'Postgres' not configured.");
 
 builder.Services.AddNpgsqlDataSource(connectionString);
-builder.Services.AddSingleton<ChangeWriter>();
-builder.Services.AddSingleton<BusinessEventWriter>();
-builder.Services.AddSingleton<GdprProcessor>();
-builder.Services.AddScoped<ITenantResolver, HeaderTenantResolver>();
-builder.Services.AddSingleton<IUnitOfWork>(sp => new NpgsqlUnitOfWork(
-    sp.GetRequiredService<NpgsqlDataSource>()));
+
+// Registriert ChangeWriter, BusinessEventWriter, OutboxWriter, GdprProcessor, IUnitOfWork
+builder.Services.AddPapumaKernel();
+
+// Projections registrieren
+builder.Services.AddProjection<UserReadModelProjection>();
+builder.Services.AddReplayService();
+
+// Tenant-Auflösung (aus Papuma.Kernel.AspNetCore)
+builder.Services.AddPapumaTenancy<HeaderTenantResolver>();
 
 var app = builder.Build();
 app.UseTenantResolution();

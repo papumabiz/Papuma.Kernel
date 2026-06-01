@@ -46,15 +46,11 @@ CREATE INDEX idx_change_feed_tenant ON change_feed (tenant_id, sequence_id);
 ALTER TABLE business_event_log ADD COLUMN tenant_id TEXT NOT NULL;
 CREATE INDEX idx_business_event_tenant ON business_event_log (tenant_id, occurred_at);
 
--- projection_checkpoint: tenant_id hinzufügen
-ALTER TABLE projection_checkpoint DROP CONSTRAINT projection_checkpoint_pkey;
-ALTER TABLE projection_checkpoint ADD COLUMN tenant_id TEXT NOT NULL;
-ALTER TABLE projection_checkpoint ADD PRIMARY KEY (tenant_id, projection_name);
-
--- projection_failures: tenant_id hinzufügen
-ALTER TABLE projection_failures DROP CONSTRAINT projection_failures_pkey;
-ALTER TABLE projection_failures ADD COLUMN tenant_id TEXT NOT NULL;
-ALTER TABLE projection_failures ADD PRIMARY KEY (tenant_id, projection_name, sequence_id);
+-- projection_checkpoint und projection_failures:
+-- Kein tenant_id nötig. Der ProjectionWorker kodiert den Tenant in den
+-- Projection-Namen: "handler_name@tenant_id". Damit bleibt das Schema
+-- einfach und der Primary Key unverändert.
+-- Beispiel: projection_name = "user_read_model@acme-corp"
 
 -- event_outbox: tenant_id hinzufügen
 ALTER TABLE event_outbox ADD COLUMN tenant_id TEXT NOT NULL;

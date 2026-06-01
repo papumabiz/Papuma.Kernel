@@ -14,9 +14,10 @@ public record ChangeRecord(
     int             Version,
     string?         CorrelationId,
     string?         CausationId,
-    string?         ActorId,
+    string          ActorId,
     string          PayloadJson,
-    DateTimeOffset  Timestamp
+    DateTimeOffset  Timestamp,
+    string          TenantId = "default"
 );
 ```
 
@@ -74,9 +75,6 @@ public class ChangeWriterOptions
 // src/Kernel/ChangeFeed/ChangeWriter.cs
 public class ChangeWriter
 {
-    private static readonly Regex ValidNamePattern = new(
-        @"^[A-Za-z][A-Za-z0-9_]{1,100}$", RegexOptions.Compiled);
-
     private readonly ChangeWriterOptions _options;
 
     public ChangeWriter(ChangeWriterOptions? options = null)
@@ -96,7 +94,7 @@ public class ChangeWriter
         string? causationId = null,
         CancellationToken ct = default)
     {
-        // Validierung (Defense in Depth)
+        // Validierung (Defense in Depth) – delegiert an shared InputValidator
         ValidateInputs(entity, entityId, eventType, version, payloadJson, actorId);
 
         await using var cmd = transaction.Connection!.CreateCommand();
@@ -120,33 +118,22 @@ public class ChangeWriter
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    private void ValidateInputs(
+    public void ValidateInputs(
         string entity, string entityId, string eventType,
         int version, string payloadJson, string actorId)
     {
-        if (!ValidNamePattern.IsMatch(entity))
-            throw new ArgumentException(
-                $"Invalid entity name '{entity}'. Must match [A-Za-z][A-Za-z0-9_]{{1,100}}.", nameof(entity));
-
-        if (string.IsNullOrWhiteSpace(entityId) || entityId.Length > 200)
-            throw new ArgumentException(
-                "entityId must not be empty and max 200 characters.", nameof(entityId));
-
-        if (!ValidNamePattern.IsMatch(eventType))
-            throw new ArgumentException(
-                $"Invalid eventType '{eventType}'. Must match [A-Za-z][A-Za-z0-9_]{{2,100}}.", nameof(eventType));
-
-        if (version < 1)
-            throw new ArgumentException("version must be >= 1.", nameof(version));
-
-        if (string.IsNullOrWhiteSpace(actorId) || actorId.Length > 200)
-            throw new ArgumentException(
-                "actorId is required and must not exceed 200 characters.", nameof(actorId));
-
-        if (payloadJson.Length > _options.MaxPayloadSizeBytes)
-            throw new ArgumentException(
-                $"Payload exceeds maximum size of {_options.MaxPayloadSizeBytes} bytes ({payloadJson.Length} bytes).",
-                nameof(payloadJson));
+        // Alle Validierungen delegieren an den shared InputValidator.
+        // Entity und EventType verwenden separate Regex-Patterns:
+        //   Entity:    ^[A-Za-z][A-Za-z0-9_]{1,100}$
+        //   EventType: ^[A-Za-z][A-Za-z0-9_]{2,100}$  (min. 3 Zeichen)
+        // Alle Regex-Patterns sind compiled und time-bounded (100ms Timeout).
+        InputValidator.ValidateEntity(entity);
+        InputValidator.ValidateEntityId(entityId);
+        InputValidator.ValidateEventType(eventType);
+        InputValidator.ValidateVersion(version);
+        InputValidator.ValidateActorId(actorId);
+        // Payload-Größe wird in UTF-8 Bytes gemessen, nicht in Zeichenlänge.
+        InputValidator.ValidatePayloadSize(payloadJson, _options.MaxPayloadSizeBytes);
     }
 }
 ```
