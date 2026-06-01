@@ -24,6 +24,12 @@ CREATE INDEX idx_change_feed_not_redacted  ON change_feed (tenant_id, sequence_i
 CREATE INDEX idx_change_feed_correlation   ON change_feed (correlation_id) WHERE correlation_id IS NOT NULL;
 CREATE INDEX idx_change_feed_actor         ON change_feed (actor_id);
 
+ALTER TABLE change_feed ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_change_feed ON change_feed;
+CREATE POLICY tenant_isolation_change_feed ON change_feed
+    USING (tenant_id = COALESCE(current_setting('app.current_tenant', true), tenant_id))
+    WITH CHECK (tenant_id = COALESCE(current_setting('app.current_tenant', true), tenant_id));
+
 -- projection_checkpoint
 CREATE TABLE projection_checkpoint (
     projection_name  TEXT   PRIMARY KEY,
@@ -64,6 +70,12 @@ CREATE INDEX idx_business_event_occurred_at ON business_event_log (occurred_at);
 CREATE INDEX idx_business_event_entity      ON business_event_log (tenant_id, entity, entity_id);
 CREATE INDEX idx_business_event_actor       ON business_event_log (actor_id);
 
+ALTER TABLE business_event_log ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_business_event_log ON business_event_log;
+CREATE POLICY tenant_isolation_business_event_log ON business_event_log
+    USING (tenant_id = COALESCE(current_setting('app.current_tenant', true), tenant_id))
+    WITH CHECK (tenant_id = COALESCE(current_setting('app.current_tenant', true), tenant_id));
+
 -- event_outbox
 CREATE TABLE event_outbox (
     outbox_id      BIGSERIAL   PRIMARY KEY,
@@ -82,3 +94,9 @@ CREATE TABLE event_outbox (
 );
 
 CREATE INDEX idx_event_outbox_status_retry ON event_outbox (tenant_id, status, next_retry_at);
+
+ALTER TABLE event_outbox ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_event_outbox ON event_outbox;
+CREATE POLICY tenant_isolation_event_outbox ON event_outbox
+    USING (tenant_id = COALESCE(current_setting('app.current_tenant', true), tenant_id))
+    WITH CHECK (tenant_id = COALESCE(current_setting('app.current_tenant', true), tenant_id));
