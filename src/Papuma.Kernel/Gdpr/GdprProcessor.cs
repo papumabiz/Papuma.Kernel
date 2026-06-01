@@ -9,6 +9,7 @@ using Npgsql;
 
 using Papuma.Kernel.ChangeFeed;
 using Papuma.Kernel.Events;
+using Papuma.Kernel.Tenancy;
 
 namespace Papuma.Kernel.Gdpr;
 
@@ -55,7 +56,32 @@ public sealed class GdprProcessor
         string actorId,
         string reason,
         CancellationToken ct = default)
+        => await RedactEntityAsync(
+            TenantContext.Default,
+            entity,
+            entityId,
+            actorId,
+            reason,
+            ct);
+
+    /// <summary>
+    /// Redacts all change feed and business event log entries for a specific entity in one tenant.
+    /// </summary>
+    /// <param name="tenant">The tenant context.</param>
+    /// <param name="entity">The logical entity name.</param>
+    /// <param name="entityId">The entity identifier.</param>
+    /// <param name="actorId">The actor performing the redaction.</param>
+    /// <param name="reason">The documented reason for the redaction.</param>
+    /// <param name="ct">A cancellation token.</param>
+    public async Task<RedactionResult> RedactEntityAsync(
+        TenantContext tenant,
+        string entity,
+        string entityId,
+        string actorId,
+        string reason,
+        CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(tenant);
         ValidateEntityReference(entity, entityId);
 
         if (string.IsNullOrWhiteSpace(actorId))
@@ -77,10 +103,12 @@ public sealed class GdprProcessor
             UPDATE change_feed
             SET payload  = '{"redacted": true}'::jsonb,
                 redacted = TRUE
-            WHERE entity    = @entity
+                        WHERE tenant_id = @tenantId
+                            AND entity    = @entity
               AND entity_id = @entityId
               AND redacted  = FALSE
             """;
+                feedCmd.Parameters.AddWithValue("tenantId", tenant.TenantId);
         feedCmd.Parameters.AddWithValue("entity", entity);
         feedCmd.Parameters.AddWithValue("entityId", entityId);
         var feedAffected = await feedCmd.ExecuteNonQueryAsync(ct);
@@ -91,10 +119,12 @@ public sealed class GdprProcessor
             UPDATE business_event_log
             SET payload  = '{"redacted": true}'::jsonb,
                 redacted = TRUE
-            WHERE entity    = @entity
+                        WHERE tenant_id = @tenantId
+                            AND entity    = @entity
               AND entity_id = @entityId
               AND redacted  = FALSE
             """;
+                belCmd.Parameters.AddWithValue("tenantId", tenant.TenantId);
         belCmd.Parameters.AddWithValue("entity", entity);
         belCmd.Parameters.AddWithValue("entityId", entityId);
         var businessEventsAffected = await belCmd.ExecuteNonQueryAsync(ct);
@@ -111,6 +141,7 @@ public sealed class GdprProcessor
 
         await _businessEventWriter.AppendAsync(
             tx,
+            tenant,
             eventType: "EntityRedacted",
             actorId,
             payloadJson: auditPayload,
@@ -140,7 +171,26 @@ public sealed class GdprProcessor
         string entity,
         string entityId,
         CancellationToken ct = default)
+        => await GetEntityHistoryAsync(
+            TenantContext.Default,
+            entity,
+            entityId,
+            ct);
+
+    /// <summary>
+    /// Returns the stored history for one entity and tenant across change feed and business event log.
+    /// </summary>
+    /// <param name="tenant">The tenant context.</param>
+    /// <param name="entity">The logical entity name.</param>
+    /// <param name="entityId">The entity identifier.</param>
+    /// <param name="ct">A cancellation token.</param>
+    public async Task<EntityHistory> GetEntityHistoryAsync(
+        TenantContext tenant,
+        string entity,
+        string entityId,
+        CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(tenant);
         ValidateEntityReference(entity, entityId);
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
@@ -148,12 +198,14 @@ public sealed class GdprProcessor
         await using var feedCmd = conn.CreateCommand();
         feedCmd.CommandText = """
             SELECT sequence_id, entity, entity_id, event_type, version,
-                   correlation_id, causation_id, actor_id, payload::text, timestamp
+                                     correlation_id, causation_id, actor_id, payload::text, timestamp, tenant_id
             FROM change_feed
-            WHERE entity    = @entity
+                        WHERE tenant_id = @tenantId
+                            AND entity    = @entity
               AND entity_id = @entityId
             ORDER BY sequence_id
             """;
+                feedCmd.Parameters.AddWithValue("tenantId", tenant.TenantId);
         feedCmd.Parameters.AddWithValue("entity", entity);
         feedCmd.Parameters.AddWithValue("entityId", entityId);
 
@@ -172,7 +224,8 @@ public sealed class GdprProcessor
                     CausationId: feedReader.IsDBNull(6) ? null : feedReader.GetString(6),
                     ActorId: feedReader.GetString(7),
                     PayloadJson: feedReader.GetString(8),
-                    Timestamp: feedReader.GetFieldValue<DateTimeOffset>(9)));
+                    Timestamp: feedReader.GetFieldValue<DateTimeOffset>(9),
+                    TenantId: feedReader.GetString(10)));
             }
         }
 
@@ -180,10 +233,12 @@ public sealed class GdprProcessor
         belCmd.CommandText = """
             SELECT event_id, event_type, actor_id, payload::text, occurred_at
             FROM business_event_log
-            WHERE entity    = @entity
+                        WHERE tenant_id = @tenantId
+                            AND entity    = @entity
               AND entity_id = @entityId
             ORDER BY occurred_at
             """;
+                belCmd.Parameters.AddWithValue("tenantId", tenant.TenantId);
         belCmd.Parameters.AddWithValue("entity", entity);
         belCmd.Parameters.AddWithValue("entityId", entityId);
 

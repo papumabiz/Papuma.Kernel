@@ -7,6 +7,7 @@ using Npgsql;
 
 using Papuma.Kernel.Events;
 using Papuma.Kernel.Gdpr;
+using Papuma.Kernel.Tenancy;
 
 namespace Papuma.Kernel.Tests.Gdpr;
 
@@ -84,6 +85,32 @@ public class GdprProcessorTests
             entityId: " "));
 
         Assert.Equal("entityId", exception.ParamName);
+    }
+
+    [Fact]
+    public async Task RedactEntityAsync_ThrowsForNullTenant()
+    {
+        using var dataSource = CreateDataSource();
+        var sut = CreateSut(dataSource);
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() => sut.RedactEntityAsync(
+            tenant: null!,
+            entity: "User",
+            entityId: "user-1",
+            actorId: "admin:1",
+            reason: "GDPR request"));
+    }
+
+    [Fact]
+    public async Task GetEntityHistoryAsync_ThrowsForNullTenant()
+    {
+        using var dataSource = CreateDataSource();
+        var sut = CreateSut(dataSource);
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() => sut.GetEntityHistoryAsync(
+            tenant: null!,
+            entity: "User",
+            entityId: "user-1"));
     }
 
     private static GdprProcessor CreateSut(NpgsqlDataSource dataSource) =>

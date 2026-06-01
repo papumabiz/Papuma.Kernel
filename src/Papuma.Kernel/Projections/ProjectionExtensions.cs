@@ -7,6 +7,8 @@ using Microsoft.Extensions.Logging;
 
 using Npgsql;
 
+using Papuma.Kernel.Tenancy;
+
 namespace Papuma.Kernel.Projections;
 
 /// <summary>
@@ -23,7 +25,8 @@ public static class ProjectionExtensions
     /// <returns>The original service collection.</returns>
     public static IServiceCollection AddProjection<THandler>(
         this IServiceCollection services,
-        Action<ProjectionWorkerOptions>? configure = null)
+        Action<ProjectionWorkerOptions>? configure = null,
+        TenantContext? tenant = null)
         where THandler : class, IProjectionHandler
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -38,7 +41,8 @@ public static class ProjectionExtensions
                 sp.GetRequiredService<THandler>(),
                 sp.GetRequiredService<NpgsqlDataSource>(),
                 sp.GetRequiredService<ILogger<ProjectionWorker>>(),
-                options);
+                options,
+                tenant);
         });
 
         return services;

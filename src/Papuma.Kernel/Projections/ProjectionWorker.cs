@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Npgsql;
 
 using Papuma.Kernel.ChangeFeed;
+using Papuma.Kernel.Tenancy;
 
 namespace Papuma.Kernel.Projections;
 
@@ -21,6 +22,8 @@ public sealed class ProjectionWorker : BackgroundService
     private readonly NpgsqlDataSource _dataSource;
     private readonly ILogger<ProjectionWorker> _logger;
     private readonly ProjectionWorkerOptions _options;
+    private readonly TenantContext? _tenant;
+    private readonly string _projectionName;
     private readonly Channel<ReplayRequest> _replayChannel = Channel.CreateBounded<ReplayRequest>(1);
 
     /// <summary>
@@ -34,7 +37,8 @@ public sealed class ProjectionWorker : BackgroundService
         IProjectionHandler handler,
         NpgsqlDataSource dataSource,
         ILogger<ProjectionWorker> logger,
-        ProjectionWorkerOptions? options = null)
+        ProjectionWorkerOptions? options = null,
+        TenantContext? tenant = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(dataSource);
@@ -44,6 +48,8 @@ public sealed class ProjectionWorker : BackgroundService
         _dataSource = dataSource;
         _logger = logger;
         _options = options ?? new ProjectionWorkerOptions();
+        _tenant = tenant;
+        _projectionName = tenant is null ? handler.Name : $"{handler.Name}@{tenant.TenantId}";
 
         ValidateOptions(_options);
     }
@@ -68,7 +74,7 @@ public sealed class ProjectionWorker : BackgroundService
             {
                 _logger.LogInformation(
                     "ProjectionWorker [{Name}] replay requested, resetting projection state.",
-                    _handler.Name);
+                    _projectionName);
 
                 await ResetProjectionStateAsync(stoppingToken);
 
@@ -97,7 +103,7 @@ public sealed class ProjectionWorker : BackgroundService
             }
         }
 
-        _logger.LogInformation("ProjectionWorker [{Name}] stopped.", _handler.Name);
+        _logger.LogInformation("ProjectionWorker [{Name}] stopped.", _projectionName);
     }
 
     private async Task<int> ProcessBatchAsync(CancellationToken ct)
@@ -145,7 +151,7 @@ public sealed class ProjectionWorker : BackgroundService
             FROM projection_checkpoint
             WHERE projection_name = @name
             """;
-        cmd.Parameters.AddWithValue("name", _handler.Name);
+        cmd.Parameters.AddWithValue("name", _projectionName);
 
         var result = await cmd.ExecuteScalarAsync(ct);
         return result is long id ? id : 0L;
@@ -158,10 +164,11 @@ public sealed class ProjectionWorker : BackgroundService
     {
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT sequence_id, entity, entity_id, event_type, version,
-                   correlation_id, causation_id, actor_id, payload::text, timestamp
+             SELECT sequence_id, tenant_id, entity, entity_id, event_type, version,
+                 correlation_id, causation_id, actor_id, payload::text, timestamp
             FROM change_feed
             WHERE sequence_id > @lastSeen
+            AND (@tenantId IS NULL OR tenant_id = @tenantId)
               AND redacted = FALSE
               AND event_type = ANY(@eventTypes)
               AND xmin::text::bigint < pg_snapshot_xmin(pg_current_snapshot())::text::bigint
@@ -179,7 +186,8 @@ public sealed class ProjectionWorker : BackgroundService
             """;
 
         cmd.Parameters.AddWithValue("lastSeen", fromSequenceId);
-        cmd.Parameters.AddWithValue("name", _handler.Name);
+    cmd.Parameters.AddWithValue("tenantId", (object?)_tenant?.TenantId ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("name", _projectionName);
         cmd.Parameters.AddWithValue("maxAttempts", _options.MaxAttemptsPerEvent);
         cmd.Parameters.AddWithValue("eventTypes", _handler.EventTypes.ToArray());
         cmd.Parameters.AddWithValue("batchSize", _options.BatchSize);
@@ -190,15 +198,16 @@ public sealed class ProjectionWorker : BackgroundService
         {
             records.Add(new ChangeRecord(
                 SequenceId: reader.GetInt64(0),
-                Entity: reader.GetString(1),
-                EntityId: reader.GetString(2),
-                EventType: reader.GetString(3),
-                Version: reader.GetInt32(4),
-                CorrelationId: reader.IsDBNull(5) ? null : reader.GetString(5),
-                CausationId: reader.IsDBNull(6) ? null : reader.GetString(6),
-                ActorId: reader.GetString(7),
-                PayloadJson: reader.GetString(8),
-                Timestamp: reader.GetFieldValue<DateTimeOffset>(9)));
+                Entity: reader.GetString(2),
+                EntityId: reader.GetString(3),
+                EventType: reader.GetString(4),
+                Version: reader.GetInt32(5),
+                CorrelationId: reader.IsDBNull(6) ? null : reader.GetString(6),
+                CausationId: reader.IsDBNull(7) ? null : reader.GetString(7),
+                ActorId: reader.GetString(8),
+                PayloadJson: reader.GetString(9),
+                Timestamp: reader.GetFieldValue<DateTimeOffset>(10),
+                TenantId: reader.GetString(1)));
         }
 
         return records;
@@ -218,7 +227,7 @@ public sealed class ProjectionWorker : BackgroundService
             ON CONFLICT (projection_name)
             DO UPDATE SET last_sequence_id = @sequenceId, updated_at = NOW()
             """;
-        cmd.Parameters.AddWithValue("name", _handler.Name);
+        cmd.Parameters.AddWithValue("name", _projectionName);
         cmd.Parameters.AddWithValue("sequenceId", sequenceId);
 
         await cmd.ExecuteNonQueryAsync(ct);
@@ -237,7 +246,7 @@ public sealed class ProjectionWorker : BackgroundService
             WHERE projection_name = @name
               AND sequence_id = @sequenceId
             """;
-        cmd.Parameters.AddWithValue("name", _handler.Name);
+                cmd.Parameters.AddWithValue("name", _projectionName);
         cmd.Parameters.AddWithValue("sequenceId", sequenceId);
 
         await cmd.ExecuteNonQueryAsync(ct);
@@ -271,7 +280,7 @@ public sealed class ProjectionWorker : BackgroundService
             RETURNING attempts
             """;
 
-        cmd.Parameters.AddWithValue("name", _handler.Name);
+        cmd.Parameters.AddWithValue("name", _projectionName);
         cmd.Parameters.AddWithValue("sequenceId", change.SequenceId);
         cmd.Parameters.AddWithValue("eventType", change.EventType);
         cmd.Parameters.AddWithValue("error", ex.ToString());
@@ -296,7 +305,7 @@ public sealed class ProjectionWorker : BackgroundService
                 ON CONFLICT (projection_name)
                 DO UPDATE SET last_sequence_id = 0, updated_at = NOW()
                 """;
-            checkpointCmd.Parameters.AddWithValue("name", _handler.Name);
+            checkpointCmd.Parameters.AddWithValue("name", _projectionName);
             await checkpointCmd.ExecuteNonQueryAsync(ct);
         }
 
@@ -307,7 +316,7 @@ public sealed class ProjectionWorker : BackgroundService
                 DELETE FROM projection_failures
                 WHERE projection_name = @name
                 """;
-            failuresCmd.Parameters.AddWithValue("name", _handler.Name);
+            failuresCmd.Parameters.AddWithValue("name", _projectionName);
             await failuresCmd.ExecuteNonQueryAsync(ct);
         }
 

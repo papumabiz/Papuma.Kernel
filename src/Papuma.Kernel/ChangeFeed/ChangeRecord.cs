@@ -46,4 +46,8 @@ public sealed record ChangeRecord(
     /// <summary>
     /// Gets the timestamp at which the change was recorded.
     /// </summary>
-    DateTimeOffset Timestamp);
+    DateTimeOffset Timestamp,
+    /// <summary>
+    /// Gets the tenant identifier associated with the change.
+    /// </summary>
+    string TenantId = "default");

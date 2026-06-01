@@ -6,6 +6,8 @@ using System.Text.RegularExpressions;
 
 using Npgsql;
 
+using Papuma.Kernel.Tenancy;
+
 namespace Papuma.Kernel.ChangeFeed;
 
 /// <summary>
@@ -58,20 +60,63 @@ public sealed class ChangeWriter
         string? correlationId = null,
         string? causationId = null,
         CancellationToken ct = default)
+        => await AppendAsync(
+            transaction,
+            TenantContext.Default,
+            entity,
+            entityId,
+            eventType,
+            version,
+            payloadJson,
+            actorId,
+            correlationId,
+            causationId,
+            ct);
+
+    /// <summary>
+    /// Appends a new tenant-scoped change feed record to the current transaction.
+    /// </summary>
+    /// <param name="transaction">The ambient PostgreSQL transaction.</param>
+    /// <param name="tenant">The tenant context for the record.</param>
+    /// <param name="entity">The logical entity name that produced the change.</param>
+    /// <param name="entityId">The entity identifier within its logical namespace.</param>
+    /// <param name="eventType">The event type that describes the change.</param>
+    /// <param name="version">The aggregate version associated with the change.</param>
+    /// <param name="payloadJson">The JSON payload to persist.</param>
+    /// <param name="actorId">The actor that caused the change.</param>
+    /// <param name="correlationId">Optional correlation identifier for distributed tracing.</param>
+    /// <param name="causationId">Optional causation identifier pointing to the upstream event.</param>
+    /// <param name="ct">A cancellation token.</param>
+    public async Task AppendAsync(
+        NpgsqlTransaction transaction,
+        TenantContext tenant,
+        string entity,
+        string entityId,
+        string eventType,
+        int version,
+        string payloadJson,
+        string actorId,
+        string? correlationId = null,
+        string? causationId = null,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
+        ArgumentNullException.ThrowIfNull(tenant);
 
         ValidateInputs(entity, entityId, eventType, version, payloadJson, actorId);
+
+        await SetTenantOnConnectionAsync(transaction.Connection!, tenant.TenantId, ct);
 
         await using var cmd = transaction.Connection!.CreateCommand();
         cmd.Transaction = transaction;
         cmd.CommandText = """
             INSERT INTO change_feed
-                (entity, entity_id, event_type, version, correlation_id, causation_id, actor_id, payload)
+                (tenant_id, entity, entity_id, event_type, version, correlation_id, causation_id, actor_id, payload)
             VALUES
-                (@entity, @entityId, @eventType, @version, @correlationId, @causationId, @actorId, @payload::jsonb)
+                (@tenantId, @entity, @entityId, @eventType, @version, @correlationId, @causationId, @actorId, @payload::jsonb)
             """;
 
+        cmd.Parameters.AddWithValue("tenantId", tenant.TenantId);
         cmd.Parameters.AddWithValue("entity", entity);
         cmd.Parameters.AddWithValue("entityId", entityId);
         cmd.Parameters.AddWithValue("eventType", eventType);
@@ -81,6 +126,17 @@ public sealed class ChangeWriter
         cmd.Parameters.AddWithValue("actorId", actorId);
         cmd.Parameters.AddWithValue("payload", payloadJson);
 
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task SetTenantOnConnectionAsync(
+        NpgsqlConnection connection,
+        string tenantId,
+        CancellationToken ct)
+    {
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SET LOCAL app.current_tenant = @tenantId";
+        cmd.Parameters.AddWithValue("tenantId", tenantId);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
