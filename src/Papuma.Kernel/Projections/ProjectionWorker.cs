@@ -29,6 +29,11 @@ public sealed class ProjectionWorker : BackgroundService
     private readonly Channel<ReplayRequest> _replayChannel = Channel.CreateBounded<ReplayRequest>(1);
 
     /// <summary>
+    /// Gets the unique projection name used for checkpointing and failure tracking.
+    /// </summary>
+    public string ProjectionName => _projectionName;
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="ProjectionWorker"/> class.
     /// </summary>
     /// <param name="handler">The projection handler that applies change feed records.</param>

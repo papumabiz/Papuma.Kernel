@@ -22,6 +22,7 @@ public static class ProjectionExtensions
     /// <typeparam name="THandler">The projection handler type.</typeparam>
     /// <param name="services">The service collection to add the projection to.</param>
     /// <param name="configure">Optional worker configuration callback.</param>
+    /// <param name="tenant">Optional tenant scope for the worker.</param>
     /// <returns>The original service collection.</returns>
     public static IServiceCollection AddProjection<THandler>(
         this IServiceCollection services,
@@ -43,6 +44,28 @@ public static class ProjectionExtensions
                 sp.GetRequiredService<ILogger<ProjectionWorker>>(),
                 options,
                 tenant);
+        });
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers a <see cref="ReplayService"/> that automatically discovers all
+    /// <see cref="ProjectionWorker"/> instances registered as <see cref="IHostedService"/>.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <returns>The original service collection for chaining.</returns>
+    public static IServiceCollection AddReplayService(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddSingleton<ReplayService>(sp =>
+        {
+            var workers = sp.GetServices<IHostedService>()
+                .OfType<ProjectionWorker>()
+                .ToDictionary(w => w.ProjectionName);
+
+            return new ReplayService(workers);
         });
 
         return services;
