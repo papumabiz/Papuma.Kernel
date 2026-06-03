@@ -17,9 +17,15 @@ public record ChangeRecord(
     string          ActorId,
     string          PayloadJson,
     DateTimeOffset  Timestamp,
-    string          TenantId = "default"
+    ScopeType       Scope,
+    string?         TenantId
 );
 ```
+
+Hinweis zum aktuellen Stand:
+
+- `Scope` ist explizit (`Platform` oder `Tenant`).
+- `TenantId` ist nur bei `Scope = Tenant` gesetzt.
 
 `DateTimeOffset` passt besser zu `TIMESTAMPTZ` als `DateTime`, weil Offset/UTC-Semantik explizit bleibt.
 
@@ -84,6 +90,7 @@ public class ChangeWriter
 
     public async Task AppendAsync(
         NpgsqlTransaction transaction,
+        ScopeContext scope,
         string entity,
         string entityId,
         string eventType,
@@ -97,15 +104,19 @@ public class ChangeWriter
         // Validierung (Defense in Depth) – delegiert an shared InputValidator
         ValidateInputs(entity, entityId, eventType, version, payloadJson, actorId);
 
+        await SetScopeOnConnectionAsync(transaction.Connection!, scope, ct);
+
         await using var cmd = transaction.Connection!.CreateCommand();
         cmd.Transaction = transaction;
         cmd.CommandText = """
             INSERT INTO change_feed
-                (entity, entity_id, event_type, version, correlation_id, causation_id, actor_id, payload)
+                (scope, tenant_id, entity, entity_id, event_type, version, correlation_id, causation_id, actor_id, payload)
             VALUES
-                (@entity, @entityId, @eventType, @version, @correlationId, @causationId, @actorId, @payload::jsonb)
+                (@scope, @tenantId, @entity, @entityId, @eventType, @version, @correlationId, @causationId, @actorId, @payload::jsonb)
             """;
 
+        cmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+        cmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("entity",        entity);
         cmd.Parameters.AddWithValue("entityId",      entityId);
         cmd.Parameters.AddWithValue("eventType",     eventType);
@@ -134,6 +145,26 @@ public class ChangeWriter
         InputValidator.ValidateActorId(actorId);
         // Payload-Größe wird in UTF-8 Bytes gemessen, nicht in Zeichenlänge.
         InputValidator.ValidatePayloadSize(payloadJson, _options.MaxPayloadSizeBytes);
+    }
+
+    private static async Task SetScopeOnConnectionAsync(
+        NpgsqlConnection connection,
+        ScopeContext scope,
+        CancellationToken ct)
+    {
+        await using (var scopeCmd = connection.CreateCommand())
+        {
+            scopeCmd.CommandText = "SET LOCAL app.current_scope = @scope";
+            scopeCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+            await scopeCmd.ExecuteNonQueryAsync(ct);
+        }
+
+        await using (var tenantCmd = connection.CreateCommand())
+        {
+            tenantCmd.CommandText = "SET LOCAL app.current_tenant = @tenantId";
+            tenantCmd.Parameters.AddWithValue("tenantId", scope.TenantId ?? string.Empty);
+            await tenantCmd.ExecuteNonQueryAsync(ct);
+        }
     }
 }
 ```
@@ -307,6 +338,7 @@ public class UpdateUserEmailHandler
 
         await _changeWriter.AppendAsync(
             transaction:   tx,
+            scope:         ScopeContext.Tenant("acme"),
             entity:        "User",
             entityId:      userId.ToString(),
             eventType:     "UserEmailUpdated",
@@ -399,11 +431,12 @@ public class BusinessEventWriter
 {
     public async Task<Guid> AppendAsync(
         NpgsqlTransaction transaction,
+        ScopeContext scope,
         string eventType,
         string actorId,
+        string payloadJson,
         string? entity = null,
         string? entityId = null,
-        string payloadJson,
         string? correlationId = null,
         string? causationId = null,
         CancellationToken ct = default)
@@ -414,14 +447,16 @@ public class BusinessEventWriter
         cmd.Transaction = transaction;
         cmd.CommandText = """
             INSERT INTO business_event_log
-                (event_id, event_type, entity, entity_id, actor_id,
+                (event_id, scope, tenant_id, event_type, entity, entity_id, actor_id,
                  correlation_id, causation_id, payload)
             VALUES
-                (@eventId, @eventType, @entity, @entityId, @actorId,
+                (@eventId, @scope, @tenantId, @eventType, @entity, @entityId, @actorId,
                  @correlationId, @causationId, @payload::jsonb)
             """;
 
         cmd.Parameters.AddWithValue("eventId", eventId);
+        cmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+        cmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("eventType", eventType);
         cmd.Parameters.AddWithValue("entity", (object?)entity ?? DBNull.Value);
         cmd.Parameters.AddWithValue("entityId", (object?)entityId ?? DBNull.Value);
@@ -450,6 +485,7 @@ public class OutboxWriter
 {
     public async Task EnqueueAsync(
         NpgsqlTransaction transaction,
+        ScopeContext scope,
         Guid eventId,
         string eventType,
         string payloadJson,
@@ -458,10 +494,12 @@ public class OutboxWriter
         await using var cmd = transaction.Connection!.CreateCommand();
         cmd.Transaction = transaction;
         cmd.CommandText = """
-            INSERT INTO event_outbox (event_id, event_type, payload)
-            VALUES (@eventId, @eventType, @payload::jsonb)
+            INSERT INTO event_outbox (scope, tenant_id, event_id, event_type, payload)
+            VALUES (@scope, @tenantId, @eventId, @eventType, @payload::jsonb)
             """;
 
+        cmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+        cmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("eventId", eventId);
         cmd.Parameters.AddWithValue("eventType", eventType);
         cmd.Parameters.AddWithValue("payload", payloadJson);
@@ -487,6 +525,7 @@ public async Task HandleLoginAsync(Guid userId, string ip, string actorId, Cance
 
     var eventId = await _businessEventWriter.AppendAsync(
         transaction: tx,
+        scope: ScopeContext.Tenant("acme"),
         eventType: "UserLoggedIn",
         actorId: actorId,              // Pflicht: wer loggt sich ein?
         entity: "User",                // konsistent mit change_feed
@@ -496,6 +535,7 @@ public async Task HandleLoginAsync(Guid userId, string ip, string actorId, Cance
 
     await _outboxWriter.EnqueueAsync(
         transaction: tx,
+        scope: ScopeContext.Tenant("acme"),
         eventId: eventId,
         eventType: "UserLoggedIn",
         payloadJson: payload,

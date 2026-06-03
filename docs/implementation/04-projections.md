@@ -79,6 +79,11 @@ Der Worker läuft als `BackgroundService` und verarbeitet Events mit **at-least-
 
 Darum müssen Handler idempotent sein (siehe unten).
 
+Aktueller Stand:
+
+- Der Worker kann optional mit einem `ScopeContext` betrieben werden.
+- Der Projection-Name wird scope-spezifisch gebildet (z.B. `user_read_model@Tenant:acme` oder `user_read_model@Platform`).
+
 ```csharp
 // src/Kernel/Projections/ProjectionWorker.cs
 public class ProjectionWorker : BackgroundService
@@ -207,10 +212,18 @@ public class ProjectionWorker : BackgroundService
     {
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT sequence_id, entity, entity_id, event_type, version,
+            SELECT sequence_id, scope, tenant_id, entity, entity_id, event_type, version,
                    correlation_id, causation_id, actor_id, payload::text, timestamp
             FROM change_feed
             WHERE sequence_id > @lastSeen
+              AND (@scope IS NULL OR scope = @scope)
+              AND (
+                  @scope IS NULL
+                  OR
+                  @scope <> 'Tenant'
+                  OR
+                  tenant_id = @tenantId
+              )
               AND redacted = FALSE
               AND event_type = ANY(@eventTypes)
               AND xmin::text::bigint < pg_snapshot_xmin(pg_current_snapshot())::text::bigint
@@ -226,6 +239,8 @@ public class ProjectionWorker : BackgroundService
             """;
 
         cmd.Parameters.AddWithValue("lastSeen", fromSequenceId);
+    cmd.Parameters.AddWithValue("scope", (object?)_scope?.Scope.ToString() ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("tenantId", (object?)_scope?.TenantId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("name", _handler.Name);
         cmd.Parameters.AddWithValue("maxAttempts", _options.MaxAttemptsPerEvent);
         cmd.Parameters.AddWithValue("eventTypes", _handler.EventTypes.ToArray());
@@ -237,15 +252,17 @@ public class ProjectionWorker : BackgroundService
         {
             records.Add(new ChangeRecord(
                 SequenceId:    reader.GetInt64(0),
-                Entity:        reader.GetString(1),
-                EntityId:      reader.GetString(2),
-                EventType:     reader.GetString(3),
-                Version:       reader.GetInt32(4),
-                CorrelationId: reader.IsDBNull(5) ? null : reader.GetString(5),
-                CausationId:   reader.IsDBNull(6) ? null : reader.GetString(6),
-                ActorId:       reader.IsDBNull(7) ? null : reader.GetString(7),
-                PayloadJson:   reader.GetString(8),
-                Timestamp:     reader.GetFieldValue<DateTimeOffset>(9)
+                Entity:        reader.GetString(3),
+                EntityId:      reader.GetString(4),
+                EventType:     reader.GetString(5),
+                Version:       reader.GetInt32(6),
+                CorrelationId: reader.IsDBNull(7) ? null : reader.GetString(7),
+                CausationId:   reader.IsDBNull(8) ? null : reader.GetString(8),
+                ActorId:       reader.GetString(9),
+                PayloadJson:   reader.GetString(10),
+                Timestamp:     reader.GetFieldValue<DateTimeOffset>(11),
+                Scope:         Enum.Parse<ScopeType>(reader.GetString(1), ignoreCase: false),
+                TenantId:      reader.IsDBNull(2) ? null : reader.GetString(2)
             ));
         }
 
@@ -465,7 +482,8 @@ public static class ProjectionExtensions
 {
     public static IServiceCollection AddProjection<THandler>(
         this IServiceCollection services,
-        Action<ProjectionWorkerOptions>? configure = null)
+        Action<ProjectionWorkerOptions>? configure = null,
+        ScopeContext? scope = null)
         where THandler : class, IProjectionHandler
     {
         services.AddSingleton<THandler>();
@@ -478,7 +496,8 @@ public static class ProjectionExtensions
                 sp.GetRequiredService<THandler>(),
                 sp.GetRequiredService<NpgsqlDataSource>(),
                 sp.GetRequiredService<ILogger<ProjectionWorker>>(),
-                options
+                options,
+                scope
             );
         });
 

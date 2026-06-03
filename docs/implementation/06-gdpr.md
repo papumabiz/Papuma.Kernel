@@ -35,6 +35,12 @@ WHERE sequence_id > @lastSeen
   AND redacted = FALSE
 ```
 
+Mit Scope-Modell gilt zusaetzlich:
+
+- `scope` ist explizit (`Platform` oder `Tenant`).
+- `tenant_id` ist nur bei `Scope = Tenant` gesetzt.
+- GDPR-Operationen laufen immer in einem expliziten `ScopeContext`.
+
 ---
 
 ## Der `GdprProcessor`
@@ -76,12 +82,15 @@ public class GdprProcessor
     /// Both tables are redacted in ONE transaction. The redaction itself is logged as a Business Event.
     /// </summary>
     public async Task<RedactionResult> RedactEntityAsync(
+        ScopeContext scope,
         string entity,
         string entityId,
         string actorId,
         string reason,
         CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+
         if (string.IsNullOrWhiteSpace(actorId))
             throw new ArgumentException("actorId is required for GDPR redaction.", nameof(actorId));
         if (string.IsNullOrWhiteSpace(reason))
@@ -97,10 +106,18 @@ public class GdprProcessor
             UPDATE change_feed
             SET payload  = '{"redacted": true}'::jsonb,
                 redacted = TRUE
-            WHERE entity    = @entity
+                        WHERE scope     = @scope
+                            AND (
+                                     (@tenantId IS NULL AND tenant_id IS NULL)
+                                     OR
+                                     tenant_id = @tenantId
+                            )
+                            AND entity    = @entity
               AND entity_id = @entityId
               AND redacted  = FALSE
             """;
+                feedCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+                feedCmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
         feedCmd.Parameters.AddWithValue("entity", entity);
         feedCmd.Parameters.AddWithValue("entityId", entityId);
         var feedAffected = await feedCmd.ExecuteNonQueryAsync(ct);
@@ -112,10 +129,18 @@ public class GdprProcessor
             UPDATE business_event_log
             SET payload  = '{"redacted": true}'::jsonb,
                 redacted = TRUE
-            WHERE entity    = @entity
+                        WHERE scope     = @scope
+                            AND (
+                                     (@tenantId IS NULL AND tenant_id IS NULL)
+                                     OR
+                                     tenant_id = @tenantId
+                            )
+                            AND entity    = @entity
               AND entity_id = @entityId
               AND redacted  = FALSE
             """;
+                belCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+                belCmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
         belCmd.Parameters.AddWithValue("entity", entity);
         belCmd.Parameters.AddWithValue("entityId", entityId);
         var belAffected = await belCmd.ExecuteNonQueryAsync(ct);
@@ -133,6 +158,7 @@ public class GdprProcessor
 
         await _businessEventWriter.AppendAsync(
             transaction: tx,
+            scope: scope,
             eventType: "EntityRedacted",
             actorId: actorId,
             payloadJson: auditPayload,
@@ -153,22 +179,33 @@ public class GdprProcessor
     /// Includes both Change Feed and Business Event Log entries.
     /// </summary>
     public async Task<EntityHistory> GetEntityHistoryAsync(
+        ScopeContext scope,
         string entity,
         string entityId,
         CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
 
         // Change Feed History
         await using var feedCmd = conn.CreateCommand();
         feedCmd.CommandText = """
-            SELECT sequence_id, entity, entity_id, event_type, version,
-                   correlation_id, causation_id, actor_id, payload::text, timestamp
+             SELECT sequence_id, entity, entity_id, event_type, version,
+                 correlation_id, causation_id, actor_id, payload::text, timestamp, scope, tenant_id
             FROM change_feed
-            WHERE entity    = @entity
+             WHERE scope     = @scope
+            AND (
+                 (@tenantId IS NULL AND tenant_id IS NULL)
+                 OR
+                 tenant_id = @tenantId
+            )
+            AND entity    = @entity
               AND entity_id = @entityId
             ORDER BY sequence_id
             """;
+         feedCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+         feedCmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
         feedCmd.Parameters.AddWithValue("entity", entity);
         feedCmd.Parameters.AddWithValue("entityId", entityId);
 
@@ -186,19 +223,29 @@ public class GdprProcessor
                 CausationId:   feedReader.IsDBNull(6) ? null : feedReader.GetString(6),
                 ActorId:       feedReader.GetString(7),
                 PayloadJson:   feedReader.GetString(8),
-                Timestamp:     feedReader.GetFieldValue<DateTimeOffset>(9)
+                Timestamp:     feedReader.GetFieldValue<DateTimeOffset>(9),
+                Scope:         Enum.Parse<ScopeType>(feedReader.GetString(10), ignoreCase: false),
+                TenantId:      feedReader.IsDBNull(11) ? null : feedReader.GetString(11)
             ));
         }
 
         // Business Event Log History
         await using var belCmd = conn.CreateCommand();
         belCmd.CommandText = """
-            SELECT event_id, event_type, actor_id, payload::text, occurred_at
+                        SELECT event_id, event_type, actor_id, payload::text, occurred_at, scope, tenant_id
             FROM business_event_log
-            WHERE entity    = @entity
+                        WHERE scope     = @scope
+                            AND (
+                                     (@tenantId IS NULL AND tenant_id IS NULL)
+                                     OR
+                                     tenant_id = @tenantId
+                            )
+                            AND entity    = @entity
               AND entity_id = @entityId
             ORDER BY occurred_at
             """;
+                belCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+                belCmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
         belCmd.Parameters.AddWithValue("entity", entity);
         belCmd.Parameters.AddWithValue("entityId", entityId);
 
@@ -211,7 +258,9 @@ public class GdprProcessor
                 EventType:   belReader.GetString(1),
                 ActorId:     belReader.GetString(2),
                 PayloadJson: belReader.GetString(3),
-                OccurredAt:  belReader.GetFieldValue<DateTimeOffset>(4)
+                OccurredAt:  belReader.GetFieldValue<DateTimeOffset>(4),
+                Scope:       Enum.Parse<ScopeType>(belReader.GetString(5), ignoreCase: false),
+                TenantId:    belReader.IsDBNull(6) ? null : belReader.GetString(6)
             ));
         }
 
@@ -221,7 +270,14 @@ public class GdprProcessor
 
 // Ergebnis-Typen
 public record RedactionResult(int FeedEventsRedacted, int BusinessEventsRedacted);
-public record BusinessEventRecord(Guid EventId, string EventType, string ActorId, string PayloadJson, DateTimeOffset OccurredAt);
+public record BusinessEventRecord(
+    Guid EventId,
+    string EventType,
+    string ActorId,
+    string PayloadJson,
+    DateTimeOffset OccurredAt,
+    ScopeType Scope,
+    string? TenantId);
 public record EntityHistory(List<ChangeRecord> ChangeRecords, List<BusinessEventRecord> BusinessEvents);
 ```
 
@@ -243,6 +299,7 @@ public record EntityHistory(List<ChangeRecord> ChangeRecords, List<BusinessEvent
 ```csharp
 // Wenn ein User die Löschung beantragt:
 var result = await gdprProcessor.RedactEntityAsync(
+    scope:   ScopeContext.Tenant("acme"),
     entity:   "User",
     entityId: userId.ToString(),
     actorId:  "admin:current-admin-id",       // Pflicht: wer führt die Löschung durch?
@@ -263,7 +320,11 @@ Nach der Redaktion:
 ### Art. 15 – Recht auf Auskunft
 
 ```csharp
-var history = await gdprProcessor.GetEntityHistoryAsync("User", userId.ToString(), ct);
+var history = await gdprProcessor.GetEntityHistoryAsync(
+    ScopeContext.Tenant("acme"),
+    "User",
+    userId.ToString(),
+    ct);
 // history.ChangeRecords = alle Change-Feed-Einträge (inkl. redacted)
 // history.BusinessEvents = alle Business-Event-Log-Einträge (inkl. redacted)
 ```

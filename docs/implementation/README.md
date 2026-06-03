@@ -82,7 +82,7 @@ Diese Trennung verhindert semantische Vermischung und macht das System fuer Audi
 - `05-versionierung.md`: Phase 3 (Versioning)
 - `06-gdpr.md`: Phase 1 (Grundlagen) + Phase 3/4 (Compliance-Härtung)
 - `07-projektstruktur.md`: Gesamt-Roadmap und Betriebskonventionen
-- `08-multi-tenancy.md`: Phase 1 (Shared Database + RLS) + Phase 3+ (Database-per-Tenant)
+- `08-multi-tenancy.md`: Betriebsstrategien fuer Shared Database und Database-per-tenant (auf Basis des Scope-Modells)
 - `09-scope-model.md`: Zielmodell fuer klare Trennung von Platform- und Tenant-Daten
 
 ## Der wichtigste Satz dieses Systems
