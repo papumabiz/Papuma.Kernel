@@ -3,6 +3,7 @@
 
 using Papuma.Kernel.ChangeFeed;
 using Papuma.Kernel.Projections;
+using Papuma.Kernel.Tenancy;
 
 namespace Papuma.Kernel.Tests.Projections;
 
@@ -23,7 +24,9 @@ public class ProjectionRegistryTests
             null,
             "user:123",
             "{\"Value\":\"alice@example.com\"}",
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            ScopeType.Tenant,
+            "acme");
 
         registry.Register("UserEmailUpdated", handler);
 
@@ -47,7 +50,9 @@ public class ProjectionRegistryTests
             null,
             "user:123",
             "{}",
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            ScopeType.Tenant,
+            "acme");
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => registry.DispatchAsync(record));
 

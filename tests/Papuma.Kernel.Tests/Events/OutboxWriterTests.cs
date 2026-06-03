@@ -2,6 +2,7 @@
 // Licensed under the MIT License. See LICENSE in the repository root for details.
 
 using Papuma.Kernel.Events;
+using Papuma.Kernel.Tenancy;
 
 namespace Papuma.Kernel.Tests.Events;
 
@@ -14,6 +15,7 @@ public class OutboxWriterTests
     {
         await Assert.ThrowsAsync<ArgumentNullException>(() => _sut.EnqueueAsync(
             transaction: null!,
+            scope: ScopeContext.Tenant("acme"),
             eventId: Guid.NewGuid(),
             eventType: "UserLoggedIn",
             payloadJson: "{}"));
@@ -27,6 +29,7 @@ public class OutboxWriterTests
     {
         await Assert.ThrowsAsync<ArgumentException>(() => _sut.EnqueueAsync(
             transaction: null!,
+            scope: ScopeContext.Tenant("acme"),
             eventId: Guid.NewGuid(),
             eventType: eventType,
             payloadJson: "{}"));
@@ -37,6 +40,7 @@ public class OutboxWriterTests
     {
         await Assert.ThrowsAsync<ArgumentNullException>(() => _sut.EnqueueAsync(
             transaction: null!,
+            scope: ScopeContext.Tenant("acme"),
             eventId: Guid.NewGuid(),
             eventType: "UserLoggedIn",
             payloadJson: null!));
@@ -49,6 +53,7 @@ public class OutboxWriterTests
 
         await Assert.ThrowsAsync<ArgumentException>(() => sut.EnqueueAsync(
             transaction: null!,
+            scope: ScopeContext.Tenant("acme"),
             eventId: Guid.NewGuid(),
             eventType: "UserLoggedIn",
             payloadJson: "123456"));

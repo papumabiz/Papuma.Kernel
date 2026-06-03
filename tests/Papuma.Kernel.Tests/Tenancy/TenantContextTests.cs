@@ -5,14 +5,15 @@ using Papuma.Kernel.Tenancy;
 
 namespace Papuma.Kernel.Tests.Tenancy;
 
-public class TenantContextTests
+public class ScopeContextTests
 {
     [Fact]
-    public void Create_AllowsValidTenantId()
+    public void Tenant_AllowsValidTenantId()
     {
-        var tenant = TenantContext.Create("Acme_01");
+        var scope = ScopeContext.Tenant("Acme_01");
 
-        Assert.Equal("Acme_01", tenant.TenantId);
+        Assert.Equal(ScopeType.Tenant, scope.Scope);
+        Assert.Equal("Acme_01", scope.TenantId);
     }
 
     [Theory]
@@ -20,16 +21,19 @@ public class TenantContextTests
     [InlineData(" ")]
     [InlineData("1tenant")]
     [InlineData("tenant-name")]
-    public void Create_RejectsInvalidTenantId(string tenantId)
+    public void Tenant_RejectsInvalidTenantId(string tenantId)
     {
-        var exception = Assert.Throws<ArgumentException>(() => TenantContext.Create(tenantId));
+        var exception = Assert.Throws<ArgumentException>(() => ScopeContext.Tenant(tenantId));
 
         Assert.Equal("tenantId", exception.ParamName);
     }
 
     [Fact]
-    public void Default_UsesDefaultTenantId()
+    public void Platform_UsesNullTenantId()
     {
-        Assert.Equal("default", TenantContext.Default.TenantId);
+        var scope = ScopeContext.Platform();
+
+        Assert.Equal(ScopeType.Platform, scope.Scope);
+        Assert.Null(scope.TenantId);
     }
 }

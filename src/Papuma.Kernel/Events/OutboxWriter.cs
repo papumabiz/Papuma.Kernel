@@ -25,39 +25,17 @@ public sealed class OutboxWriter
     }
 
     /// <summary>
-    /// Enqueues an outbox message in the current transaction.
+    /// Enqueues a scoped outbox message in the current transaction.
     /// </summary>
     /// <param name="transaction">The ambient PostgreSQL transaction.</param>
+    /// <param name="scope">The scope context for the outbox message.</param>
     /// <param name="eventId">The event identifier associated with the outbox entry.</param>
     /// <param name="eventType">The business event type.</param>
     /// <param name="payloadJson">The JSON payload to persist.</param>
     /// <param name="ct">A cancellation token.</param>
     public async Task EnqueueAsync(
         NpgsqlTransaction transaction,
-        Guid eventId,
-        string eventType,
-        string payloadJson,
-        CancellationToken ct = default)
-        => await EnqueueAsync(
-            transaction,
-            TenantContext.Default,
-            eventId,
-            eventType,
-            payloadJson,
-            ct);
-
-    /// <summary>
-    /// Enqueues a tenant-scoped outbox message in the current transaction.
-    /// </summary>
-    /// <param name="transaction">The ambient PostgreSQL transaction.</param>
-    /// <param name="tenant">The tenant context for the outbox message.</param>
-    /// <param name="eventId">The event identifier associated with the outbox entry.</param>
-    /// <param name="eventType">The business event type.</param>
-    /// <param name="payloadJson">The JSON payload to persist.</param>
-    /// <param name="ct">A cancellation token.</param>
-    public async Task EnqueueAsync(
-        NpgsqlTransaction transaction,
-        TenantContext tenant,
+        ScopeContext scope,
         Guid eventId,
         string eventType,
         string payloadJson,
@@ -67,20 +45,43 @@ public sealed class OutboxWriter
         InputValidator.ValidatePayloadSize(payloadJson, _options.MaxPayloadSizeBytes);
 
         ArgumentNullException.ThrowIfNull(transaction);
-        ArgumentNullException.ThrowIfNull(tenant);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        await SetScopeOnConnectionAsync(transaction.Connection!, scope, ct);
 
         await using var cmd = transaction.Connection!.CreateCommand();
         cmd.Transaction = transaction;
         cmd.CommandText = """
-            INSERT INTO event_outbox (tenant_id, event_id, event_type, payload)
-            VALUES (@tenantId, @eventId, @eventType, @payload::jsonb)
+            INSERT INTO event_outbox (scope, tenant_id, event_id, event_type, payload)
+            VALUES (@scope, @tenantId, @eventId, @eventType, @payload::jsonb)
             """;
 
-        cmd.Parameters.AddWithValue("tenantId", tenant.TenantId);
+        cmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+        cmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("eventId", eventId);
         cmd.Parameters.AddWithValue("eventType", eventType);
         cmd.Parameters.AddWithValue("payload", payloadJson);
 
         await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task SetScopeOnConnectionAsync(
+        NpgsqlConnection connection,
+        ScopeContext scope,
+        CancellationToken ct)
+    {
+        await using (var scopeCmd = connection.CreateCommand())
+        {
+            scopeCmd.CommandText = "SET LOCAL app.current_scope = @scope";
+            scopeCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+            await scopeCmd.ExecuteNonQueryAsync(ct);
+        }
+
+        await using (var tenantCmd = connection.CreateCommand())
+        {
+            tenantCmd.CommandText = "SET LOCAL app.current_tenant = @tenantId";
+            tenantCmd.Parameters.AddWithValue("tenantId", scope.TenantId ?? string.Empty);
+            await tenantCmd.ExecuteNonQueryAsync(ct);
+        }
     }
 }

@@ -6,9 +6,9 @@ using System.Text.RegularExpressions;
 namespace Papuma.Kernel.Tenancy;
 
 /// <summary>
-/// Represents the current tenant context for tenant-scoped operations.
+/// Represents the current data scope for platform- or tenant-scoped operations.
 /// </summary>
-public sealed record TenantContext
+public sealed record ScopeContext
 {
     private static readonly Regex ValidTenantPattern = new(
         "^[A-Za-z][A-Za-z0-9_]{1,100}$",
@@ -16,25 +16,31 @@ public sealed record TenantContext
         TimeSpan.FromMilliseconds(100));
 
     /// <summary>
-    /// Gets the default tenant context used by backward-compatible overloads.
+    /// Gets the resolved scope kind.
     /// </summary>
-    public static TenantContext Default { get; } = new("default");
+    public ScopeType Scope { get; }
 
     /// <summary>
-    /// Gets the tenant identifier.
+    /// Gets the tenant identifier for <see cref="ScopeType.Tenant"/> scope; otherwise <c>null</c>.
     /// </summary>
-    public string TenantId { get; }
+    public string? TenantId { get; }
 
-    private TenantContext(string tenantId)
+    private ScopeContext(ScopeType scope, string? tenantId)
     {
+        Scope = scope;
         TenantId = tenantId;
     }
 
     /// <summary>
-    /// Creates a validated tenant context.
+    /// Creates a platform scope.
+    /// </summary>
+    public static ScopeContext Platform() => new(ScopeType.Platform, null);
+
+    /// <summary>
+    /// Creates a validated tenant scope.
     /// </summary>
     /// <param name="tenantId">The tenant identifier.</param>
-    public static TenantContext Create(string tenantId)
+    public static ScopeContext Tenant(string tenantId)
     {
         if (!ValidTenantPattern.IsMatch(tenantId))
         {
@@ -43,6 +49,6 @@ public sealed record TenantContext
                 nameof(tenantId));
         }
 
-        return new TenantContext(tenantId);
+        return new ScopeContext(ScopeType.Tenant, tenantId);
     }
 }

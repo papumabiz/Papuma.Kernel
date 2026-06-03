@@ -25,9 +25,10 @@ public sealed class ChangeWriter
     }
 
     /// <summary>
-    /// Appends a new change feed record to the current transaction.
+    /// Appends a new scoped change feed record to the current transaction.
     /// </summary>
     /// <param name="transaction">The ambient PostgreSQL transaction.</param>
+    /// <param name="scope">The scope context for the record.</param>
     /// <param name="entity">The logical entity name that produced the change.</param>
     /// <param name="entityId">The entity identifier within its logical namespace.</param>
     /// <param name="eventType">The event type that describes the change.</param>
@@ -39,45 +40,7 @@ public sealed class ChangeWriter
     /// <param name="ct">A cancellation token.</param>
     public async Task AppendAsync(
         NpgsqlTransaction transaction,
-        string entity,
-        string entityId,
-        string eventType,
-        int version,
-        string payloadJson,
-        string actorId,
-        string? correlationId = null,
-        string? causationId = null,
-        CancellationToken ct = default)
-        => await AppendAsync(
-            transaction,
-            TenantContext.Default,
-            entity,
-            entityId,
-            eventType,
-            version,
-            payloadJson,
-            actorId,
-            correlationId,
-            causationId,
-            ct);
-
-    /// <summary>
-    /// Appends a new tenant-scoped change feed record to the current transaction.
-    /// </summary>
-    /// <param name="transaction">The ambient PostgreSQL transaction.</param>
-    /// <param name="tenant">The tenant context for the record.</param>
-    /// <param name="entity">The logical entity name that produced the change.</param>
-    /// <param name="entityId">The entity identifier within its logical namespace.</param>
-    /// <param name="eventType">The event type that describes the change.</param>
-    /// <param name="version">The aggregate version associated with the change.</param>
-    /// <param name="payloadJson">The JSON payload to persist.</param>
-    /// <param name="actorId">The actor that caused the change.</param>
-    /// <param name="correlationId">Optional correlation identifier for distributed tracing.</param>
-    /// <param name="causationId">Optional causation identifier pointing to the upstream event.</param>
-    /// <param name="ct">A cancellation token.</param>
-    public async Task AppendAsync(
-        NpgsqlTransaction transaction,
-        TenantContext tenant,
+        ScopeContext scope,
         string entity,
         string entityId,
         string eventType,
@@ -89,22 +52,23 @@ public sealed class ChangeWriter
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
-        ArgumentNullException.ThrowIfNull(tenant);
+        ArgumentNullException.ThrowIfNull(scope);
 
         ValidateInputs(entity, entityId, eventType, version, payloadJson, actorId);
 
-        await SetTenantOnConnectionAsync(transaction.Connection!, tenant.TenantId, ct);
+        await SetScopeOnConnectionAsync(transaction.Connection!, scope, ct);
 
         await using var cmd = transaction.Connection!.CreateCommand();
         cmd.Transaction = transaction;
         cmd.CommandText = """
             INSERT INTO change_feed
-                (tenant_id, entity, entity_id, event_type, version, correlation_id, causation_id, actor_id, payload)
+                (scope, tenant_id, entity, entity_id, event_type, version, correlation_id, causation_id, actor_id, payload)
             VALUES
-                (@tenantId, @entity, @entityId, @eventType, @version, @correlationId, @causationId, @actorId, @payload::jsonb)
+                (@scope, @tenantId, @entity, @entityId, @eventType, @version, @correlationId, @causationId, @actorId, @payload::jsonb)
             """;
 
-        cmd.Parameters.AddWithValue("tenantId", tenant.TenantId);
+        cmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+        cmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("entity", entity);
         cmd.Parameters.AddWithValue("entityId", entityId);
         cmd.Parameters.AddWithValue("eventType", eventType);
@@ -117,15 +81,24 @@ public sealed class ChangeWriter
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    private static async Task SetTenantOnConnectionAsync(
+    private static async Task SetScopeOnConnectionAsync(
         NpgsqlConnection connection,
-        string tenantId,
+        ScopeContext scope,
         CancellationToken ct)
     {
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SET LOCAL app.current_tenant = @tenantId";
-        cmd.Parameters.AddWithValue("tenantId", tenantId);
-        await cmd.ExecuteNonQueryAsync(ct);
+        await using (var scopeCmd = connection.CreateCommand())
+        {
+            scopeCmd.CommandText = "SET LOCAL app.current_scope = @scope";
+            scopeCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+            await scopeCmd.ExecuteNonQueryAsync(ct);
+        }
+
+        await using (var tenantCmd = connection.CreateCommand())
+        {
+            tenantCmd.CommandText = "SET LOCAL app.current_tenant = @tenantId";
+            tenantCmd.Parameters.AddWithValue("tenantId", scope.TenantId ?? string.Empty);
+            await tenantCmd.ExecuteNonQueryAsync(ct);
+        }
     }
 
     /// <summary>

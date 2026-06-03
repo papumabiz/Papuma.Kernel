@@ -24,7 +24,7 @@ public sealed class ProjectionWorker : BackgroundService
     private readonly NpgsqlDataSource _dataSource;
     private readonly ILogger<ProjectionWorker> _logger;
     private readonly ProjectionWorkerOptions _options;
-    private readonly TenantContext? _tenant;
+    private readonly ScopeContext? _scope;
     private readonly string _projectionName;
     private readonly Channel<ReplayRequest> _replayChannel = Channel.CreateBounded<ReplayRequest>(1);
 
@@ -40,13 +40,13 @@ public sealed class ProjectionWorker : BackgroundService
     /// <param name="dataSource">The data source used to load and checkpoint records.</param>
     /// <param name="logger">The logger used for worker diagnostics.</param>
     /// <param name="options">Optional polling and retry configuration.</param>
-    /// <param name="tenant">Optional tenant scope for this worker.</param>
+    /// <param name="scope">Optional scope filter for this worker.</param>
     public ProjectionWorker(
         IProjectionHandler handler,
         NpgsqlDataSource dataSource,
         ILogger<ProjectionWorker> logger,
         ProjectionWorkerOptions? options = null,
-        TenantContext? tenant = null)
+        ScopeContext? scope = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(dataSource);
@@ -56,8 +56,12 @@ public sealed class ProjectionWorker : BackgroundService
         _dataSource = dataSource;
         _logger = logger;
         _options = options ?? new ProjectionWorkerOptions();
-        _tenant = tenant;
-        _projectionName = tenant is null ? handler.Name : $"{handler.Name}@{tenant.TenantId}";
+        _scope = scope;
+        _projectionName = scope is null
+            ? handler.Name
+            : scope.Scope == ScopeType.Platform
+                ? $"{handler.Name}@Platform"
+                : $"{handler.Name}@Tenant:{scope.TenantId}";
 
         ValidateOptions(_options);
     }
@@ -180,11 +184,18 @@ public sealed class ProjectionWorker : BackgroundService
     {
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT sequence_id, tenant_id, entity, entity_id, event_type, version,
+            SELECT sequence_id, scope, tenant_id, entity, entity_id, event_type, version,
                    correlation_id, causation_id, actor_id, payload::text, timestamp
             FROM change_feed
             WHERE sequence_id > @lastSeen
-              AND (@tenantId IS NULL OR tenant_id = @tenantId)
+              AND (@scope IS NULL OR scope = @scope)
+              AND (
+                  @scope IS NULL
+                  OR
+                  @scope <> 'Tenant'
+                  OR
+                  tenant_id = @tenantId
+              )
               AND redacted = FALSE
               AND event_type = ANY(@eventTypes)
               AND xmin::text::bigint < pg_snapshot_xmin(pg_current_snapshot())::text::bigint
@@ -202,7 +213,8 @@ public sealed class ProjectionWorker : BackgroundService
             """;
 
         cmd.Parameters.AddWithValue("lastSeen", fromSequenceId);
-        cmd.Parameters.AddWithValue("tenantId", (object?)_tenant?.TenantId ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("scope", (object?)_scope?.Scope.ToString() ?? DBNull.Value);
+    cmd.Parameters.AddWithValue("tenantId", (object?)_scope?.TenantId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("name", _projectionName);
         cmd.Parameters.AddWithValue("maxAttempts", _options.MaxAttemptsPerEvent);
         cmd.Parameters.AddWithValue("eventTypes", _handler.EventTypes.ToArray());
@@ -214,16 +226,17 @@ public sealed class ProjectionWorker : BackgroundService
         {
             records.Add(new ChangeRecord(
                 SequenceId: reader.GetInt64(0),
-                Entity: reader.GetString(2),
-                EntityId: reader.GetString(3),
-                EventType: reader.GetString(4),
-                Version: reader.GetInt32(5),
-                CorrelationId: reader.IsDBNull(6) ? null : reader.GetString(6),
-                CausationId: reader.IsDBNull(7) ? null : reader.GetString(7),
-                ActorId: reader.GetString(8),
-                PayloadJson: reader.GetString(9),
-                Timestamp: reader.GetFieldValue<DateTimeOffset>(10),
-                TenantId: reader.GetString(1)));
+                Entity: reader.GetString(3),
+                EntityId: reader.GetString(4),
+                EventType: reader.GetString(5),
+                Version: reader.GetInt32(6),
+                CorrelationId: reader.IsDBNull(7) ? null : reader.GetString(7),
+                CausationId: reader.IsDBNull(8) ? null : reader.GetString(8),
+                ActorId: reader.GetString(9),
+                PayloadJson: reader.GetString(10),
+                Timestamp: reader.GetFieldValue<DateTimeOffset>(11),
+                Scope: Enum.Parse<ScopeType>(reader.GetString(1), ignoreCase: false),
+                TenantId: reader.IsDBNull(2) ? null : reader.GetString(2)));
         }
 
         return records;

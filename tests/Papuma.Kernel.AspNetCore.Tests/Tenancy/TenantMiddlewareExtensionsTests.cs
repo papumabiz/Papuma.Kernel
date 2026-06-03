@@ -9,75 +9,75 @@ using Papuma.Kernel.Tenancy;
 
 namespace Papuma.Kernel.AspNetCore.Tests.Tenancy;
 
-public class TenantMiddlewareExtensionsTests
+public class ScopeMiddlewareExtensionsTests
 {
     [Fact]
-    public void AddPapumaTenancy_NullServices_Throws()
+    public void AddPapumaScope_NullServices_Throws()
     {
         IServiceCollection services = null!;
-        Assert.Throws<ArgumentNullException>(() => services.AddPapumaTenancy<StubTenantResolver>());
+        Assert.Throws<ArgumentNullException>(() => services.AddPapumaScope<StubScopeResolver>());
     }
 
     [Fact]
-    public void AddPapumaTenancy_RegistersResolver()
+    public void AddPapumaScope_RegistersResolver()
     {
         var services = new ServiceCollection();
 
-        services.AddPapumaTenancy<StubTenantResolver>();
+        services.AddPapumaScope<StubScopeResolver>();
 
         var provider = services.BuildServiceProvider();
-        var resolver = provider.GetService<ITenantResolver>();
+        var resolver = provider.GetService<IScopeResolver>();
         Assert.NotNull(resolver);
-        Assert.IsType<StubTenantResolver>(resolver);
+        Assert.IsType<StubScopeResolver>(resolver);
     }
 
     [Fact]
-    public void AddPapumaTenancy_ReturnsSameCollection()
+    public void AddPapumaScope_ReturnsSameCollection()
     {
         var services = new ServiceCollection();
 
-        var result = services.AddPapumaTenancy<StubTenantResolver>();
+        var result = services.AddPapumaScope<StubScopeResolver>();
 
         Assert.Same(services, result);
     }
 
     [Fact]
-    public void UseTenantResolution_NullApp_Throws()
+    public void UseScopeResolution_NullApp_Throws()
     {
         Microsoft.AspNetCore.Builder.IApplicationBuilder app = null!;
-        Assert.Throws<ArgumentNullException>(() => app.UseTenantResolution());
+        Assert.Throws<ArgumentNullException>(() => app.UseScopeResolution());
     }
 
     [Fact]
-    public void GetTenantContext_WithoutMiddleware_Throws()
+    public void GetScopeContext_WithoutMiddleware_Throws()
     {
         var context = new DefaultHttpContext();
 
-        Assert.Throws<InvalidOperationException>(() => context.GetTenantContext());
+        Assert.Throws<InvalidOperationException>(() => context.GetScopeContext());
     }
 
     [Fact]
-    public void GetTenantContext_NullContext_Throws()
+    public void GetScopeContext_NullContext_Throws()
     {
         HttpContext context = null!;
-        Assert.Throws<ArgumentNullException>(() => context.GetTenantContext());
+        Assert.Throws<ArgumentNullException>(() => context.GetScopeContext());
     }
 
     [Fact]
-    public void GetTenantContext_WithTenantSet_ReturnsTenant()
+    public void GetScopeContext_WithScopeSet_ReturnsScope()
     {
         var context = new DefaultHttpContext();
-        var tenant = TenantContext.Create("test_tenant");
-        context.Items["Papuma.Kernel.Tenancy.TenantContext"] = tenant;
+        var scope = ScopeContext.Tenant("test_tenant");
+        context.Items["Papuma.Kernel.Tenancy.ScopeContext"] = scope;
 
-        var result = context.GetTenantContext();
+        var result = context.GetScopeContext();
 
-        Assert.Equal(tenant, result);
+        Assert.Equal(scope, result);
     }
 
-    private sealed class StubTenantResolver : ITenantResolver
+    private sealed class StubScopeResolver : IScopeResolver
     {
-        public TenantContext Resolve(HttpContext context) =>
-            TenantContext.Create("stub_tenant");
+        public ScopeContext Resolve(HttpContext context) =>
+            ScopeContext.Tenant("stub_tenant");
     }
 }

@@ -45,45 +45,23 @@ public sealed class GdprProcessor
     }
 
     /// <summary>
-    /// Redacts all change feed and business event log entries for a specific entity in one transaction.
+    /// Redacts all change feed and business event log entries for a specific entity and scope.
     /// </summary>
+    /// <param name="scope">The scope context.</param>
     /// <param name="entity">The logical entity name.</param>
     /// <param name="entityId">The entity identifier.</param>
     /// <param name="actorId">The actor performing the redaction.</param>
     /// <param name="reason">The documented reason for the redaction.</param>
     /// <param name="ct">A cancellation token.</param>
     public async Task<RedactionResult> RedactEntityAsync(
-        string entity,
-        string entityId,
-        string actorId,
-        string reason,
-        CancellationToken ct = default)
-        => await RedactEntityAsync(
-            TenantContext.Default,
-            entity,
-            entityId,
-            actorId,
-            reason,
-            ct);
-
-    /// <summary>
-    /// Redacts all change feed and business event log entries for a specific entity in one tenant.
-    /// </summary>
-    /// <param name="tenant">The tenant context.</param>
-    /// <param name="entity">The logical entity name.</param>
-    /// <param name="entityId">The entity identifier.</param>
-    /// <param name="actorId">The actor performing the redaction.</param>
-    /// <param name="reason">The documented reason for the redaction.</param>
-    /// <param name="ct">A cancellation token.</param>
-    public async Task<RedactionResult> RedactEntityAsync(
-        TenantContext tenant,
+        ScopeContext scope,
         string entity,
         string entityId,
         string actorId,
         string reason,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(tenant);
+        ArgumentNullException.ThrowIfNull(scope);
         InputValidator.ValidateEntity(entity);
         InputValidator.ValidateEntityId(entityId);
         InputValidator.ValidateActorId(actorId);
@@ -102,12 +80,18 @@ public sealed class GdprProcessor
             UPDATE change_feed
             SET payload  = '{"redacted": true}'::jsonb,
                 redacted = TRUE
-            WHERE tenant_id = @tenantId
+                        WHERE scope     = @scope
+                            AND (
+                                     (@tenantId IS NULL AND tenant_id IS NULL)
+                                     OR
+                                     tenant_id = @tenantId
+                            )
               AND entity    = @entity
               AND entity_id = @entityId
               AND redacted  = FALSE
             """;
-        feedCmd.Parameters.AddWithValue("tenantId", tenant.TenantId);
+                feedCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+                feedCmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
         feedCmd.Parameters.AddWithValue("entity", entity);
         feedCmd.Parameters.AddWithValue("entityId", entityId);
         var feedAffected = await feedCmd.ExecuteNonQueryAsync(ct);
@@ -118,12 +102,18 @@ public sealed class GdprProcessor
             UPDATE business_event_log
             SET payload  = '{"redacted": true}'::jsonb,
                 redacted = TRUE
-            WHERE tenant_id = @tenantId
+                        WHERE scope     = @scope
+                            AND (
+                                     (@tenantId IS NULL AND tenant_id IS NULL)
+                                     OR
+                                     tenant_id = @tenantId
+                            )
               AND entity    = @entity
               AND entity_id = @entityId
               AND redacted  = FALSE
             """;
-        belCmd.Parameters.AddWithValue("tenantId", tenant.TenantId);
+                belCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+                belCmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
         belCmd.Parameters.AddWithValue("entity", entity);
         belCmd.Parameters.AddWithValue("entityId", entityId);
         var businessEventsAffected = await belCmd.ExecuteNonQueryAsync(ct);
@@ -140,7 +130,7 @@ public sealed class GdprProcessor
 
         await _businessEventWriter.AppendAsync(
             tx,
-            tenant,
+            scope,
             eventType: "EntityRedacted",
             actorId,
             payloadJson: auditPayload,
@@ -161,35 +151,19 @@ public sealed class GdprProcessor
     }
 
     /// <summary>
-    /// Returns the stored history for one entity across change feed and business event log.
+    /// Returns the stored history for one entity and scope across change feed and business event log.
     /// </summary>
+    /// <param name="scope">The scope context.</param>
     /// <param name="entity">The logical entity name.</param>
     /// <param name="entityId">The entity identifier.</param>
     /// <param name="ct">A cancellation token.</param>
     public async Task<EntityHistory> GetEntityHistoryAsync(
-        string entity,
-        string entityId,
-        CancellationToken ct = default)
-        => await GetEntityHistoryAsync(
-            TenantContext.Default,
-            entity,
-            entityId,
-            ct);
-
-    /// <summary>
-    /// Returns the stored history for one entity and tenant across change feed and business event log.
-    /// </summary>
-    /// <param name="tenant">The tenant context.</param>
-    /// <param name="entity">The logical entity name.</param>
-    /// <param name="entityId">The entity identifier.</param>
-    /// <param name="ct">A cancellation token.</param>
-    public async Task<EntityHistory> GetEntityHistoryAsync(
-        TenantContext tenant,
+        ScopeContext scope,
         string entity,
         string entityId,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(tenant);
+        ArgumentNullException.ThrowIfNull(scope);
         InputValidator.ValidateEntity(entity);
         InputValidator.ValidateEntityId(entityId);
 
@@ -197,15 +171,21 @@ public sealed class GdprProcessor
 
         await using var feedCmd = conn.CreateCommand();
         feedCmd.CommandText = """
-            SELECT sequence_id, entity, entity_id, event_type, version,
-                   correlation_id, causation_id, actor_id, payload::text, timestamp, tenant_id
+             SELECT sequence_id, entity, entity_id, event_type, version,
+                 correlation_id, causation_id, actor_id, payload::text, timestamp, scope, tenant_id
             FROM change_feed
-            WHERE tenant_id = @tenantId
+             WHERE scope     = @scope
+            AND (
+                 (@tenantId IS NULL AND tenant_id IS NULL)
+                 OR
+                 tenant_id = @tenantId
+            )
               AND entity    = @entity
               AND entity_id = @entityId
             ORDER BY sequence_id
             """;
-        feedCmd.Parameters.AddWithValue("tenantId", tenant.TenantId);
+         feedCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+         feedCmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
         feedCmd.Parameters.AddWithValue("entity", entity);
         feedCmd.Parameters.AddWithValue("entityId", entityId);
 
@@ -225,20 +205,27 @@ public sealed class GdprProcessor
                     ActorId: feedReader.GetString(7),
                     PayloadJson: feedReader.GetString(8),
                     Timestamp: feedReader.GetFieldValue<DateTimeOffset>(9),
-                    TenantId: feedReader.GetString(10)));
+                    Scope: Enum.Parse<ScopeType>(feedReader.GetString(10), ignoreCase: false),
+                    TenantId: feedReader.IsDBNull(11) ? null : feedReader.GetString(11)));
             }
         }
 
         await using var belCmd = conn.CreateCommand();
         belCmd.CommandText = """
-            SELECT event_id, event_type, actor_id, payload::text, occurred_at
+                        SELECT event_id, event_type, actor_id, payload::text, occurred_at, scope, tenant_id
             FROM business_event_log
-            WHERE tenant_id = @tenantId
+                        WHERE scope     = @scope
+                            AND (
+                                     (@tenantId IS NULL AND tenant_id IS NULL)
+                                     OR
+                                     tenant_id = @tenantId
+                            )
               AND entity    = @entity
               AND entity_id = @entityId
             ORDER BY occurred_at
             """;
-        belCmd.Parameters.AddWithValue("tenantId", tenant.TenantId);
+                belCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+                belCmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
         belCmd.Parameters.AddWithValue("entity", entity);
         belCmd.Parameters.AddWithValue("entityId", entityId);
 
@@ -252,7 +239,9 @@ public sealed class GdprProcessor
                     EventType: belReader.GetString(1),
                     ActorId: belReader.GetString(2),
                     PayloadJson: belReader.GetString(3),
-                    OccurredAt: belReader.GetFieldValue<DateTimeOffset>(4)));
+                    OccurredAt: belReader.GetFieldValue<DateTimeOffset>(4),
+                    Scope: Enum.Parse<ScopeType>(belReader.GetString(5), ignoreCase: false),
+                    TenantId: belReader.IsDBNull(6) ? null : belReader.GetString(6)));
             }
         }
 

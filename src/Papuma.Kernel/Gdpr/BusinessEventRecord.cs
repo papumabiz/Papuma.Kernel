@@ -3,6 +3,8 @@
 
 namespace Papuma.Kernel.Gdpr;
 
+using Papuma.Kernel.Tenancy;
+
 /// <summary>
 /// Represents a business event entry returned for GDPR history requests.
 /// </summary>
@@ -11,4 +13,6 @@ public sealed record BusinessEventRecord(
     string EventType,
     string ActorId,
     string PayloadJson,
-    DateTimeOffset OccurredAt);
+    DateTimeOffset OccurredAt,
+    ScopeType Scope,
+    string? TenantId);

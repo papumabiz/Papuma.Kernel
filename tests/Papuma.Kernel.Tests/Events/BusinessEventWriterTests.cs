@@ -2,6 +2,7 @@
 // Licensed under the MIT License. See LICENSE in the repository root for details.
 
 using Papuma.Kernel.Events;
+using Papuma.Kernel.Tenancy;
 
 namespace Papuma.Kernel.Tests.Events;
 
@@ -14,6 +15,7 @@ public class BusinessEventWriterTests
     {
         await Assert.ThrowsAsync<ArgumentNullException>(() => _sut.AppendAsync(
             transaction: null!,
+            scope: ScopeContext.Tenant("acme"),
             eventType: "UserLoggedIn",
             actorId: "user:123",
             payloadJson: "{}"));
@@ -27,6 +29,7 @@ public class BusinessEventWriterTests
     {
         await Assert.ThrowsAsync<ArgumentException>(() => _sut.AppendAsync(
             transaction: null!,
+            scope: ScopeContext.Tenant("acme"),
             eventType: eventType,
             actorId: "user:123",
             payloadJson: "{}"));
@@ -39,6 +42,7 @@ public class BusinessEventWriterTests
     {
         await Assert.ThrowsAsync<ArgumentException>(() => _sut.AppendAsync(
             transaction: null!,
+            scope: ScopeContext.Tenant("acme"),
             eventType: "UserLoggedIn",
             actorId: actorId,
             payloadJson: "{}"));
@@ -49,6 +53,7 @@ public class BusinessEventWriterTests
     {
         await Assert.ThrowsAsync<ArgumentException>(() => _sut.AppendAsync(
             transaction: null!,
+            scope: ScopeContext.Tenant("acme"),
             eventType: "UserLoggedIn",
             actorId: new string('a', 201),
             payloadJson: "{}"));
@@ -59,6 +64,7 @@ public class BusinessEventWriterTests
     {
         await Assert.ThrowsAsync<ArgumentNullException>(() => _sut.AppendAsync(
             transaction: null!,
+            scope: ScopeContext.Tenant("acme"),
             eventType: "UserLoggedIn",
             actorId: "user:123",
             payloadJson: null!));
@@ -71,6 +77,7 @@ public class BusinessEventWriterTests
 
         await Assert.ThrowsAsync<ArgumentException>(() => sut.AppendAsync(
             transaction: null!,
+            scope: ScopeContext.Tenant("acme"),
             eventType: "UserLoggedIn",
             actorId: "user:123",
             payloadJson: "123456"));
@@ -84,6 +91,7 @@ public class BusinessEventWriterTests
     {
         await Assert.ThrowsAsync<ArgumentException>(() => _sut.AppendAsync(
             transaction: null!,
+            scope: ScopeContext.Tenant("acme"),
             eventType: "UserLoggedIn",
             actorId: "user:123",
             payloadJson: "{}",
@@ -97,6 +105,7 @@ public class BusinessEventWriterTests
     {
         await Assert.ThrowsAsync<ArgumentException>(() => _sut.AppendAsync(
             transaction: null!,
+            scope: ScopeContext.Tenant("acme"),
             eventType: "UserLoggedIn",
             actorId: "user:123",
             payloadJson: "{}",
@@ -110,6 +119,7 @@ public class BusinessEventWriterTests
         // Should fail on null transaction, not on validation – entity/entityId are optional.
         await Assert.ThrowsAsync<ArgumentNullException>(() => _sut.AppendAsync(
             transaction: null!,
+            scope: ScopeContext.Tenant("acme"),
             eventType: "UserLoggedIn",
             actorId: "user:123",
             payloadJson: "{}",

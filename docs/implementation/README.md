@@ -50,6 +50,7 @@ Protobuf würde Typen erzwingen und das Schema fest einschreiben – das zwingt 
 | [06-gdpr.md](06-gdpr.md) | DSGVO-Redaktion mit Autorisierung, Audit und atomarer Löschung |
 | [07-projektstruktur.md](07-projektstruktur.md) | Verzeichnisstruktur, Phasenplan, Konventionen |
 | [08-multi-tenancy.md](08-multi-tenancy.md) | Multi-Tenancy: Shared Database + RLS, Database-per-Tenant |
+| [09-scope-model.md](09-scope-model.md) | Scope-Modell: Platform/Tenant als expliziter Kontext (Breaking Change) |
 
 ## Voraussetzungen
 
@@ -82,6 +83,7 @@ Diese Trennung verhindert semantische Vermischung und macht das System fuer Audi
 - `06-gdpr.md`: Phase 1 (Grundlagen) + Phase 3/4 (Compliance-Härtung)
 - `07-projektstruktur.md`: Gesamt-Roadmap und Betriebskonventionen
 - `08-multi-tenancy.md`: Phase 1 (Shared Database + RLS) + Phase 3+ (Database-per-Tenant)
+- `09-scope-model.md`: Zielmodell fuer klare Trennung von Platform- und Tenant-Daten
 
 ## Der wichtigste Satz dieses Systems
 

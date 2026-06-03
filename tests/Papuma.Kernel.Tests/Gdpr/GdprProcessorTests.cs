@@ -51,6 +51,7 @@ public class GdprProcessorTests
         var sut = CreateSut(dataSource);
 
         var exception = await Assert.ThrowsAsync<ArgumentException>(() => sut.RedactEntityAsync(
+            scope: ScopeContext.Tenant("acme"),
             entity: "User",
             entityId: "user-1",
             actorId: " ",
@@ -66,6 +67,7 @@ public class GdprProcessorTests
         var sut = CreateSut(dataSource);
 
         var exception = await Assert.ThrowsAsync<ArgumentException>(() => sut.RedactEntityAsync(
+            scope: ScopeContext.Tenant("acme"),
             entity: "User",
             entityId: "user-1",
             actorId: "admin:1",
@@ -81,6 +83,7 @@ public class GdprProcessorTests
         var sut = CreateSut(dataSource);
 
         var exception = await Assert.ThrowsAsync<ArgumentException>(() => sut.GetEntityHistoryAsync(
+            scope: ScopeContext.Tenant("acme"),
             entity: "User",
             entityId: " "));
 
@@ -88,13 +91,13 @@ public class GdprProcessorTests
     }
 
     [Fact]
-    public async Task RedactEntityAsync_ThrowsForNullTenant()
+        public async Task RedactEntityAsync_ThrowsForNullScope()
     {
         using var dataSource = CreateDataSource();
         var sut = CreateSut(dataSource);
 
         await Assert.ThrowsAsync<ArgumentNullException>(() => sut.RedactEntityAsync(
-            tenant: null!,
+            scope: null!,
             entity: "User",
             entityId: "user-1",
             actorId: "admin:1",
@@ -102,13 +105,13 @@ public class GdprProcessorTests
     }
 
     [Fact]
-    public async Task GetEntityHistoryAsync_ThrowsForNullTenant()
+        public async Task GetEntityHistoryAsync_ThrowsForNullScope()
     {
         using var dataSource = CreateDataSource();
         var sut = CreateSut(dataSource);
 
         await Assert.ThrowsAsync<ArgumentNullException>(() => sut.GetEntityHistoryAsync(
-            tenant: null!,
+            scope: null!,
             entity: "User",
             entityId: "user-1"));
     }
@@ -123,6 +126,7 @@ public class GdprProcessorTests
         var sut = CreateSut(dataSource);
 
         await Assert.ThrowsAsync<ArgumentException>(() => sut.RedactEntityAsync(
+            scope: ScopeContext.Tenant("acme"),
             entity: entity,
             entityId: "user-1",
             actorId: "admin:1",
@@ -139,6 +143,7 @@ public class GdprProcessorTests
         var sut = CreateSut(dataSource);
 
         await Assert.ThrowsAsync<ArgumentException>(() => sut.GetEntityHistoryAsync(
+            scope: ScopeContext.Tenant("acme"),
             entity: entity,
             entityId: "user-1"));
     }

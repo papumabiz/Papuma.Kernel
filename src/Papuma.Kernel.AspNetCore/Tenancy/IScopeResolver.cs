@@ -8,13 +8,13 @@ using Papuma.Kernel.Tenancy;
 namespace Papuma.Kernel.AspNetCore.Tenancy;
 
 /// <summary>
-/// Resolves the tenant context from an ASP.NET Core request.
+/// Resolves the scope context from an ASP.NET Core request.
 /// </summary>
-public interface ITenantResolver
+public interface IScopeResolver
 {
     /// <summary>
-    /// Resolves the tenant context for the specified request.
+    /// Resolves the scope context for the specified request.
     /// </summary>
     /// <param name="context">The current HTTP context.</param>
-    TenantContext Resolve(HttpContext context);
+    ScopeContext Resolve(HttpContext context);
 }

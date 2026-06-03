@@ -3,6 +3,8 @@
 
 namespace Papuma.Kernel.ChangeFeed;
 
+using Papuma.Kernel.Tenancy;
+
 /// <summary>
 /// Represents a persisted change feed entry.
 /// </summary>
@@ -48,6 +50,10 @@ public sealed record ChangeRecord(
     /// </summary>
     DateTimeOffset Timestamp,
     /// <summary>
-    /// Gets the tenant identifier associated with the change.
+    /// Gets the scope associated with the change.
     /// </summary>
-    string TenantId = "default");
+    ScopeType Scope,
+    /// <summary>
+    /// Gets the tenant identifier associated with the change for tenant scope; otherwise <c>null</c>.
+    /// </summary>
+    string? TenantId);
