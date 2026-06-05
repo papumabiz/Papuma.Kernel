@@ -37,6 +37,9 @@ Papuma.Kernel.slnx
 |   |   |   +-- GdprProcessor.cs
 |   |   |   +-- EntityHistory.cs
 |   |   |   +-- BusinessEventRecord.cs
+|   |   |   +-- RetentionExtensions.cs
+|   |   |   +-- RetentionWorker.cs
+|   |   |   +-- RetentionWorkerOptions.cs
 |   |   |   +-- RedactionResult.cs
 |   |   +-- Projections/
 |   |   |   +-- IProjectionHandler.cs

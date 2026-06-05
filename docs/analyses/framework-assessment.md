@@ -143,11 +143,19 @@ Zusätzlich ist die DI-Registrierung über `AddChangeFeedReader()` sowie über `
 - `schema.sql` enthält ebenfalls den aktuellen Version-Marker
 - Kein eigenes Migrations-Framework: Integration in vorhandene Tools bleibt bewusst offen
 
-#### 3b. Retention-Policy-Automatisierung
+#### 3b. Retention-Policy-Automatisierung (umgesetzt)
 
-**Problem:** Retention ist nur als SQL-Beispiel dokumentiert. Für regulierte Systeme wäre ein automatisierter Prozess sinnvoll.
+**Status:** Umgesetzt. Retention kann jetzt automatisiert per Worker ausgeführt werden.
 
-**Vorschlag:** Ein `RetentionWorker : BackgroundService` der konfigurierbar alte, bereits redacted Events physisch löscht oder archiviert.
+**Umsetzung:**
+- `RetentionWorker : BackgroundService` löscht redacted Datensätze älter als das konfigurierte Retention-Fenster
+- Cleanup läuft für `change_feed` und `business_event_log` in Batches
+- Konfiguration über `RetentionWorkerOptions` (PollInterval, RetentionWindow, BatchSize)
+- DI-Registrierung über `AddRetentionWorker(...)`
+
+**Sicherheits-Default:**
+- Standardmäßig wird nur `change_feed` bereinigt (`DeleteFromChangeFeed = true`)
+- `business_event_log` bleibt standardmäßig erhalten und wird nur per explizitem Opt-in bereinigt (`DeleteFromBusinessEventLog = false`)
 
 #### 3c. Idempotenz-Unterstützung für den Change Feed
 
