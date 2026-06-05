@@ -14,7 +14,7 @@ namespace Papuma.Kernel.Projections;
 /// <summary>
 /// Polls the change feed and applies matching events to an external projection with at-least-once semantics.
 /// </summary>
-public sealed class ExternalProjectionWorker : BackgroundService
+public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLagProvider
 {
     private static readonly TimeSpan MinErrorDelay = TimeSpan.FromSeconds(5);
 
@@ -29,6 +29,23 @@ public sealed class ExternalProjectionWorker : BackgroundService
     /// Gets the unique projection name used for checkpointing and failure tracking.
     /// </summary>
     public string ProjectionName => _projectionName;
+
+    /// <summary>
+    /// Gets a lag snapshot containing checkpoint and latest sequence id for this projection.
+    /// </summary>
+    /// <param name="ct">A cancellation token.</param>
+    /// <returns>The current lag snapshot.</returns>
+    public async Task<ProjectionLagSnapshot> GetLagSnapshotAsync(CancellationToken ct = default)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await SetScopeOnConnectionAsync(conn, _scope, ct);
+
+        var checkpoint = await LoadCheckpointAsync(conn, ct);
+        var latestSequenceId = await LoadLatestRelevantSequenceIdAsync(conn, ct);
+        var lag = latestSequenceId > checkpoint ? latestSequenceId - checkpoint : 0L;
+
+        return new ProjectionLagSnapshot(_projectionName, checkpoint, latestSequenceId, lag);
+    }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ExternalProjectionWorker"/> class.
@@ -216,6 +233,33 @@ public sealed class ExternalProjectionWorker : BackgroundService
         }
 
         return records;
+    }
+
+    private async Task<long> LoadLatestRelevantSequenceIdAsync(NpgsqlConnection conn, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT COALESCE(MAX(sequence_id), 0)
+            FROM change_feed
+            WHERE (@scope IS NULL OR scope = @scope)
+              AND (
+                  @scope IS NULL
+                  OR
+                  @scope <> 'Tenant'
+                  OR
+                  tenant_id = @tenantId
+              )
+              AND redacted = FALSE
+              AND event_type = ANY(@eventTypes)
+              AND xmin::text::bigint < pg_snapshot_xmin(pg_current_snapshot())::text::bigint
+            """;
+
+        cmd.Parameters.AddWithValue("scope", (object?)_scope?.Scope.ToString() ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("tenantId", (object?)_scope?.TenantId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("eventTypes", _handler.EventTypes.ToArray());
+
+        var result = await cmd.ExecuteScalarAsync(ct);
+        return result is long latestSequenceId ? latestSequenceId : 0L;
     }
 
     private async Task SaveCheckpointAsync(

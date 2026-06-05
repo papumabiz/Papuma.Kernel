@@ -35,6 +35,7 @@ public class ServiceCollectionExtensionsTests
         using var provider = services.BuildServiceProvider();
 
         Assert.NotNull(provider.GetRequiredService<ChangeWriter>());
+        Assert.NotNull(provider.GetRequiredService<ChangeFeedReader>());
         Assert.NotNull(provider.GetRequiredService<BusinessEventWriter>());
         Assert.NotNull(provider.GetRequiredService<OutboxWriter>());
         Assert.NotNull(provider.GetRequiredService<GdprProcessor>());

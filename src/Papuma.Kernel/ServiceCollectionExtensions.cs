@@ -20,6 +20,7 @@ public static class ServiceCollectionExtensions
 {
     /// <summary>
     /// Registers the core Papuma.Kernel services: <see cref="ChangeWriter"/>,
+    /// <see cref="ChangeFeedReader"/>,
     /// <see cref="BusinessEventWriter"/>, <see cref="OutboxWriter"/>,
     /// <see cref="GdprProcessor"/> and <see cref="IUnitOfWork"/>.
     /// </summary>
@@ -52,6 +53,8 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<ChangeWriter>(sp =>
             new ChangeWriter(sp.GetRequiredService<ChangeWriterOptions>()));
+
+        services.AddSingleton<ChangeFeedReader>();
 
         services.AddSingleton<BusinessEventWriter>(sp =>
             new BusinessEventWriter(sp.GetRequiredService<BusinessEventWriterOptions>()));

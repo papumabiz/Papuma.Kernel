@@ -75,6 +75,20 @@ public class ProjectionWorkerTests
             options));
     }
 
+    [Fact]
+    public void ProjectionName_MatchesLagProviderName()
+    {
+        using var dataSource = CreateDataSource();
+
+        var worker = new ProjectionWorker(
+            new StubProjectionHandler(),
+            dataSource,
+            NullLogger<ProjectionWorker>.Instance);
+
+        var provider = Assert.IsAssignableFrom<IProjectionLagProvider>(worker);
+        Assert.Equal(worker.ProjectionName, provider.ProjectionName);
+    }
+
     private static NpgsqlDataSource CreateDataSource() =>
         NpgsqlDataSource.Create("Host=localhost;Port=1;Database=test;Username=test;Password=test");
 
