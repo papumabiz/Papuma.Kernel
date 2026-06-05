@@ -37,6 +37,13 @@ Papuma.Kernel.slnx
 |   |   |   +-- GdprProcessor.cs
 |   |   |   +-- EntityHistory.cs
 |   |   |   +-- BusinessEventRecord.cs
+|   |   |   +-- SensitiveRef.cs
+|   |   |   +-- SensitiveDataState.cs
+|   |   |   +-- SensitiveDataVersion.cs
+|   |   |   +-- ISensitiveDataStore.cs
+|   |   |   +-- ISensitiveDataResolver.cs
+|   |   |   +-- NpgsqlSensitiveDataStore.cs
+|   |   |   +-- SensitiveDataExtensions.cs
 |   |   |   +-- RetentionExtensions.cs
 |   |   |   +-- RetentionWorker.cs
 |   |   |   +-- RetentionWorkerOptions.cs
@@ -67,6 +74,7 @@ Papuma.Kernel.slnx
 |   |   |   +-- Migrations/
 |   |   |   |   +-- V001__initial.sql
 |   |   |   |   +-- V002__schema_version_tracking.sql
+|   |   |   |   +-- V003__sensitive_data_store.sql
 |   |   |   +-- SchemaExtensions.cs
 |   |   |   +-- SchemaVersionChecker.cs
 |   |   |   +-- schema.sql

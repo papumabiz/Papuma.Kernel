@@ -8,6 +8,11 @@ Event Sourcing und DSGVO scheinen sich direkt zu widersprechen:
 
 Dieses System löst den Widerspruch durch **explizite Redaktion** – keine stille Mutation, sondern ein transparenter, nachvollziehbarer Prozess.
 
+Ergaenzend zu dieser Basis ist ab Schema-Version 3 ein expliziter **Sensitive Data Store** verfuegbar:
+- Events koennen statt direkter PII eine `sensitiveRef` enthalten
+- sensible Inhalte werden versioniert in `sensitive_data_versions` gespeichert
+- Aufloesung erfolgt explizit ueber `ISensitiveDataResolver` (Opt-in, keine globale Magie)
+
 ---
 
 ## Drei gängige Ansätze und warum hier Redaktion gewählt wurde

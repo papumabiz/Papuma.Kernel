@@ -23,7 +23,8 @@ public static class ServiceCollectionExtensions
     /// Registers the core Papuma.Kernel services: <see cref="ChangeWriter"/>,
     /// <see cref="ChangeFeedReader"/>,
     /// <see cref="BusinessEventWriter"/>, <see cref="OutboxWriter"/>,
-    /// <see cref="GdprProcessor"/>, <see cref="SchemaVersionChecker"/> and <see cref="IUnitOfWork"/>.
+    /// <see cref="GdprProcessor"/>, <see cref="SchemaVersionChecker"/>,
+    /// <see cref="ISensitiveDataStore"/>, <see cref="ISensitiveDataResolver"/> and <see cref="IUnitOfWork"/>.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Optional callback to configure kernel options.</param>
@@ -70,6 +71,8 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<NpgsqlDataSource>(),
                 sp.GetRequiredService<BusinessEventWriter>(),
                 sp.GetRequiredService<ILogger<GdprProcessor>>()));
+
+        services.AddSensitiveDataStore();
 
         services.AddSingleton<IUnitOfWork>(sp =>
             new NpgsqlUnitOfWork(

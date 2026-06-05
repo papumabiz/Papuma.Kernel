@@ -248,6 +248,35 @@ CREATE INDEX idx_event_outbox_status_retry ON event_outbox (status, next_retry_a
 
 ---
 
+### `sensitive_data_versions` – Versionierter Store fuer sensible Inhalte (Schema v3)
+
+Fuer DSGVO-relevante Inhalte steht ein separater, versionierter Store zur Verfuegung. Events koennen nur eine Referenz (`sensitiveRef`) enthalten, waehrend der eigentliche sensitive JSON-Inhalt hier gespeichert wird.
+
+```sql
+CREATE TABLE sensitive_data_versions (
+    sensitive_ref  UUID        NOT NULL,
+    version        INT         NOT NULL,
+    scope          TEXT        NOT NULL CHECK (scope IN ('Platform', 'Tenant')),
+    tenant_id      TEXT        NULL,
+    schema_version INT         NOT NULL DEFAULT 1,
+    payload        JSONB       NOT NULL,
+    redacted       BOOLEAN     NOT NULL DEFAULT FALSE,
+    deleted        BOOLEAN     NOT NULL DEFAULT FALSE,
+    legal_hold     BOOLEAN     NOT NULL DEFAULT FALSE,
+    reason         TEXT        NULL,
+    actor_id       TEXT        NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (sensitive_ref, version)
+);
+```
+
+Kernregeln:
+- neue Versionen werden append-only geschrieben
+- Redaction/Deletion werden als neue Version markiert statt in-place Mutation
+- Scope/RLS-Regeln folgen dem bestehenden Platform/Tenant-Modell
+
+---
+
 ### Domain-Tabellen (Beispiel: `users`)
 
 Die eigentlichen Daten leben in normalen Tabellen. Das ist die CRUD Truth.

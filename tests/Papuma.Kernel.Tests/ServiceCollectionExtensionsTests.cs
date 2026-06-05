@@ -41,6 +41,8 @@ public class ServiceCollectionExtensionsTests
         Assert.NotNull(provider.GetRequiredService<OutboxWriter>());
         Assert.NotNull(provider.GetRequiredService<GdprProcessor>());
         Assert.NotNull(provider.GetRequiredService<SchemaVersionChecker>());
+        Assert.NotNull(provider.GetRequiredService<ISensitiveDataStore>());
+        Assert.NotNull(provider.GetRequiredService<ISensitiveDataResolver>());
         Assert.NotNull(provider.GetRequiredService<IUnitOfWork>());
     }
 
