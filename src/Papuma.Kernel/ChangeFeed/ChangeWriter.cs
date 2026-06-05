@@ -13,6 +13,8 @@ namespace Papuma.Kernel.ChangeFeed;
 /// </summary>
 public sealed class ChangeWriter
 {
+    private const string IdempotencyConflictConstraintName = "ux_change_feed_idempotency_key";
+
     private readonly ChangeWriterOptions _options;
 
     /// <summary>
@@ -49,36 +51,47 @@ public sealed class ChangeWriter
         string actorId,
         string? correlationId = null,
         string? causationId = null,
+        string? idempotencyKey = null,
         CancellationToken ct = default)
     {
+        ValidateInputs(entity, entityId, eventType, version, payloadJson, actorId, idempotencyKey);
         ArgumentNullException.ThrowIfNull(transaction);
         ArgumentNullException.ThrowIfNull(scope);
 
-        ValidateInputs(entity, entityId, eventType, version, payloadJson, actorId);
-
         await SetScopeOnConnectionAsync(transaction.Connection!, scope, ct);
 
-        await using var cmd = transaction.Connection!.CreateCommand();
-        cmd.Transaction = transaction;
-        cmd.CommandText = """
-            INSERT INTO change_feed
-                (scope, tenant_id, entity, entity_id, event_type, version, correlation_id, causation_id, actor_id, payload)
-            VALUES
-                (@scope, @tenantId, @entity, @entityId, @eventType, @version, @correlationId, @causationId, @actorId, @payload::jsonb)
-            """;
+        try
+        {
+            await using var cmd = transaction.Connection!.CreateCommand();
+            cmd.Transaction = transaction;
+            cmd.CommandText = """
+                INSERT INTO change_feed
+                    (scope, tenant_id, entity, entity_id, event_type, version, correlation_id, causation_id, actor_id, payload, idempotency_key)
+                VALUES
+                    (@scope, @tenantId, @entity, @entityId, @eventType, @version, @correlationId, @causationId, @actorId, @payload::jsonb, @idempotencyKey)
+                """;
 
-        cmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
-        cmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("entity", entity);
-        cmd.Parameters.AddWithValue("entityId", entityId);
-        cmd.Parameters.AddWithValue("eventType", eventType);
-        cmd.Parameters.AddWithValue("version", version);
-        cmd.Parameters.AddWithValue("correlationId", (object?)correlationId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("causationId", (object?)causationId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("actorId", actorId);
-        cmd.Parameters.AddWithValue("payload", payloadJson);
+            cmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+            cmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("entity", entity);
+            cmd.Parameters.AddWithValue("entityId", entityId);
+            cmd.Parameters.AddWithValue("eventType", eventType);
+            cmd.Parameters.AddWithValue("version", version);
+            cmd.Parameters.AddWithValue("correlationId", (object?)correlationId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("causationId", (object?)causationId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("actorId", actorId);
+            cmd.Parameters.AddWithValue("payload", payloadJson);
+            cmd.Parameters.AddWithValue("idempotencyKey", (object?)idempotencyKey ?? DBNull.Value);
 
-        await cmd.ExecuteNonQueryAsync(ct);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+        catch (PostgresException ex) when (
+            idempotencyKey is not null &&
+            ex.SqlState == PostgresErrorCodes.UniqueViolation &&
+            string.Equals(ex.ConstraintName, IdempotencyConflictConstraintName, StringComparison.Ordinal))
+        {
+            return;
+        }
     }
 
     private static async Task SetScopeOnConnectionAsync(
@@ -116,7 +129,8 @@ public sealed class ChangeWriter
         string eventType,
         int version,
         string payloadJson,
-        string actorId)
+        string actorId,
+        string? idempotencyKey = null)
     {
         InputValidator.ValidateEntity(entity);
         InputValidator.ValidateEntityId(entityId);
@@ -124,5 +138,10 @@ public sealed class ChangeWriter
         InputValidator.ValidateVersion(version);
         InputValidator.ValidateActorId(actorId);
         InputValidator.ValidatePayloadSize(payloadJson, _options.MaxPayloadSizeBytes);
+
+        if (idempotencyKey is not null)
+        {
+            InputValidator.ValidateIdempotencyKey(idempotencyKey);
+        }
     }
 }

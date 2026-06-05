@@ -68,6 +68,21 @@ Die Projections laufen mit **at-least-once Verarbeitung**. Das bedeutet:
 
 Ohne diese drei Punkte ist das System nicht robust genug für Produktion.
 
+## Idempotenz-Regel (wichtig)
+
+Für retrybare Write-Pfade gilt folgende Konvention:
+
+1. `change_feed` immer idempotency-key-faehig betreiben.
+2. `business_event_log` idempotency-key-faehig halten, aber aktiv nur in retrybaren Pfaden nutzen.
+3. Der gleiche fachliche Vorgang muss bei Retries denselben `idempotencyKey` behalten.
+
+Typische retrybare Pfade:
+- HTTP-Endpoints mit Client-Retry
+- Message-Consumer mit mindestens einmaliger Zustellung
+- Scheduler/Jobs mit Retry-Policy
+
+Duplikate im Change Feed wirken direkt auf Projektionen; deshalb ist dort die Idempotenz-Absicherung besonders wichtig.
+
 ## Event-Typen (wichtig)
 
 Im Kernel gibt es zwei Event-Klassen mit unterschiedlicher Aufgabe:

@@ -146,4 +146,19 @@ public class ChangeWriterTests
 
         Assert.Equal("payloadJson", exception.ParamName);
     }
+
+    [Fact]
+    public void ValidateInputs_RejectsTooLongIdempotencyKey()
+    {
+        var exception = Assert.Throws<ArgumentException>(() => _sut.ValidateInputs(
+            entity: "UserProfile",
+            entityId: "user-123",
+            eventType: "UserEmailUpdated",
+            version: 1,
+            payloadJson: "{}",
+            actorId: "system:scheduler",
+            idempotencyKey: new string('a', 201)));
+
+        Assert.Equal("idempotencyKey", exception.ParamName);
+    }
 }

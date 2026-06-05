@@ -13,6 +13,8 @@ namespace Papuma.Kernel.Events;
 /// </summary>
 public sealed class BusinessEventWriter
 {
+    private const string IdempotencyConflictConstraintName = "ux_business_event_log_idempotency_key";
+
     private readonly BusinessEventWriterOptions _options;
 
     /// <summary>
@@ -48,11 +50,17 @@ public sealed class BusinessEventWriter
         string? entityId = null,
         string? correlationId = null,
         string? causationId = null,
+        string? idempotencyKey = null,
         CancellationToken ct = default)
     {
         InputValidator.ValidateEventType(eventType);
         InputValidator.ValidateActorId(actorId);
         InputValidator.ValidatePayloadSize(payloadJson, _options.MaxPayloadSizeBytes);
+
+        if (idempotencyKey is not null)
+        {
+            InputValidator.ValidateIdempotencyKey(idempotencyKey);
+        }
 
         if (entity is not null)
         {
@@ -71,29 +79,54 @@ public sealed class BusinessEventWriter
 
         var eventId = Guid.NewGuid();
 
-        await using var cmd = transaction.Connection!.CreateCommand();
-        cmd.Transaction = transaction;
-        cmd.CommandText = """
-            INSERT INTO business_event_log
-                (event_id, scope, tenant_id, event_type, entity, entity_id, actor_id,
-                 correlation_id, causation_id, payload)
-            VALUES
-                (@eventId, @scope, @tenantId, @eventType, @entity, @entityId, @actorId,
-                 @correlationId, @causationId, @payload::jsonb)
-            """;
+        try
+        {
+            await using var cmd = transaction.Connection!.CreateCommand();
+            cmd.Transaction = transaction;
+            cmd.CommandText = """
+                INSERT INTO business_event_log
+                    (event_id, scope, tenant_id, event_type, entity, entity_id, actor_id,
+                     correlation_id, causation_id, payload, idempotency_key)
+                VALUES
+                    (@eventId, @scope, @tenantId, @eventType, @entity, @entityId, @actorId,
+                     @correlationId, @causationId, @payload::jsonb, @idempotencyKey)
+                """;
 
-        cmd.Parameters.AddWithValue("eventId", eventId);
-        cmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
-        cmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("eventType", eventType);
-        cmd.Parameters.AddWithValue("entity", (object?)entity ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("entityId", (object?)entityId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("actorId", actorId);
-        cmd.Parameters.AddWithValue("correlationId", (object?)correlationId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("causationId", (object?)causationId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("payload", payloadJson);
+            cmd.Parameters.AddWithValue("eventId", eventId);
+            cmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+            cmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("eventType", eventType);
+            cmd.Parameters.AddWithValue("entity", (object?)entity ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("entityId", (object?)entityId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("actorId", actorId);
+            cmd.Parameters.AddWithValue("correlationId", (object?)correlationId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("causationId", (object?)causationId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("payload", payloadJson);
+            cmd.Parameters.AddWithValue("idempotencyKey", (object?)idempotencyKey ?? DBNull.Value);
 
-        await cmd.ExecuteNonQueryAsync(ct);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+        catch (PostgresException ex) when (
+            idempotencyKey is not null &&
+            ex.SqlState == PostgresErrorCodes.UniqueViolation &&
+            string.Equals(ex.ConstraintName, IdempotencyConflictConstraintName, StringComparison.Ordinal))
+        {
+            await using var lookupCmd = transaction.Connection!.CreateCommand();
+            lookupCmd.Transaction = transaction;
+            lookupCmd.CommandText = """
+                SELECT event_id
+                FROM business_event_log
+                WHERE scope = @scope
+                  AND ((@tenantId IS NULL AND tenant_id IS NULL) OR tenant_id = @tenantId)
+                  AND idempotency_key = @idempotencyKey
+                """;
+            lookupCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+            lookupCmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
+            lookupCmd.Parameters.AddWithValue("idempotencyKey", idempotencyKey);
+
+            var existingEventId = await lookupCmd.ExecuteScalarAsync(ct);
+            return existingEventId is Guid guid ? guid : eventId;
+        }
 
         return eventId;
     }

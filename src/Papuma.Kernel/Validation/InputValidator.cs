@@ -112,4 +112,19 @@ public static class InputValidator
             throw new ArgumentException("version must be >= 1.", nameof(version));
         }
     }
+
+    /// <summary>
+    /// Validates an idempotency key.
+    /// </summary>
+    /// <param name="idempotencyKey">The idempotency key to validate.</param>
+    /// <exception cref="ArgumentException">Thrown when the key is invalid.</exception>
+    public static void ValidateIdempotencyKey(string idempotencyKey)
+    {
+        if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Length > 200)
+        {
+            throw new ArgumentException(
+                "idempotencyKey is required and must not exceed 200 characters.",
+                nameof(idempotencyKey));
+        }
+    }
 }

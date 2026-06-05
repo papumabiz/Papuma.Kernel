@@ -114,6 +114,18 @@ public class BusinessEventWriterTests
     }
 
     [Fact]
+    public async Task AppendAsync_ThrowsForTooLongIdempotencyKey()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() => _sut.AppendAsync(
+            transaction: null!,
+            scope: ScopeContext.Tenant("acme"),
+            eventType: "UserLoggedIn",
+            actorId: "user:123",
+            payloadJson: "{}",
+            idempotencyKey: new string('a', 201)));
+    }
+
+    [Fact]
     public async Task AppendAsync_AllowsNullEntityAndEntityId()
     {
         // Should fail on null transaction, not on validation – entity/entityId are optional.

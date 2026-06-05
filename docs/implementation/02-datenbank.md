@@ -21,6 +21,7 @@ CREATE TABLE change_feed (
     causation_id   TEXT        NULL,
     actor_id       TEXT        NOT NULL,
     payload        JSONB       NOT NULL,
+    idempotency_key TEXT       NULL,
     timestamp      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     redacted       BOOLEAN     NOT NULL DEFAULT FALSE
 );
@@ -31,6 +32,9 @@ CREATE INDEX idx_change_feed_event_type    ON change_feed (event_type);
 CREATE INDEX idx_change_feed_not_redacted  ON change_feed (sequence_id) WHERE redacted = FALSE;
 CREATE INDEX idx_change_feed_correlation   ON change_feed (correlation_id) WHERE correlation_id IS NOT NULL;
 CREATE INDEX idx_change_feed_actor         ON change_feed (actor_id);
+CREATE UNIQUE INDEX ux_change_feed_idempotency_key
+    ON change_feed (scope, tenant_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
 ```
 
 **Spalten erklärt:**
@@ -46,6 +50,7 @@ CREATE INDEX idx_change_feed_actor         ON change_feed (actor_id);
 | `causation_id` | `TEXT` | Optional. Referenziert das Event, das dieses Event **direkt ausgelöst** hat. Ermöglicht die Rekonstruktion von Kausalketten (Event A → Event B → Event C). Siehe Abschnitt "Correlation vs. Causation" unten. |
 | `actor_id` | `TEXT` | **Pflichtfeld.** Identifiziert den Akteur, der die Änderung ausgelöst hat – z.B. eine User-ID, `"system"`, `"migration"`, `"scheduler"`. Unverzichtbar für Audit-Trails und Nachvollziehbarkeit. Ohne `actor_id` ist Forensik bei Sicherheitsvorfällen unmöglich. |
 | `payload` | `JSONB` | Nutzdaten des Events als JSON. JSONB ermöglicht indexierte Queries auf Felder. |
+| `idempotency_key` | `TEXT` | Optional. Verhindert doppelte Writes bei wiederholten Requests mit derselben fachlichen Aktion. |
 | `timestamp` | `TIMESTAMPTZ` | Zeitpunkt des Events, immer UTC. |
 | `redacted` | `BOOLEAN` | DSGVO: wurde dieses Event auf Wunsch des Nutzers gelöscht/unkenntlich gemacht? |
 
@@ -59,6 +64,7 @@ CREATE INDEX idx_change_feed_actor         ON change_feed (actor_id);
 | `idx_change_feed_not_redacted` | **Partieller Index**: Nur nicht-redacted Events. Beschleunigt die Polling-Query der Projections erheblich, da redacted Events aus dem Index ausgeschlossen werden. |
 | `idx_change_feed_correlation` | **Partieller Index**: Nur Events mit `correlation_id`. Ermöglicht schnelles Nachverfolgen zusammengehöriger Änderungen. |
 | `idx_change_feed_actor` | Ermöglicht schnelle Abfrage aller Änderungen eines bestimmten Akteurs (z.B. "Zeige alle Änderungen von User X"). |
+| `ux_change_feed_idempotency_key` | Eindeutigkeit für retrybare Writes. Dieselbe fachliche Aktion darf nicht zweimal denselben Change-Feed-Eintrag erzeugen. |
 
 ### Correlation vs. Causation
 
@@ -203,6 +209,7 @@ CREATE TABLE business_event_log (
     correlation_id TEXT        NULL,
     causation_id   TEXT        NULL,
     payload        JSONB       NOT NULL,
+    idempotency_key TEXT       NULL,
     occurred_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     redacted       BOOLEAN     NOT NULL DEFAULT FALSE
 );
@@ -211,6 +218,9 @@ CREATE INDEX idx_business_event_type        ON business_event_log (event_type);
 CREATE INDEX idx_business_event_occurred_at ON business_event_log (occurred_at);
 CREATE INDEX idx_business_event_entity      ON business_event_log (entity, entity_id);
 CREATE INDEX idx_business_event_actor       ON business_event_log (actor_id);
+CREATE UNIQUE INDEX ux_business_event_log_idempotency_key
+    ON business_event_log (scope, tenant_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
 ```
 
 **Änderungen gegenüber der Minimalversion:**

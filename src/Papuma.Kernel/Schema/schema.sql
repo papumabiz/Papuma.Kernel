@@ -13,6 +13,7 @@ CREATE TABLE change_feed (
     causation_id   TEXT        NULL,
     actor_id       TEXT        NOT NULL,
     payload        JSONB       NOT NULL,
+    idempotency_key TEXT       NULL,
     timestamp      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     redacted       BOOLEAN     NOT NULL DEFAULT FALSE,
     CONSTRAINT ck_change_feed_scope_tenant
@@ -30,6 +31,9 @@ CREATE INDEX idx_change_feed_event_type    ON change_feed (event_type);
 CREATE INDEX idx_change_feed_not_redacted  ON change_feed (scope, tenant_id, sequence_id) WHERE redacted = FALSE;
 CREATE INDEX idx_change_feed_correlation   ON change_feed (correlation_id) WHERE correlation_id IS NOT NULL;
 CREATE INDEX idx_change_feed_actor         ON change_feed (actor_id);
+CREATE UNIQUE INDEX ux_change_feed_idempotency_key
+    ON change_feed (scope, tenant_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
 
 ALTER TABLE change_feed ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_change_feed ON change_feed;
@@ -92,6 +96,7 @@ CREATE TABLE business_event_log (
     correlation_id TEXT        NULL,
     causation_id   TEXT        NULL,
     payload        JSONB       NOT NULL,
+    idempotency_key TEXT       NULL,
     occurred_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     redacted       BOOLEAN     NOT NULL DEFAULT FALSE,
     CONSTRAINT ck_business_event_scope_tenant
@@ -106,6 +111,9 @@ CREATE INDEX idx_business_event_type        ON business_event_log (event_type);
 CREATE INDEX idx_business_event_occurred_at ON business_event_log (occurred_at);
 CREATE INDEX idx_business_event_entity      ON business_event_log (scope, tenant_id, entity, entity_id);
 CREATE INDEX idx_business_event_actor       ON business_event_log (actor_id);
+CREATE UNIQUE INDEX ux_business_event_log_idempotency_key
+    ON business_event_log (scope, tenant_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
 
 ALTER TABLE business_event_log ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_business_event_log ON business_event_log;

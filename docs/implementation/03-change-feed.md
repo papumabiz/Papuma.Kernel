@@ -62,8 +62,11 @@ Der `ChangeWriter` validiert alle Eingaben **vor** dem Schreiben. Das verhindert
 | `actorId` | **Pflichtfeld**, nicht leer, max. 200 Zeichen | Audit-Trail darf keine Lücken haben |
 | `payloadJson` | Max. 256 KB (konfigurierbar) | Verhindert DoS durch überdimensionierte Payloads |
 | `version` | `>= 1` | Semantisch ungültige Versionen verhindern |
+| `idempotencyKey` | Optional, max. 200 Zeichen | Verhindert doppelte Writes bei Retry derselben fachlichen Aktion |
 
 > ⚠️ **`actorId` ist ein Pflichtfeld.** Jede Änderung im System muss einem Akteur zugeordnet werden können. Ohne `actorId` ist der Audit-Trail unvollständig und Forensik bei Sicherheitsvorfällen unmöglich. Für automatische Prozesse: `"system:scheduler"`, `"system:migration"`, etc.
+
+> ℹ️ **`idempotencyKey` ist optional, aber für retrybare Write-Pfade empfohlen.** Derselbe Key verhindert doppelte Change-Feed-Einträge bei erneuten Requests nach transienten Fehlern. Das gleiche Muster ist auch für den Business Event Log sinnvoll, wenn dieselbe fachliche Aktion dort ebenfalls mehrfach geschrieben werden könnte.
 
 ```csharp
 // src/Kernel/ChangeFeed/ChangeWriterOptions.cs
@@ -76,6 +79,23 @@ public class ChangeWriterOptions
     public int MaxPayloadSizeBytes { get; set; } = 256 * 1024;
 }
 ```
+
+Wenn der Write-Pfad retrybar ist, sollte zusätzlich ein `idempotencyKey` gesetzt werden. Dann kann der gleiche fachliche Vorgang ohne doppelte Einträge erneut ausgeführt werden.
+
+### Guideline: Wo ist der Idempotency-Key Pflicht?
+
+| Entry-Point | Change Feed (`change_feed`) | Event Log (`business_event_log`) | Empfehlung |
+|---|---|---|---|
+| HTTP Command Endpoint mit Client-Retry | Pflicht | Aktiv nutzen | Gleichen Key pro fachlichem Command durchreichen |
+| Message Consumer mit mindestens einmaliger Zustellung | Pflicht | Aktiv nutzen | Message-ID oder deterministischen Command-Key verwenden |
+| Geplanter Job mit Retry-Policy | Pflicht | Aktiv nutzen | Job-Run + fachlichen Schlüssel kombinieren |
+| Interner synchroner Pfad ohne Retry und ohne externen Re-Dispatch | Empfohlen | Optional | Key kann gesetzt werden, ist aber nicht zwingend |
+| Reine technische Status-/Diagnose-Events | Nicht relevant | Optional | Nur setzen, wenn Duplikate fachlich stoeren |
+
+Kurzregel:
+1. Change Feed immer idempotent-key-faehig behandeln.
+2. Event Log nur fuer retrybare Pfade aktiv mit Key nutzen.
+3. Der gleiche fachliche Vorgang muss in einem Retry denselben Key behalten.
 
 ```csharp
 // src/Kernel/ChangeFeed/ChangeWriter.cs
@@ -99,10 +119,11 @@ public class ChangeWriter
         string actorId,
         string? correlationId = null,
         string? causationId = null,
+        string? idempotencyKey = null,
         CancellationToken ct = default)
     {
         // Validierung (Defense in Depth) – delegiert an shared InputValidator
-        ValidateInputs(entity, entityId, eventType, version, payloadJson, actorId);
+        ValidateInputs(entity, entityId, eventType, version, payloadJson, actorId, idempotencyKey);
 
         await SetScopeOnConnectionAsync(transaction.Connection!, scope, ct);
 
@@ -110,9 +131,9 @@ public class ChangeWriter
         cmd.Transaction = transaction;
         cmd.CommandText = """
             INSERT INTO change_feed
-                (scope, tenant_id, entity, entity_id, event_type, version, correlation_id, causation_id, actor_id, payload)
+                (scope, tenant_id, entity, entity_id, event_type, version, correlation_id, causation_id, actor_id, payload, idempotency_key)
             VALUES
-                (@scope, @tenantId, @entity, @entityId, @eventType, @version, @correlationId, @causationId, @actorId, @payload::jsonb)
+                (@scope, @tenantId, @entity, @entityId, @eventType, @version, @correlationId, @causationId, @actorId, @payload::jsonb, @idempotencyKey)
             """;
 
         cmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
@@ -125,6 +146,7 @@ public class ChangeWriter
         cmd.Parameters.AddWithValue("causationId",   (object?)causationId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("actorId",       actorId);
         cmd.Parameters.AddWithValue("payload",       payloadJson);
+        cmd.Parameters.AddWithValue("idempotencyKey", (object?)idempotencyKey ?? DBNull.Value);
 
         await cmd.ExecuteNonQueryAsync(ct);
     }

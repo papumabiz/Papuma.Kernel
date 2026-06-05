@@ -75,6 +75,7 @@ Papuma.Kernel.slnx
 |   |   |   |   +-- V001__initial.sql
 |   |   |   |   +-- V002__schema_version_tracking.sql
 |   |   |   |   +-- V003__sensitive_data_store.sql
+|   |   |   |   +-- V004__idempotency_keys.sql
 |   |   |   +-- SchemaExtensions.cs
 |   |   |   +-- SchemaVersionChecker.cs
 |   |   |   +-- schema.sql
