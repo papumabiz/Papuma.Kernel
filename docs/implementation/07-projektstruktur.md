@@ -26,6 +26,9 @@ Papuma.Kernel.slnx
 |   |   |   +-- BusinessEventWriter.cs
 |   |   |   +-- BusinessEventWriterOptions.cs
 |   |   |   +-- IOutboxPublisher.cs
+|   |   |   +-- OutboxExtensions.cs
+|   |   |   +-- OutboxWorker.cs
+|   |   |   +-- OutboxWorkerOptions.cs
 |   |   |   +-- OutboxWriter.cs
 |   |   |   +-- OutboxWriterOptions.cs
 |   |   +-- Gdpr/
@@ -38,6 +41,7 @@ Papuma.Kernel.slnx
 |   |   |   +-- IExternalProjectionHandler.cs
 |   |   |   +-- IReplayableProjection.cs
 |   |   |   +-- IVersionedHandler.cs
+|   |   |   +-- ExternalProjectionWorker.cs
 |   |   |   +-- ProjectionWorker.cs
 |   |   |   +-- ProjectionWorkerOptions.cs
 |   |   |   +-- ProjectionRegistry.cs
@@ -114,7 +118,7 @@ app.UseScopeResolution();
 ### Phase 2 - Reale Projections
 
 1. Mehrere produktionsnahe Projection-Handler
-2. Outbox-Publisher und Betriebsprozesse
+2. Konkrete `IOutboxPublisher`-Implementierungen und Broker/Webhook-Adapter
 3. Monitoring (Lag, Failure, Health)
 
 ### Phase 3 - Skalierung

@@ -71,6 +71,7 @@ This document cross-references every claim in [`factsheet.md`](../marketing/fact
 ✅ **Confirmed.**  
 - [`ScopeContext`](../../src/Papuma.Kernel/Tenancy/ScopeContext.cs:11) is a sealed record with factory methods `Platform()` and `Tenant(tenantId)`. `Tenant()` validates the `tenantId` against a compiled regex (`^[A-Za-z][A-Za-z0-9_]{1,100}$`).
 - All three write APIs (`ChangeWriter`, `BusinessEventWriter`, `OutboxWriter`) require a `ScopeContext` parameter and call `SET LOCAL app.current_scope` / `SET LOCAL app.current_tenant` before inserting.
+- Polling workers (`ProjectionWorker`, `ExternalProjectionWorker`, `OutboxWorker`) also set scope session variables before reading RLS-protected tables.
 - All three tables have `CHECK` constraints enforcing the `Platform → tenant_id IS NULL` / `Tenant → tenant_id IS NOT NULL` invariant.
 - RLS policies are defined in [`schema.sql`](../../src/Papuma.Kernel/Schema/schema.sql:37) for all three tables.
 - Projection checkpoint names include the scope: `{HandlerName}@Platform` or `{HandlerName}@Tenant:{TenantId}` ([`ProjectionWorker`](../../src/Papuma.Kernel/Projections/ProjectionWorker.cs:60)).
@@ -83,12 +84,12 @@ This document cross-references every claim in [`factsheet.md`](../marketing/fact
 
 > *"An `event_outbox` table and `OutboxWriter` enable reliable integration with external systems."*
 
-⚠️ **Partial.**  
+✅ **Confirmed.**  
 [`OutboxWriter.EnqueueAsync()`](../../src/Papuma.Kernel/Events/OutboxWriter.cs:36) writes to `event_outbox` within a transaction. The table ([`schema.sql`](../../src/Papuma.Kernel/Schema/schema.sql:140)) has `status` (`Pending`/`Sent`/`Failed`), `attempts`, `next_retry_at`, and `last_error` columns — a complete outbox schema.
 
-**Gap:** There is no `OutboxPublisher` background worker in the library. The [`IOutboxPublisher`](../../src/Papuma.Kernel/Events/IOutboxPublisher.cs:13) interface is defined (with an explicit note that implementations must be idempotent), but the polling/dispatch loop that reads `Pending` entries and calls `IOutboxPublisher.PublishAsync()` is **not implemented** in the kernel. The developer must build this themselves.
+The library now includes [`OutboxWorker`](../../src/Papuma.Kernel/Events/OutboxWorker.cs), which polls retry-eligible outbox rows and dispatches them via [`IOutboxPublisher.PublishAsync(...)`](../../src/Papuma.Kernel/Events/IOutboxPublisher.cs:25). Registration is provided through [`AddOutboxWorker<TPublisher>()`](../../src/Papuma.Kernel/Events/OutboxExtensions.cs:27).
 
-The factsheet states *"enable reliable integration"* — this is accurate for the write side, but the delivery side is an integration point, not a provided component.
+The application still owns the concrete publisher implementation (broker/webhook adapter), while dispatch orchestration is now part of the kernel.
 
 ---
 
@@ -167,7 +168,7 @@ All inter-component communication is via PostgreSQL polling. The outbox pattern 
 | GDPR Art. 15 (access) | ✅ | Both tables, includes redacted entries |
 | Multi-Tenancy / Scope | ✅ | CHECK constraints + RLS + validated `ScopeContext` |
 | Outbox (write side) | ✅ | Schema + `OutboxWriter` present |
-| Outbox (delivery side) | ⚠️ | `IOutboxPublisher` interface only — no dispatch worker |
+| Outbox (delivery side) | ✅ | `OutboxWorker` + `IOutboxPublisher` contract |
 | ASP.NET Core integration | ✅ | Middleware + extension methods present |
 | Getting Started example | ❌ | `options.ConnectionString` does not exist in `PapumaKernelOptions` |
 | Schema Versioning | ⚠️ | `IVersionedHandler<T>` exists; version dispatch must be hand-rolled |
@@ -182,8 +183,8 @@ All inter-component communication is via PostgreSQL polling. The outbox pattern 
 1. **Getting Started — remove `options.ConnectionString`.**  
    `PapumaKernelOptions` has no such property. Replace with a note that `NpgsqlDataSource` must be registered separately.
 
-2. **Outbox — clarify the delivery gap.**  
-   Add a sentence: *"The kernel provides the write side of the outbox. Delivery to an external system requires a custom `IOutboxPublisher` implementation and a polling worker."*
+2. **Outbox — update to shipped delivery support.**  
+   State explicitly that the kernel provides `OutboxWorker` and `AddOutboxWorker<TPublisher>()`, while the concrete `IOutboxPublisher` implementation remains application-specific.
 
 3. **`IVersionedHandler` — clarify it is a contract, not a dispatcher.**  
    Add: *"Version routing within a handler must be implemented by the developer."*

@@ -342,9 +342,9 @@ In `05-versionierung.md` verwendet die `UserProjection` die `ProjectionRegistry`
 
 ---
 
-### 🟢 C4: Fehlende `event_outbox`-Verarbeitung
+### 🟢 C4: `event_outbox`-Verarbeitung
 
-Die `event_outbox`-Tabelle und der `OutboxWriter` sind definiert, aber es gibt keinen **Outbox-Publisher-Worker**, der die Outbox abarbeitet. Das ist in Phase 2 geplant, sollte aber als offener Punkt markiert sein.
+Die in dieser Analyse markierte Luecke wurde inzwischen geschlossen: Neben `OutboxWriter` existiert jetzt ein **OutboxWorker**, der `event_outbox` pollt und ueber `IOutboxPublisher` zustellt.
 
 ---
 
@@ -400,7 +400,7 @@ Diese Punkte sind für Phase 1–3 nicht relevant, sollten aber als "Known Unkno
 | C1 | Namensgebung vereinheitlichen | 🟢 Niedrig |
 | C2 | `ChangeRecord`-Konsistenz in GDPR | 🟢 Niedrig |
 | C3 | Transaktion in `ProjectionRegistry` durchreichen | 🟢 Niedrig |
-| C4 | Outbox-Publisher als offenen Punkt markieren | 🟢 Niedrig |
+| C4 | Outbox-Publisher als offenen Punkt markieren | ✅ Erledigt |
 | O1 | Graceful Shutdown dokumentieren | 🟢 Niedrig |
 
 ---
@@ -441,7 +441,7 @@ Alle Findings wurden in die Implementierungsdokumentation eingearbeitet:
 | **C1:** Namensgebung vereinheitlichen | ✅ Umgesetzt | `02-datenbank.md` (aggregate_id → entity + entity_id) |
 | **C2:** ChangeRecord-Konsistenz GDPR | ✅ Umgesetzt | `06-gdpr.md` (alle 10 Felder werden gelesen) |
 | **C3:** Transaktion in ProjectionRegistry | 📋 Offen | Für Phase 3 geplant |
-| **C4:** Outbox-Publisher | 📋 Offen | Für Phase 2 geplant |
+| **C4:** Outbox-Publisher | ✅ Umgesetzt | `OutboxWorker` + `AddOutboxWorker<TPublisher>()` vorhanden |
 | **O1:** Graceful Shutdown | 📋 Offen | Für Phase 2 geplant |
 | **O2:** OpenTelemetry | 📋 Offen | Für Phase 2 geplant |
 | **O3:** Multi-Instance-Verhalten | ✅ Dokumentiert | `07-projektstruktur.md` (Betriebsinvariante: eine Instanz in Phase 1–2) |

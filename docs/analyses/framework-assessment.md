@@ -36,7 +36,7 @@ Papuma.Kernel ist ein **überraschend vollständiges und durchdachtes Framework*
 | Fehlerbehandlung | Dead-Letter + Retry + Backoff | ✅ Vollständig |
 | Replay | `ReplayService` + `IReplayableProjection` | ✅ Vollständig |
 | Versioned Dispatch | `ProjectionRegistry` | ✅ Vollständig |
-| Externe Projektionen | `IExternalProjectionHandler` Interface | ⚠️ Nur Interface, kein Worker |
+| Externe Projektionen | `IExternalProjectionHandler` + `ExternalProjectionWorker` | ✅ Vollständig |
 | Projection-Monitoring | Kein Health-Check / Lag-Metrik | ❌ Fehlt |
 
 ### GDPR
@@ -54,7 +54,7 @@ Papuma.Kernel ist ein **überraschend vollständiges und durchdachtes Framework*
 |---|---|---|
 | Enqueue in Transaktion | `OutboxWriter.EnqueueAsync()` | ✅ Vollständig |
 | Publisher-Interface | `IOutboxPublisher` | ✅ Definiert |
-| Dispatch-Worker | — | ❌ Fehlt |
+| Dispatch-Worker | `OutboxWorker` + `AddOutboxWorker<TPublisher>()` | ✅ Vollständig |
 
 ### Multi-Tenancy
 
@@ -68,26 +68,28 @@ Papuma.Kernel ist ein **überraschend vollständiges und durchdachtes Framework*
 
 ## Erweiterungsvorschläge — priorisiert
 
-### Priorität 1: Hoher Nutzen, geringer Aufwand
+> Status 2026-06-05: Priorität 1 ist umgesetzt (`OutboxWorker`, `ExternalProjectionWorker`).
+
+### Priorität 1: Hoher Nutzen, geringer Aufwand (umgesetzt)
 
 #### 1a. OutboxWorker — Polling-Dispatcher für die Outbox
 
-**Problem:** Die Outbox hat Write-Seite (`OutboxWriter`) und Interface (`IOutboxPublisher`), aber keinen Worker, der `Pending`-Einträge pollt und an den Publisher übergibt. Jeder Nutzer muss diesen Worker selbst bauen.
+**Status:** Umgesetzt. Die Outbox hat jetzt einen `OutboxWorker`, der Einträge aus `event_outbox` pollt und über `IOutboxPublisher.PublishAsync(...)` zustellt.
 
-**Vorschlag:** Ein `OutboxWorker : BackgroundService` analog zum `ProjectionWorker`:
-- Pollt `event_outbox WHERE status = 'Pending' AND next_retry_at <= NOW()`
-- Ruft `IOutboxPublisher.PublishAsync()` auf
-- Setzt `status = 'Sent'` bei Erfolg, `status = 'Failed'` + `attempts++` bei Fehler
-- Exponential Backoff wie beim ProjectionWorker
-- Dead-Letter nach N Versuchen
+**Umsetzung:** `OutboxWorker : BackgroundService` analog zum `ProjectionWorker`:
+- Pollt `event_outbox` mit `status IN ('Pending', 'Failed')`, `next_retry_at <= NOW()`, `attempts < MaxAttempts`
+- Ruft `IOutboxPublisher.PublishAsync(scope, eventId, eventType, payloadJson, ct)` auf
+- Setzt `status = 'Sent'` bei Erfolg, erhöht bei Fehlern `attempts`, setzt `status = 'Failed'`, `last_error` und `next_retry_at`
+- Exponential Backoff analog zu Projections
+- Dead-Letter via Max-Attempts-Grenze
 
-**Aufwand:** Gering — das Pattern existiert bereits im `ProjectionWorker`.
+**Aufwand:** Erledigt.
 
 ```
 ┌─────────────────────────────────────────────┐
 │              OutboxWorker                   │
 │                                             │
-│  Poll: event_outbox WHERE Pending           │
+│  Poll: event_outbox WHERE Pending/Failed    │
 │       ↓                                     │
 │  IOutboxPublisher.PublishAsync()            │
 │       ↓                                     │
@@ -97,11 +99,11 @@ Papuma.Kernel ist ein **überraschend vollständiges und durchdachtes Framework*
 
 #### 1b. ExternalProjectionWorker
 
-**Problem:** `IExternalProjectionHandler` ist definiert (für Projektionen in externe Systeme wie Elasticsearch), aber es gibt keinen Worker dafür. Der bestehende `ProjectionWorker` erwartet `IProjectionHandler` mit `NpgsqlConnection`/`NpgsqlTransaction` — das passt nicht für externe Systeme.
+**Status:** Umgesetzt. `IExternalProjectionHandler` wird jetzt durch `ExternalProjectionWorker` ausgeführt.
 
-**Vorschlag:** Ein `ExternalProjectionWorker` der `IExternalProjectionHandler.HandleAsync(record, ct)` aufruft — ohne Transaktions-Kopplung, aber mit demselben Checkpoint/Retry-Mechanismus.
+**Umsetzung:** `ExternalProjectionWorker` ruft `IExternalProjectionHandler.HandleAsync(record, ct)` auf, ohne Transaktions-Kopplung in den Handlern, aber mit demselben Checkpoint/Retry-Mechanismus wie beim internen Worker.
 
-**Aufwand:** Gering — fast identisch zum bestehenden Worker, nur ohne Transaktions-Parameter.
+**Aufwand:** Erledigt.
 
 ---
 
@@ -183,7 +185,7 @@ graph TD
         PR[ProjectionRegistry]
     end
 
-    subgraph Vorgeschlagen - Prio 1
+    subgraph Umgesetzt - Prio 1
         OWK[OutboxWorker]
         EPW[ExternalProjectionWorker]
     end
@@ -222,10 +224,10 @@ graph TD
 
 ## Fazit
 
-Das Framework ist in seinem Kern **produktionsreif und architektonisch sauber**. Die wichtigsten Lücken sind:
+Das Framework ist in seinem Kern **produktionsreif und architektonisch sauber**. Nach der Umsetzung von Priorität 1 sind die wichtigsten verbleibenden Lücken:
 
-1. **OutboxWorker** — die offensichtlichste Lücke, weil die Write-Seite komplett ist aber die Delivery-Seite fehlt
-2. **ExternalProjectionWorker** — das Interface existiert bereits, der Worker fehlt
-3. **Projection-Monitoring** — in Produktion unverzichtbar
+1. **Projection-Monitoring** — in Produktion unverzichtbar
+2. **Change Feed Reader** — hilfreich für Admin/Debug/Export
+3. **Schema-Migrationspfad** — sinnvoll bei evolutionären Änderungen
 
-Alle drei Erweiterungen folgen dem bestehenden Pattern des `ProjectionWorker` und erfordern keine Architekturänderungen. Sie machen das Framework *vollständiger*, ohne es *komplexer* zu machen — und das ist genau die richtige Balance für Papuma.Kernel.
+Die umgesetzten Erweiterungen folgen dem bestehenden Pattern des `ProjectionWorker` und erfordern keine Architekturänderung. Damit wurde das Framework vollständiger, ohne unnötige Komplexität einzuführen.

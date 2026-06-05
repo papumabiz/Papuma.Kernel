@@ -161,9 +161,9 @@ PostgreSQL `SET` akzeptiert **keine parametrisierten Werte** in allen Versionen/
 
 **Umsetzung:** [`AddReplayService()`](src/Papuma.Kernel/Projections/ProjectionExtensions.cs) in `ProjectionExtensions` ergänzt. Entdeckt automatisch alle `ProjectionWorker`-Instanzen über `IHostedService` und baut das Dictionary über die neue [`ProjectionWorker.ProjectionName`](src/Papuma.Kernel/Projections/ProjectionWorker.cs)-Property.
 
-#### 5.2.2 Outbox-Publisher-Worker fehlt → ✅ Interface definiert
+#### 5.2.2 Outbox-Publisher-Worker → ✅ Worker + Registrierung umgesetzt
 
-**Umsetzung:** [`IOutboxPublisher`](src/Papuma.Kernel/Events/IOutboxPublisher.cs) Interface definiert mit `PublishAsync(Guid eventId, string eventType, string payloadJson, CancellationToken ct)`. App-Entwickler implementieren dieses Interface für ihren konkreten Broker (RabbitMQ, Kafka, Webhook, etc.).
+**Umsetzung:** [`OutboxWorker`](src/Papuma.Kernel/Events/OutboxWorker.cs) verarbeitet `event_outbox` mit Retry/Backoff und ruft [`IOutboxPublisher`](src/Papuma.Kernel/Events/IOutboxPublisher.cs) auf. Die DI-Registrierung erfolgt über [`AddOutboxWorker<TPublisher>()`](src/Papuma.Kernel/Events/OutboxExtensions.cs). Die App implementiert weiterhin nur den konkreten Publisher (RabbitMQ, Kafka, Webhook, etc.).
 
 #### 5.2.3 Kein `AddPapumaKernel()`-Convenience-Extension → ✅ Behoben
 
@@ -222,7 +222,7 @@ Einrückung in [`GdprProcessor.cs`](src/Papuma.Kernel/Gdpr/GdprProcessor.cs) kor
 
 5. ✅ **`AddPapumaKernel()`-Extension** – Registriert alle Kern-Services mit konfigurierbaren `PapumaKernelOptions`
 6. ✅ **`ReplayService` DI-Registrierung** – `AddReplayService()` entdeckt Worker automatisch über `IHostedService`
-7. ✅ **`IOutboxPublisher`-Interface** – Definiert den Vertrag für App-spezifische Publisher-Implementierungen
+7. ✅ **Outbox-Delivery im Kernel** – `OutboxWorker` + `AddOutboxWorker<TPublisher>()` + `IOutboxPublisher`-Vertrag
 
 ### Priorität 3 (Code-Qualität) → ✅ Vollständig umgesetzt
 
