@@ -9,6 +9,7 @@ using Npgsql;
 using Papuma.Kernel.ChangeFeed;
 using Papuma.Kernel.Events;
 using Papuma.Kernel.Gdpr;
+using Papuma.Kernel.Schema;
 using Papuma.Kernel.Transactions;
 
 namespace Papuma.Kernel;
@@ -22,7 +23,7 @@ public static class ServiceCollectionExtensions
     /// Registers the core Papuma.Kernel services: <see cref="ChangeWriter"/>,
     /// <see cref="ChangeFeedReader"/>,
     /// <see cref="BusinessEventWriter"/>, <see cref="OutboxWriter"/>,
-    /// <see cref="GdprProcessor"/> and <see cref="IUnitOfWork"/>.
+    /// <see cref="GdprProcessor"/>, <see cref="SchemaVersionChecker"/> and <see cref="IUnitOfWork"/>.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Optional callback to configure kernel options.</param>
@@ -61,6 +62,8 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<OutboxWriter>(sp =>
             new OutboxWriter(sp.GetRequiredService<OutboxWriterOptions>()));
+
+        services.AddSingleton<SchemaVersionChecker>();
 
         services.AddSingleton<GdprProcessor>(sp =>
             new GdprProcessor(

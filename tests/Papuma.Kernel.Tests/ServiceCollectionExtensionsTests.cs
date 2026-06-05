@@ -10,6 +10,7 @@ using Papuma.Kernel;
 using Papuma.Kernel.ChangeFeed;
 using Papuma.Kernel.Events;
 using Papuma.Kernel.Gdpr;
+using Papuma.Kernel.Schema;
 using Papuma.Kernel.Transactions;
 
 namespace Papuma.Kernel.Tests;
@@ -39,6 +40,7 @@ public class ServiceCollectionExtensionsTests
         Assert.NotNull(provider.GetRequiredService<BusinessEventWriter>());
         Assert.NotNull(provider.GetRequiredService<OutboxWriter>());
         Assert.NotNull(provider.GetRequiredService<GdprProcessor>());
+        Assert.NotNull(provider.GetRequiredService<SchemaVersionChecker>());
         Assert.NotNull(provider.GetRequiredService<IUnitOfWork>());
     }
 

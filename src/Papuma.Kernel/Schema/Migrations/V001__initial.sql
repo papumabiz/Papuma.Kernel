@@ -190,13 +190,3 @@ CREATE POLICY scope_isolation_event_outbox ON event_outbox
             AND scope = 'Platform'
         )
     );
-
--- papuma_schema_version
-CREATE TABLE IF NOT EXISTS papuma_schema_version (
-    version    INT         PRIMARY KEY,
-    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-INSERT INTO papuma_schema_version (version)
-VALUES (2)
-ON CONFLICT (version) DO NOTHING;
