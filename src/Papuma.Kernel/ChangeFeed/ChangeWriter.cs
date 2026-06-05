@@ -58,7 +58,7 @@ public sealed class ChangeWriter
         ArgumentNullException.ThrowIfNull(transaction);
         ArgumentNullException.ThrowIfNull(scope);
 
-        await SetScopeOnConnectionAsync(transaction.Connection!, scope, ct);
+        await transaction.Connection!.SetScopeAsync(scope, ct);
 
         try
         {
@@ -91,26 +91,6 @@ public sealed class ChangeWriter
             string.Equals(ex.ConstraintName, IdempotencyConflictConstraintName, StringComparison.Ordinal))
         {
             return;
-        }
-    }
-
-    private static async Task SetScopeOnConnectionAsync(
-        NpgsqlConnection connection,
-        ScopeContext scope,
-        CancellationToken ct)
-    {
-        await using (var scopeCmd = connection.CreateCommand())
-        {
-            scopeCmd.CommandText = "SET LOCAL app.current_scope = @scope";
-            scopeCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
-            await scopeCmd.ExecuteNonQueryAsync(ct);
-        }
-
-        await using (var tenantCmd = connection.CreateCommand())
-        {
-            tenantCmd.CommandText = "SET LOCAL app.current_tenant = @tenantId";
-            tenantCmd.Parameters.AddWithValue("tenantId", scope.TenantId ?? string.Empty);
-            await tenantCmd.ExecuteNonQueryAsync(ct);
         }
     }
 

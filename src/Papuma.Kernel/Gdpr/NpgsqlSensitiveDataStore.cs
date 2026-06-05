@@ -38,7 +38,7 @@ public sealed class NpgsqlSensitiveDataStore : ISensitiveDataStore, ISensitiveDa
         ValidateWriteInputs(scope, sensitiveRef, schemaVersion, payloadJson, actorId);
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await SetScopeOnConnectionAsync(conn, scope, ct);
+        await conn.SetScopeAsync(scope, ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
 
         var current = await LoadLatestRowAsync(conn, tx, scope, sensitiveRef, lockRow: false, ct);
@@ -83,7 +83,7 @@ public sealed class NpgsqlSensitiveDataStore : ISensitiveDataStore, ISensitiveDa
         ValidateScopeAndReference(scope, sensitiveRef);
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await SetScopeOnConnectionAsync(conn, scope, ct);
+        await conn.SetScopeAsync(scope, ct);
 
         var current = await LoadLatestRowAsync(conn, transaction: null, scope, sensitiveRef, lockRow: false, ct);
         return current is null
@@ -102,7 +102,7 @@ public sealed class NpgsqlSensitiveDataStore : ISensitiveDataStore, ISensitiveDa
         ValidateStateTransitionInputs(scope, sensitiveRef, actorId, reason);
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await SetScopeOnConnectionAsync(conn, scope, ct);
+        await conn.SetScopeAsync(scope, ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
 
         var latest = await RequireLatestRowForMutationAsync(conn, tx, scope, sensitiveRef, ct);
@@ -137,7 +137,7 @@ public sealed class NpgsqlSensitiveDataStore : ISensitiveDataStore, ISensitiveDa
         ValidateStateTransitionInputs(scope, sensitiveRef, actorId, reason);
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await SetScopeOnConnectionAsync(conn, scope, ct);
+        await conn.SetScopeAsync(scope, ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
 
         var latest = await RequireLatestRowForMutationAsync(conn, tx, scope, sensitiveRef, ct);
@@ -173,7 +173,7 @@ public sealed class NpgsqlSensitiveDataStore : ISensitiveDataStore, ISensitiveDa
         ValidateStateTransitionInputs(scope, sensitiveRef, actorId, reason);
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await SetScopeOnConnectionAsync(conn, scope, ct);
+        await conn.SetScopeAsync(scope, ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
 
         var latest = await RequireLatestRowForMutationAsync(conn, tx, scope, sensitiveRef, ct);
@@ -246,26 +246,6 @@ public sealed class NpgsqlSensitiveDataStore : ISensitiveDataStore, ISensitiveDa
         if (sensitiveRef.IsEmpty)
         {
             throw new ArgumentException("sensitiveRef must not be empty.", nameof(sensitiveRef));
-        }
-    }
-
-    private static async Task SetScopeOnConnectionAsync(
-        NpgsqlConnection connection,
-        ScopeContext scope,
-        CancellationToken ct)
-    {
-        await using (var scopeCmd = connection.CreateCommand())
-        {
-            scopeCmd.CommandText = "SET LOCAL app.current_scope = @scope";
-            scopeCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
-            await scopeCmd.ExecuteNonQueryAsync(ct);
-        }
-
-        await using (var tenantCmd = connection.CreateCommand())
-        {
-            tenantCmd.CommandText = "SET LOCAL app.current_tenant = @tenantId";
-            tenantCmd.Parameters.AddWithValue("tenantId", scope.TenantId ?? string.Empty);
-            await tenantCmd.ExecuteNonQueryAsync(ct);
         }
     }
 

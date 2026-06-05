@@ -21,12 +21,12 @@ public static class RetentionExtensions
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Optional retention worker configuration callback.</param>
-    /// <param name="scope">Optional scope filter for this worker.</param>
+    /// <param name="scopeFilter">Optional scope filter for this worker.</param>
     /// <returns>The original service collection for chaining.</returns>
     public static IServiceCollection AddRetentionWorker(
         this IServiceCollection services,
         Action<RetentionWorkerOptions>? configure = null,
-        ScopeContext? scope = null)
+        ScopeFilter? scopeFilter = null)
     {
         ArgumentNullException.ThrowIfNull(services);
 
@@ -39,7 +39,7 @@ public static class RetentionExtensions
                 sp.GetRequiredService<NpgsqlDataSource>(),
                 sp.GetRequiredService<ILogger<RetentionWorker>>(),
                 options,
-                scope);
+                scopeFilter);
         });
 
         return services;

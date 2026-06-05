@@ -47,9 +47,11 @@ public sealed class ChangeFeedReader
         ValidateLimit(limit);
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await SetScopeOnConnectionAsync(conn, scope, ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        await conn.SetScopeAsync(scope, ct);
 
         await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = """
             SELECT sequence_id, scope, tenant_id, entity, entity_id, event_type, version,
                    correlation_id, causation_id, actor_id, payload::text, timestamp
@@ -107,9 +109,11 @@ public sealed class ChangeFeedReader
         }
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await SetScopeOnConnectionAsync(conn, scope, ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        await conn.SetScopeAsync(scope, ct);
 
         await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = """
             SELECT sequence_id, scope, tenant_id, entity, entity_id, event_type, version,
                    correlation_id, causation_id, actor_id, payload::text, timestamp
@@ -149,9 +153,11 @@ public sealed class ChangeFeedReader
         ArgumentNullException.ThrowIfNull(scope);
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await SetScopeOnConnectionAsync(conn, scope, ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        await conn.SetScopeAsync(scope, ct);
 
         await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = """
             SELECT COALESCE(MAX(sequence_id), 0)
             FROM change_feed
@@ -195,26 +201,6 @@ public sealed class ChangeFeedReader
         }
 
         return records;
-    }
-
-    private static async Task SetScopeOnConnectionAsync(
-        NpgsqlConnection connection,
-        ScopeContext scope,
-        CancellationToken ct)
-    {
-        await using (var scopeCmd = connection.CreateCommand())
-        {
-            scopeCmd.CommandText = "SET LOCAL app.current_scope = @scope";
-            scopeCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
-            await scopeCmd.ExecuteNonQueryAsync(ct);
-        }
-
-        await using (var tenantCmd = connection.CreateCommand())
-        {
-            tenantCmd.CommandText = "SET LOCAL app.current_tenant = @tenantId";
-            tenantCmd.Parameters.AddWithValue("tenantId", scope.TenantId ?? string.Empty);
-            await tenantCmd.ExecuteNonQueryAsync(ct);
-        }
     }
 
     private static void ValidateLimit(int limit)

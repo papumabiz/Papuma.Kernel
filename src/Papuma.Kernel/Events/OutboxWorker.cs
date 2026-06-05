@@ -21,7 +21,7 @@ public sealed class OutboxWorker : BackgroundService
     private readonly NpgsqlDataSource _dataSource;
     private readonly ILogger<OutboxWorker> _logger;
     private readonly OutboxWorkerOptions _options;
-    private readonly ScopeContext? _scope;
+    private readonly ScopeFilter _scopeFilter;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="OutboxWorker"/> class.
@@ -30,13 +30,13 @@ public sealed class OutboxWorker : BackgroundService
     /// <param name="dataSource">The data source used to load and update outbox rows.</param>
     /// <param name="logger">The logger used for worker diagnostics.</param>
     /// <param name="options">Optional polling and retry configuration.</param>
-    /// <param name="scope">Optional scope filter for this worker.</param>
+    /// <param name="scopeFilter">Scope filter for this worker. Use <see cref="ScopeFilter.All()"/> to process all scopes.</param>
     public OutboxWorker(
         IOutboxPublisher publisher,
         NpgsqlDataSource dataSource,
         ILogger<OutboxWorker> logger,
         OutboxWorkerOptions? options = null,
-        ScopeContext? scope = null)
+        ScopeFilter? scopeFilter = null)
     {
         ArgumentNullException.ThrowIfNull(publisher);
         ArgumentNullException.ThrowIfNull(dataSource);
@@ -46,7 +46,7 @@ public sealed class OutboxWorker : BackgroundService
         _dataSource = dataSource;
         _logger = logger;
         _options = options ?? new OutboxWorkerOptions();
-        _scope = scope;
+        _scopeFilter = scopeFilter ?? ScopeFilter.All();
 
         ValidateOptions(_options);
     }
@@ -85,7 +85,10 @@ public sealed class OutboxWorker : BackgroundService
     private async Task<int> ProcessBatchAsync(CancellationToken ct)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await SetScopeOnConnectionAsync(conn, _scope, ct);
+        if (!_scopeFilter.IsAll)
+        {
+            await conn.SetScopeAsync(_scopeFilter.Scope!, ct);
+        }
 
         var entries = await LoadEntriesAsync(conn, ct);
 
@@ -159,8 +162,8 @@ public sealed class OutboxWorker : BackgroundService
             """;
 
         cmd.Parameters.AddWithValue("maxAttempts", _options.MaxAttemptsPerMessage);
-        cmd.Parameters.AddWithValue("scope", (object?)_scope?.Scope.ToString() ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("tenantId", (object?)_scope?.TenantId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("scope", (object?)_scopeFilter.Scope?.Scope.ToString() ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("tenantId", (object?)_scopeFilter.Scope?.TenantId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("batchSize", _options.BatchSize);
 
         var entries = new List<OutboxEntry>();
@@ -232,31 +235,6 @@ public sealed class OutboxWorker : BackgroundService
 
         var attempts = (int)(await cmd.ExecuteScalarAsync(ct) ?? entry.Attempts + 1);
         return attempts >= _options.MaxAttemptsPerMessage;
-    }
-
-    private static async Task SetScopeOnConnectionAsync(
-        NpgsqlConnection connection,
-        ScopeContext? scope,
-        CancellationToken ct)
-    {
-        if (scope is null)
-        {
-            return;
-        }
-
-        await using (var scopeCmd = connection.CreateCommand())
-        {
-            scopeCmd.CommandText = "SET LOCAL app.current_scope = @scope";
-            scopeCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
-            await scopeCmd.ExecuteNonQueryAsync(ct);
-        }
-
-        await using (var tenantCmd = connection.CreateCommand())
-        {
-            tenantCmd.CommandText = "SET LOCAL app.current_tenant = @tenantId";
-            tenantCmd.Parameters.AddWithValue("tenantId", scope.TenantId ?? string.Empty);
-            await tenantCmd.ExecuteNonQueryAsync(ct);
-        }
     }
 
     private static void ValidateOptions(OutboxWorkerOptions options)

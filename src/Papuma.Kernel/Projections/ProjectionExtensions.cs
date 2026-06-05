@@ -22,12 +22,12 @@ public static class ProjectionExtensions
     /// <typeparam name="THandler">The projection handler type.</typeparam>
     /// <param name="services">The service collection to add the projection to.</param>
     /// <param name="configure">Optional worker configuration callback.</param>
-    /// <param name="scope">Optional scope filter for the worker.</param>
+    /// <param name="scopeFilter">Optional scope filter for the worker.</param>
     /// <returns>The original service collection.</returns>
     public static IServiceCollection AddProjection<THandler>(
         this IServiceCollection services,
         Action<ProjectionWorkerOptions>? configure = null,
-        ScopeContext? scope = null)
+        ScopeFilter? scopeFilter = null)
         where THandler : class, IProjectionHandler
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -43,7 +43,7 @@ public static class ProjectionExtensions
                 sp.GetRequiredService<NpgsqlDataSource>(),
                 sp.GetRequiredService<ILogger<ProjectionWorker>>(),
                 options,
-                scope);
+                scopeFilter);
         });
 
         return services;
@@ -55,12 +55,12 @@ public static class ProjectionExtensions
     /// <typeparam name="THandler">The external projection handler type.</typeparam>
     /// <param name="services">The service collection to add the projection to.</param>
     /// <param name="configure">Optional worker configuration callback.</param>
-    /// <param name="scope">Optional scope filter for the worker.</param>
+    /// <param name="scopeFilter">Optional scope filter for the worker.</param>
     /// <returns>The original service collection.</returns>
     public static IServiceCollection AddExternalProjection<THandler>(
         this IServiceCollection services,
         Action<ProjectionWorkerOptions>? configure = null,
-        ScopeContext? scope = null)
+        ScopeFilter? scopeFilter = null)
         where THandler : class, IExternalProjectionHandler
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -76,7 +76,7 @@ public static class ProjectionExtensions
                 sp.GetRequiredService<NpgsqlDataSource>(),
                 sp.GetRequiredService<ILogger<ExternalProjectionWorker>>(),
                 options,
-                scope);
+                scopeFilter);
         });
 
         return services;

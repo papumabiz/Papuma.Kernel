@@ -22,7 +22,7 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
     private readonly NpgsqlDataSource _dataSource;
     private readonly ILogger<ExternalProjectionWorker> _logger;
     private readonly ProjectionWorkerOptions _options;
-    private readonly ScopeContext? _scope;
+    private readonly ScopeFilter _scopeFilter;
     private readonly string _projectionName;
 
     /// <summary>
@@ -38,7 +38,10 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
     public async Task<ProjectionLagSnapshot> GetLagSnapshotAsync(CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await SetScopeOnConnectionAsync(conn, _scope, ct);
+        if (!_scopeFilter.IsAll)
+        {
+            await conn.SetScopeAsync(_scopeFilter.Scope!, ct);
+        }
 
         var checkpoint = await LoadCheckpointAsync(conn, ct);
         var latestSequenceId = await LoadLatestRelevantSequenceIdAsync(conn, ct);
@@ -54,13 +57,13 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
     /// <param name="dataSource">The data source used to load and checkpoint records.</param>
     /// <param name="logger">The logger used for worker diagnostics.</param>
     /// <param name="options">Optional polling and retry configuration.</param>
-    /// <param name="scope">Optional scope filter for this worker.</param>
+    /// <param name="scopeFilter">Scope filter for this worker. Use <see cref="ScopeFilter.All()"/> to process all scopes.</param>
     public ExternalProjectionWorker(
         IExternalProjectionHandler handler,
         NpgsqlDataSource dataSource,
         ILogger<ExternalProjectionWorker> logger,
         ProjectionWorkerOptions? options = null,
-        ScopeContext? scope = null)
+        ScopeFilter? scopeFilter = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(dataSource);
@@ -70,12 +73,12 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
         _dataSource = dataSource;
         _logger = logger;
         _options = options ?? new ProjectionWorkerOptions();
-        _scope = scope;
-        _projectionName = scope is null
+        _scopeFilter = scopeFilter ?? ScopeFilter.All();
+        _projectionName = _scopeFilter.IsAll
             ? handler.Name
-            : scope.Scope == ScopeType.Platform
+            : _scopeFilter.Scope!.Scope == ScopeType.Platform
                 ? $"{handler.Name}@Platform"
-                : $"{handler.Name}@Tenant:{scope.TenantId}";
+                : $"{handler.Name}@Tenant:{_scopeFilter.Scope!.TenantId}";
 
         ValidateOptions(_options);
     }
@@ -114,7 +117,10 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
     private async Task<int> ProcessBatchAsync(CancellationToken ct)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await SetScopeOnConnectionAsync(conn, _scope, ct);
+        if (!_scopeFilter.IsAll)
+        {
+            await conn.SetScopeAsync(_scopeFilter.Scope!, ct);
+        }
 
         var checkpoint = await LoadCheckpointAsync(conn, ct);
         var changes = await LoadChangesAsync(conn, checkpoint, ct);
@@ -206,8 +212,8 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
             """;
 
         cmd.Parameters.AddWithValue("lastSeen", fromSequenceId);
-        cmd.Parameters.AddWithValue("scope", (object?)_scope?.Scope.ToString() ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("tenantId", (object?)_scope?.TenantId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("scope", (object?)_scopeFilter.Scope?.Scope.ToString() ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("tenantId", (object?)_scopeFilter.Scope?.TenantId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("name", _projectionName);
         cmd.Parameters.AddWithValue("maxAttempts", _options.MaxAttemptsPerEvent);
         cmd.Parameters.AddWithValue("eventTypes", _handler.EventTypes.ToArray());
@@ -254,8 +260,8 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
               AND xmin::text::bigint < pg_snapshot_xmin(pg_current_snapshot())::text::bigint
             """;
 
-        cmd.Parameters.AddWithValue("scope", (object?)_scope?.Scope.ToString() ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("tenantId", (object?)_scope?.TenantId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("scope", (object?)_scopeFilter.Scope?.Scope.ToString() ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("tenantId", (object?)_scopeFilter.Scope?.TenantId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("eventTypes", _handler.EventTypes.ToArray());
 
         var result = await cmd.ExecuteScalarAsync(ct);
@@ -370,31 +376,6 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
         }
 
         await tx.CommitAsync(ct);
-    }
-
-    private static async Task SetScopeOnConnectionAsync(
-        NpgsqlConnection connection,
-        ScopeContext? scope,
-        CancellationToken ct)
-    {
-        if (scope is null)
-        {
-            return;
-        }
-
-        await using (var scopeCmd = connection.CreateCommand())
-        {
-            scopeCmd.CommandText = "SET LOCAL app.current_scope = @scope";
-            scopeCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
-            await scopeCmd.ExecuteNonQueryAsync(ct);
-        }
-
-        await using (var tenantCmd = connection.CreateCommand())
-        {
-            tenantCmd.CommandText = "SET LOCAL app.current_tenant = @tenantId";
-            tenantCmd.Parameters.AddWithValue("tenantId", scope.TenantId ?? string.Empty);
-            await tenantCmd.ExecuteNonQueryAsync(ct);
-        }
     }
 
     private static void ValidateOptions(ProjectionWorkerOptions options)

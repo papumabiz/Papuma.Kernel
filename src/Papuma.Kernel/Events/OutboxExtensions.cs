@@ -22,12 +22,12 @@ public static class OutboxExtensions
     /// <typeparam name="TPublisher">The outbox publisher type.</typeparam>
     /// <param name="services">The service collection to add the outbox worker to.</param>
     /// <param name="configure">Optional worker configuration callback.</param>
-    /// <param name="scope">Optional scope filter for the worker.</param>
+    /// <param name="scopeFilter">Scope filter for the worker. Defaults to <see cref="ScopeFilter.All()"/>.</param>
     /// <returns>The original service collection.</returns>
     public static IServiceCollection AddOutboxWorker<TPublisher>(
         this IServiceCollection services,
         Action<OutboxWorkerOptions>? configure = null,
-        ScopeContext? scope = null)
+        ScopeFilter? scopeFilter = null)
         where TPublisher : class, IOutboxPublisher
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -43,7 +43,7 @@ public static class OutboxExtensions
                 sp.GetRequiredService<NpgsqlDataSource>(),
                 sp.GetRequiredService<ILogger<OutboxWorker>>(),
                 options,
-                scope);
+                scopeFilter);
         });
 
         return services;

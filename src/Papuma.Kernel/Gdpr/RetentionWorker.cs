@@ -20,7 +20,7 @@ public sealed class RetentionWorker : BackgroundService
     private readonly NpgsqlDataSource _dataSource;
     private readonly ILogger<RetentionWorker> _logger;
     private readonly RetentionWorkerOptions _options;
-    private readonly ScopeContext? _scope;
+    private readonly ScopeFilter _scopeFilter;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RetentionWorker"/> class.
@@ -28,12 +28,12 @@ public sealed class RetentionWorker : BackgroundService
     /// <param name="dataSource">The data source used to perform retention cleanup.</param>
     /// <param name="logger">The logger used for worker diagnostics.</param>
     /// <param name="options">Optional retention worker options.</param>
-    /// <param name="scope">Optional scope filter for retention cleanup.</param>
+    /// <param name="scopeFilter">Optional scope filter for retention cleanup.</param>
     public RetentionWorker(
         NpgsqlDataSource dataSource,
         ILogger<RetentionWorker> logger,
         RetentionWorkerOptions? options = null,
-        ScopeContext? scope = null)
+        ScopeFilter? scopeFilter = null)
     {
         ArgumentNullException.ThrowIfNull(dataSource);
         ArgumentNullException.ThrowIfNull(logger);
@@ -41,7 +41,7 @@ public sealed class RetentionWorker : BackgroundService
         _dataSource = dataSource;
         _logger = logger;
         _options = options ?? new RetentionWorkerOptions();
-        _scope = scope;
+        _scopeFilter = scopeFilter ?? ScopeFilter.All();
 
         ValidateOptions(_options);
     }
@@ -81,7 +81,10 @@ public sealed class RetentionWorker : BackgroundService
         var cutoff = DateTimeOffset.UtcNow - _options.RetentionWindow;
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await SetScopeOnConnectionAsync(conn, _scope, ct);
+        if (!_scopeFilter.IsAll)
+        {
+            await conn.SetScopeAsync(_scopeFilter.Scope!, ct);
+        }
         await using var tx = await conn.BeginTransactionAsync(ct);
 
         var feedDeleted = _options.DeleteFromChangeFeed
@@ -138,8 +141,8 @@ public sealed class RetentionWorker : BackgroundService
             """;
 
         cmd.Parameters.AddWithValue("cutoff", cutoff);
-        cmd.Parameters.AddWithValue("scope", (object?)_scope?.Scope.ToString() ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("tenantId", (object?)_scope?.TenantId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("scope", (object?)_scopeFilter.Scope?.Scope.ToString() ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("tenantId", (object?)_scopeFilter.Scope?.TenantId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("batchSize", _options.BatchSize);
 
         return await cmd.ExecuteNonQueryAsync(ct);
@@ -176,36 +179,11 @@ public sealed class RetentionWorker : BackgroundService
             """;
 
         cmd.Parameters.AddWithValue("cutoff", cutoff);
-        cmd.Parameters.AddWithValue("scope", (object?)_scope?.Scope.ToString() ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("tenantId", (object?)_scope?.TenantId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("scope", (object?)_scopeFilter.Scope?.Scope.ToString() ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("tenantId", (object?)_scopeFilter.Scope?.TenantId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("batchSize", _options.BatchSize);
 
         return await cmd.ExecuteNonQueryAsync(ct);
-    }
-
-    private static async Task SetScopeOnConnectionAsync(
-        NpgsqlConnection connection,
-        ScopeContext? scope,
-        CancellationToken ct)
-    {
-        if (scope is null)
-        {
-            return;
-        }
-
-        await using (var scopeCmd = connection.CreateCommand())
-        {
-            scopeCmd.CommandText = "SET LOCAL app.current_scope = @scope";
-            scopeCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
-            await scopeCmd.ExecuteNonQueryAsync(ct);
-        }
-
-        await using (var tenantCmd = connection.CreateCommand())
-        {
-            tenantCmd.CommandText = "SET LOCAL app.current_tenant = @tenantId";
-            tenantCmd.Parameters.AddWithValue("tenantId", scope.TenantId ?? string.Empty);
-            await tenantCmd.ExecuteNonQueryAsync(ct);
-        }
     }
 
     private static void ValidateOptions(RetentionWorkerOptions options)
