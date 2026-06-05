@@ -264,5 +264,5 @@ CREATE TABLE IF NOT EXISTS papuma_schema_version (
 );
 
 INSERT INTO papuma_schema_version (version)
-VALUES (3)
+VALUES (4)
 ON CONFLICT (version) DO NOTHING;
