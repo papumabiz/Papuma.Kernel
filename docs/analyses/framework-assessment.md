@@ -133,14 +133,15 @@ Zusätzlich ist die DI-Registrierung über `AddChangeFeedReader()` sowie über `
 
 ### Priorität 3: Sinnvoll, aber nicht dringend
 
-#### 3a. Schema-Migrations-Unterstützung
+#### 3a. Schema-Migrations-Unterstützung (umgesetzt)
 
-**Problem:** `schema.sql` ist eine einzelne Datei. Bei Schema-Änderungen (z.B. neue Spalten) gibt es keinen Migrationspfad.
+**Status:** Umgesetzt. Es gibt jetzt einen versionierten Migrationspfad plus Laufzeitprüfung.
 
-**Vorschlag:** Kein eigenes Migrations-Framework, aber:
-- Versionierte SQL-Dateien (`V001__initial.sql`, `V002__add_scope.sql`)
-- Ein `SchemaVersionChecker` der prüft, ob die DB auf dem erwarteten Stand ist
-- Dokumentation, wie man das mit FluentMigrator oder dbmate kombiniert
+**Umsetzung:**
+- Versionierte SQL-Dateien (`V001__initial.sql`, `V002__schema_version_tracking.sql`) unter `Schema/Migrations`
+- `SchemaVersionChecker` prüft den erwarteten Mindeststand über `papuma_schema_version`
+- `schema.sql` enthält ebenfalls den aktuellen Version-Marker
+- Kein eigenes Migrations-Framework: Integration in vorhandene Tools bleibt bewusst offen
 
 #### 3b. Retention-Policy-Automatisierung
 

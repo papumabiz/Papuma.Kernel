@@ -61,6 +61,11 @@ Papuma.Kernel.slnx
 |   |   +-- Validation/
 |   |   |   +-- InputValidator.cs
 |   |   +-- Schema/
+|   |   |   +-- Migrations/
+|   |   |   |   +-- V001__initial.sql
+|   |   |   |   +-- V002__schema_version_tracking.sql
+|   |   |   +-- SchemaExtensions.cs
+|   |   |   +-- SchemaVersionChecker.cs
 |   |   |   +-- schema.sql
 |   |   +-- PapumaKernelOptions.cs
 |   |   +-- ServiceCollectionExtensions.cs
@@ -91,6 +96,7 @@ Hinweis:
 | ChangeRecord, ChangeWriter | IScopeResolver, ScopeMiddleware | Feature-Events und Handler |
 | ProjectionWorker, ReplayService | ScopeMiddlewareExtensions | Projektionen pro App |
 | GdprProcessor | AddPapumaScope<TResolver>() | konkrete Resolver-Implementierungen |
+| SchemaVersionChecker | | Betriebschecks beim Startup |
 | ScopeContext, IScopeDataSourceFactory | UseScopeResolution() | Program.cs-Komposition |
 | schema.sql | | Domain-Tabellen |
 

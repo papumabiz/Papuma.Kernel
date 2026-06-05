@@ -2,7 +2,7 @@
 
 ## Überblick
 
-Das System nutzt ausschließlich **PostgreSQL ≥ 14** (wegen `pg_current_snapshot()` und `xmin`-basiertem Sichtbarkeitsfilter, siehe [04-projections.md](04-projections.md)). Es gibt keine ORMs, keine Migration-Frameworks – nur direkte SQL-Skripte, die du einmal ausführst (oder in dein Migrations-Setup einbindest, z.B. mit [Flyway](https://flywaydb.org/) oder einfach als Init-Skripte).
+Das System nutzt ausschließlich **PostgreSQL ≥ 14** (wegen `pg_current_snapshot()` und `xmin`-basiertem Sichtbarkeitsfilter, siehe [04-projections.md](04-projections.md)). Es gibt keine ORMs und kein eigenes Migrations-Framework – stattdessen versionierte SQL-Skripte unter `Schema/Migrations`, die du direkt ausführst oder in bestehende Tools (z.B. [Flyway](https://flywaydb.org/)) einbindest.
 
 > ⚠️ **Minimale PostgreSQL-Version: 14.** Ältere Versionen unterstützen `pg_current_snapshot()` nicht (dort hieß es `txid_current_snapshot()`). Der `xmin`-basierte Sichtbarkeitsfilter im Projection Worker setzt PG ≥ 13 voraus, PG ≥ 14 wird empfohlen.
 
@@ -359,3 +359,12 @@ CREATE TABLE users (
 ## Warum kein ORM, kein Migration-Framework?
 
 Für den Kernel bewusst nicht. Ein ORM abstrahiert genau das weg, was verstanden werden soll: wie Daten wirklich gespeichert werden. Dapper wird als dünner Mapping-Layer verwendet (optional), aber SQL bleibt immer sichtbar.
+
+## Versionierter Migrationspfad
+
+Der Kernel liefert versionierte SQL-Dateien unter `src/Papuma.Kernel/Schema/Migrations`:
+
+- `V001__initial.sql`
+- `V002__schema_version_tracking.sql`
+
+Die Tabelle `papuma_schema_version` markiert den erreichten Stand. Im Code kann `SchemaVersionChecker` prüfen, ob die Datenbank mindestens den vom Kernel erwarteten Versionsstand hat.
