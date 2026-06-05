@@ -1,8 +1,6 @@
 // Copyright (c) 2026- by Harald Lapp.
 // Licensed under the MIT License. See LICENSE in the repository root for details.
 
-using System.Threading.Channels;
-
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -14,19 +12,18 @@ using Papuma.Kernel.Tenancy;
 namespace Papuma.Kernel.Projections;
 
 /// <summary>
-/// Polls the change feed and applies matching events to a projection with at-least-once semantics.
+/// Polls the change feed and applies matching events to an external projection with at-least-once semantics.
 /// </summary>
-public sealed class ProjectionWorker : BackgroundService
+public sealed class ExternalProjectionWorker : BackgroundService
 {
     private static readonly TimeSpan MinErrorDelay = TimeSpan.FromSeconds(5);
 
-    private readonly IProjectionHandler _handler;
+    private readonly IExternalProjectionHandler _handler;
     private readonly NpgsqlDataSource _dataSource;
-    private readonly ILogger<ProjectionWorker> _logger;
+    private readonly ILogger<ExternalProjectionWorker> _logger;
     private readonly ProjectionWorkerOptions _options;
     private readonly ScopeContext? _scope;
     private readonly string _projectionName;
-    private readonly Channel<ReplayRequest> _replayChannel = Channel.CreateBounded<ReplayRequest>(1);
 
     /// <summary>
     /// Gets the unique projection name used for checkpointing and failure tracking.
@@ -34,17 +31,17 @@ public sealed class ProjectionWorker : BackgroundService
     public string ProjectionName => _projectionName;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="ProjectionWorker"/> class.
+    /// Initializes a new instance of the <see cref="ExternalProjectionWorker"/> class.
     /// </summary>
-    /// <param name="handler">The projection handler that applies change feed records.</param>
+    /// <param name="handler">The external projection handler that applies change feed records.</param>
     /// <param name="dataSource">The data source used to load and checkpoint records.</param>
     /// <param name="logger">The logger used for worker diagnostics.</param>
     /// <param name="options">Optional polling and retry configuration.</param>
     /// <param name="scope">Optional scope filter for this worker.</param>
-    public ProjectionWorker(
-        IProjectionHandler handler,
+    public ExternalProjectionWorker(
+        IExternalProjectionHandler handler,
         NpgsqlDataSource dataSource,
-        ILogger<ProjectionWorker> logger,
+        ILogger<ExternalProjectionWorker> logger,
         ProjectionWorkerOptions? options = null,
         ScopeContext? scope = null)
     {
@@ -66,36 +63,13 @@ public sealed class ProjectionWorker : BackgroundService
         ValidateOptions(_options);
     }
 
-    /// <summary>
-    /// Requests a full replay for this projection worker.
-    /// </summary>
-    /// <param name="ct">A cancellation token.</param>
-    public async Task RequestReplayAsync(CancellationToken ct = default)
-    {
-        await _replayChannel.Writer.WriteAsync(new ReplayRequest(), ct);
-    }
-
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("ProjectionWorker [{Name}] started.", _projectionName);
+        _logger.LogInformation("ExternalProjectionWorker [{Name}] started.", _projectionName);
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            if (_replayChannel.Reader.TryRead(out _))
-            {
-                _logger.LogInformation(
-                    "ProjectionWorker [{Name}] replay requested, resetting projection state.",
-                    _projectionName);
-
-                await ResetProjectionStateAsync(stoppingToken);
-
-                if (_handler is IReplayableProjection replayable)
-                {
-                    await replayable.PrepareReplayAsync(stoppingToken);
-                }
-            }
-
             try
             {
                 var processed = await ProcessBatchAsync(stoppingToken);
@@ -110,15 +84,14 @@ public sealed class ProjectionWorker : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error in ProjectionWorker [{Name}]", _projectionName);
+                _logger.LogError(ex, "Error in ExternalProjectionWorker [{Name}]", _projectionName);
 
-                // Use at least 5 seconds to avoid log flooding when the database is unreachable.
                 var errorDelay = _options.PollInterval < MinErrorDelay ? MinErrorDelay : _options.PollInterval;
                 await Task.Delay(errorDelay, stoppingToken);
             }
         }
 
-        _logger.LogInformation("ProjectionWorker [{Name}] stopped.", _projectionName);
+        _logger.LogInformation("ExternalProjectionWorker [{Name}] stopped.", _projectionName);
     }
 
     private async Task<int> ProcessBatchAsync(CancellationToken ct)
@@ -131,29 +104,31 @@ public sealed class ProjectionWorker : BackgroundService
 
         foreach (var change in changes)
         {
-            await using var tx = await conn.BeginTransactionAsync(ct);
             try
             {
-                await _handler.HandleAsync(change, conn, tx, ct);
-                await ClearFailureAsync(conn, tx, change.SequenceId, ct);
-                await SaveCheckpointAsync(conn, tx, change.SequenceId, ct);
-                await tx.CommitAsync(ct);
+                await _handler.HandleAsync(change, ct);
+
+                await using (var tx = await conn.BeginTransactionAsync(ct))
+                {
+                    await ClearFailureAsync(conn, tx, change.SequenceId, ct);
+                    await SaveCheckpointAsync(conn, tx, change.SequenceId, ct);
+                    await tx.CommitAsync(ct);
+                }
             }
             catch (Exception ex)
             {
-                await tx.RollbackAsync(ct);
-
-                // RegisterFailureAsync runs outside the rolled-back transaction.
-                // If the worker crashes between here and the next loop iteration the
-                // failure row is persisted but the checkpoint is not advanced.  On
-                // restart the event will be reloaded and the attempts counter will be
-                // incremented again – this is correct at-least-once behaviour.
                 var movedToDeadLetter = await RegisterFailureAsync(conn, change, ex, ct);
                 if (movedToDeadLetter)
                 {
-                    await using var skipTx = await conn.BeginTransactionAsync(ct);
-                    await SaveCheckpointAsync(conn, skipTx, change.SequenceId, ct);
-                    await skipTx.CommitAsync(ct);
+                    await using var tx = await conn.BeginTransactionAsync(ct);
+                    await SaveCheckpointAsync(conn, tx, change.SequenceId, ct);
+                    await tx.CommitAsync(ct);
+
+                    _logger.LogWarning(
+                        ex,
+                        "External projection entry {SequenceId} reached the maximum retry count and was dead-lettered.",
+                        change.SequenceId);
+
                     continue;
                 }
 
@@ -214,8 +189,8 @@ public sealed class ProjectionWorker : BackgroundService
             """;
 
         cmd.Parameters.AddWithValue("lastSeen", fromSequenceId);
-    cmd.Parameters.AddWithValue("scope", (object?)_scope?.Scope.ToString() ?? DBNull.Value);
-    cmd.Parameters.AddWithValue("tenantId", (object?)_scope?.TenantId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("scope", (object?)_scope?.Scope.ToString() ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("tenantId", (object?)_scope?.TenantId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("name", _projectionName);
         cmd.Parameters.AddWithValue("maxAttempts", _options.MaxAttemptsPerEvent);
         cmd.Parameters.AddWithValue("eventTypes", _handler.EventTypes.ToArray());
@@ -324,7 +299,6 @@ public sealed class ProjectionWorker : BackgroundService
     private async Task ResetProjectionStateAsync(CancellationToken ct)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await SetScopeOnConnectionAsync(conn, _scope, ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
 
         await using (var checkpointCmd = conn.CreateCommand())
@@ -352,6 +326,31 @@ public sealed class ProjectionWorker : BackgroundService
         }
 
         await tx.CommitAsync(ct);
+    }
+
+    private static async Task SetScopeOnConnectionAsync(
+        NpgsqlConnection connection,
+        ScopeContext? scope,
+        CancellationToken ct)
+    {
+        if (scope is null)
+        {
+            return;
+        }
+
+        await using (var scopeCmd = connection.CreateCommand())
+        {
+            scopeCmd.CommandText = "SET LOCAL app.current_scope = @scope";
+            scopeCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+            await scopeCmd.ExecuteNonQueryAsync(ct);
+        }
+
+        await using (var tenantCmd = connection.CreateCommand())
+        {
+            tenantCmd.CommandText = "SET LOCAL app.current_tenant = @tenantId";
+            tenantCmd.Parameters.AddWithValue("tenantId", scope.TenantId ?? string.Empty);
+            await tenantCmd.ExecuteNonQueryAsync(ct);
+        }
     }
 
     private static void ValidateOptions(ProjectionWorkerOptions options)
@@ -386,31 +385,4 @@ public sealed class ProjectionWorker : BackgroundService
             throw new ArgumentOutOfRangeException(nameof(options), "MaxRetryDelay must be greater than or equal to BaseRetryDelay.");
         }
     }
-
-    private static async Task SetScopeOnConnectionAsync(
-        NpgsqlConnection connection,
-        ScopeContext? scope,
-        CancellationToken ct)
-    {
-        if (scope is null)
-        {
-            return;
-        }
-
-        await using (var scopeCmd = connection.CreateCommand())
-        {
-            scopeCmd.CommandText = "SET LOCAL app.current_scope = @scope";
-            scopeCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
-            await scopeCmd.ExecuteNonQueryAsync(ct);
-        }
-
-        await using (var tenantCmd = connection.CreateCommand())
-        {
-            tenantCmd.CommandText = "SET LOCAL app.current_tenant = @tenantId";
-            tenantCmd.Parameters.AddWithValue("tenantId", scope.TenantId ?? string.Empty);
-            await tenantCmd.ExecuteNonQueryAsync(ct);
-        }
-    }
-
-    private sealed record ReplayRequest;
 }

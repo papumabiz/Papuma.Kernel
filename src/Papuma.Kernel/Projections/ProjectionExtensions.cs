@@ -50,6 +50,39 @@ public static class ProjectionExtensions
     }
 
     /// <summary>
+    /// Registers an external projection handler and its hosted worker.
+    /// </summary>
+    /// <typeparam name="THandler">The external projection handler type.</typeparam>
+    /// <param name="services">The service collection to add the projection to.</param>
+    /// <param name="configure">Optional worker configuration callback.</param>
+    /// <param name="scope">Optional scope filter for the worker.</param>
+    /// <returns>The original service collection.</returns>
+    public static IServiceCollection AddExternalProjection<THandler>(
+        this IServiceCollection services,
+        Action<ProjectionWorkerOptions>? configure = null,
+        ScopeContext? scope = null)
+        where THandler : class, IExternalProjectionHandler
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddSingleton<THandler>();
+        services.AddSingleton<IHostedService>(sp =>
+        {
+            var options = new ProjectionWorkerOptions();
+            configure?.Invoke(options);
+
+            return new ExternalProjectionWorker(
+                sp.GetRequiredService<THandler>(),
+                sp.GetRequiredService<NpgsqlDataSource>(),
+                sp.GetRequiredService<ILogger<ExternalProjectionWorker>>(),
+                options,
+                scope);
+        });
+
+        return services;
+    }
+
+    /// <summary>
     /// Registers a <see cref="ReplayService"/> that automatically discovers all
     /// <see cref="ProjectionWorker"/> instances registered as <see cref="IHostedService"/>.
     /// </summary>
