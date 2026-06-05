@@ -107,27 +107,27 @@ Papuma.Kernel ist ein **überraschend vollständiges und durchdachtes Framework*
 
 ---
 
-### Priorität 2: Mittlerer Nutzen, mittlerer Aufwand
+### Priorität 2: Mittlerer Nutzen, mittlerer Aufwand (umgesetzt)
 
 #### 2a. Projection Health / Lag-Metriken
 
-**Problem:** Es gibt keine Möglichkeit, den Projection-Lag programmatisch abzufragen. In Produktion ist das kritisch: *Wie weit hinkt meine Projection hinter dem Feed her?*
+**Status:** Umgesetzt. Projection-Lag ist jetzt programmatisch verfügbar und optional als Health-Check integrierbar.
 
-**Vorschlag:**
-- `ProjectionWorker.GetLagAsync()` — Differenz zwischen aktuellem Checkpoint und `MAX(sequence_id)` im Feed
-- Optional: `IHealthCheck`-Integration für ASP.NET Core
-- Optional: Metriken via `System.Diagnostics.Metrics` (Counter/Gauge für processed events, lag, failures)
+**Umsetzung:**
+- `ProjectionWorker` und `ExternalProjectionWorker` implementieren `IProjectionLagProvider` und liefern `ProjectionLagSnapshot` (Checkpoint, LatestSequenceId, Lag)
+- Optionale ASP.NET-Core-Integration via `AddPapumaProjectionHealthChecks(...)` + `ProjectionLagHealthCheck`
+- Optionales Metrics-Instrumenting via `System.Diagnostics.Metrics` bleibt als separater Ausbaupunkt offen
 
 #### 2b. Change Feed Reader (allgemein)
 
-**Problem:** Der Change Feed kann aktuell nur über den `ProjectionWorker` gelesen werden. Für Ad-hoc-Abfragen (Debugging, Admin-UI, Export) gibt es keinen allgemeinen Reader.
+**Status:** Umgesetzt. Für Ad-hoc-Abfragen gibt es jetzt einen allgemeinen Reader.
 
-**Vorschlag:** Ein `ChangeFeedReader` mit:
+**Umsetzung:** `ChangeFeedReader` mit:
 - `GetByEntityAsync(scope, entity, entityId)` — alle Events für eine Entity
 - `GetBySequenceRangeAsync(scope, from, to)` — Bereich lesen
 - `GetLatestSequenceIdAsync()` — aktuellste Sequence
 
-Das würde auch den `GdprProcessor.GetEntityHistoryAsync()` vereinfachen, der aktuell die SQL-Queries inline hat.
+Zusätzlich ist die DI-Registrierung über `AddChangeFeedReader()` sowie über `AddPapumaKernel()` verfügbar.
 
 ---
 

@@ -20,6 +20,8 @@ Papuma.Kernel.slnx
 |   +-- Papuma.Kernel/
 |   |   +-- ChangeFeed/
 |   |   |   +-- ChangeRecord.cs
+|   |   |   +-- ChangeFeedExtensions.cs
+|   |   |   +-- ChangeFeedReader.cs
 |   |   |   +-- ChangeWriter.cs
 |   |   |   +-- ChangeWriterOptions.cs
 |   |   +-- Events/
@@ -63,6 +65,10 @@ Papuma.Kernel.slnx
 |   |   +-- PapumaKernelOptions.cs
 |   |   +-- ServiceCollectionExtensions.cs
 |   +-- Papuma.Kernel.AspNetCore/
+|       +-- Projections/
+|       |   +-- ProjectionHealthCheckExtensions.cs
+|       |   +-- ProjectionHealthCheckOptions.cs
+|       |   +-- ProjectionLagHealthCheck.cs
 |       +-- Tenancy/
 |       |   +-- IScopeResolver.cs
 |       |   +-- ScopeMiddleware.cs
