@@ -14,7 +14,7 @@ Papuma.Kernel is a **CRUD-truth + change-feed** architecture. Think of it like t
 Your domain tables (orders, users, invoices) are the SOURCE OF TRUTH.
 You CAN read them directly with SQL at any time.
 
-The change_feed is a SYNCHRONIZATION BUS.
+The papuma_event_feed is a SYNCHRONIZATION BUS.
 It tells projections "something changed, here's the fact."
 Projections build read models ASYNCHRONOUSLY from the feed.
 ```
@@ -37,15 +37,17 @@ Projections build read models ASYNCHRONOUSLY from the feed.
 
 ---
 
-## 2. The Three Event Tables: When to Use Which
+## 2. The Event Destinations: One Feed, Two Purposes
 
-This is the most important decision you'll make. Every state change in your application must be classified into one or more of these three destinations.
+Every domain operation produces at most one entry in the unified `papuma_event_feed`. The `kind` column distinguishes the two modes:
 
-| Table | Purpose | Example | Key question |
-|-------|---------|---------|-------------|
-| `change_feed` | State transition facts for **read-model rebuild** | `OrderCreated`, `UserEmailUpdated`, `InvoiceApproved` | Is this needed to reconstruct the current state of the domain? |
-| `business_event_log` | Semantic domain signals that don't change state | `UserLoggedIn`, `CheckoutViewed`, `ReportGenerated` | Is this a meaningful business occurrence that doesn't change a domain table? |
-| `event_outbox` | Reliable **external** message delivery | Publish to RabbitMQ, call webhook, notify Slack | Does an external system need to know about this? |
+| Table | Kind | Purpose | Example | Key question |
+|-------|------|---------|---------|-------------|
+| `papuma_event_feed` | `Change` | State transition facts for **read-model rebuild** | `OrderCreated`, `UserEmailUpdated`, `InvoiceApproved` | Did a domain table change? |
+| `papuma_event_feed` | `Event` | Semantic domain signals that don't change state | `UserLoggedIn`, `CheckoutViewed`, `ReportGenerated` | Is this a meaningful business occurrence without a state change? |
+| `papuma_event_outbox` | — | Reliable **external** message delivery | Publish to RabbitMQ, call webhook, notify Slack | Does an external system need to know about this? |
+
+A given operation writes **either** a Change **or** an Event to the feed — never both. A CRUD operation that mutates a domain table produces a Change (`AppendChangeAsync`). A pure signal produces an Event (`AppendEventAsync`). The Outbox is a separate mechanism for external notification; it references the Event's `event_id`.
 
 ### Decision Flow
 
@@ -53,47 +55,47 @@ This is the most important decision you'll make. Every state change in your appl
 A domain operation happens.
    │
    ├─ Did a domain table change?
-   │    YES → Write to change_feed (ALWAYS)
+   │    YES → Write to papuma_event_feed (ALWAYS)
    │
    ├─ Is there a business-significant event (even without state change)?
-   │    YES → Write to business_event_log
+   │    YES → Write to papuma_event_feed
    │    │
    │    └─ Does an external system need to be notified?
-   │         YES → Also enqueue in event_outbox (same transaction!)
+   │         YES → Also enqueue in papuma_event_outbox (same transaction!)
    │
    └─ Only a state change, no external notification needed?
-        → change_feed only (projections will pick it up)
+        → papuma_event_feed only (projections will pick it up)
 ```
 
 ### Concrete Examples
 
 **Example 1: User changes email**
 ```
-Domain table `users` updated → change_feed: `UserEmailUpdated`
+Domain table `users` updated → papuma_event_feed: `UserEmailUpdated`
 No external system needs this → no outbox needed
 ```
 
 **Example 2: User logs in**
 ```
-No domain table changed → NO change_feed entry
-Login is a business signal → business_event_log: `UserLoggedIn`
+No domain table changed → NO papuma_event_feed entry
+Login is a business signal → papuma_event_feed: `UserLoggedIn`
 Analytics system needs this → outbox: enqueue for analytics pipeline
 ```
 
 **Example 3: Invoice approved in backoffice**
 ```
-Domain table `invoices.status` changed → change_feed: `InvoiceApproved`
-Business signal for process → business_event_log: `InvoiceApproved`  
+Domain table `invoices.status` changed → papuma_event_feed: `InvoiceApproved`
+Business signal for process → papuma_event_feed: `InvoiceApproved`  
 Email notification needed → outbox: enqueue for notification service
 ```
 
-### Anti-Pattern: Writing Everything to change_feed
+### Anti-Pattern: Writing Everything to papuma_event_feed
 
-Do NOT write `UserLoggedIn` to `change_feed`. It's not a state transition — no domain table changed. It bloats the feed, slows down replays, and confuses projections that are trying to rebuild read models. Use `business_event_log` for signals without state change.
+Do NOT write `UserLoggedIn` to `papuma_event_feed`. It's not a state transition — no domain table changed. It bloats the feed, slows down replays, and confuses projections that are trying to rebuild read models. Use `papuma_event_feed` for signals without state change.
 
-### Anti-Pattern: Skipping change_feed for State Changes
+### Anti-Pattern: Skipping papuma_event_feed for State Changes
 
-Do NOT update a domain table without writing to `change_feed`. Projections rely on the feed to know something changed. If you skip it, read models go stale and replays produce wrong results.
+Do NOT update a domain table without writing to `papuma_event_feed`. Projections rely on the feed to know something changed. If you skip it, read models go stale and replays produce wrong results.
 
 ### Payload Design: What Goes Into Each Table
 
@@ -101,13 +103,13 @@ The three tables serve different consumers with different needs. **Do not copy t
 
 | Table | Consumer | Payload principle |
 |-------|----------|-------------------|
-| `change_feed` | Projections (read-model rebuild) | **Complete** — everything needed to reconstruct state |
-| `business_event_log` | Analytics, audit, process signals | **Selective** — only what the signal consumer needs |
-| `event_outbox` | External systems (broker, webhook) | **Contract-driven** — only what the external API contract requires |
+| `papuma_event_feed` | Projections (read-model rebuild) | **Complete** — everything needed to reconstruct state |
+| `papuma_event_feed` | Analytics, audit, process signals | **Selective** — only what the signal consumer needs |
+| `papuma_event_outbox` | External systems (broker, webhook) | **Contract-driven** — only what the external API contract requires |
 
-**`change_feed` payload**: Always complete. Projections must be able to reconstruct the full read model from the feed alone. If a field is missing, replays produce wrong results.
+**`papuma_event_feed` payload**: Always complete. Projections must be able to reconstruct the full read model from the feed alone. If a field is missing, replays produce wrong results.
 
-**`business_event_log` payload**: Lean and purpose-specific. Include only the fields that make the signal meaningful. For high-frequency events (login, page view, cart interaction), a minimal payload keeps the log performant and reduces GDPR surface area.
+**`papuma_event_feed` payload**: Lean and purpose-specific. Include only the fields that make the signal meaningful. For high-frequency events (login, page view, cart interaction), a minimal payload keeps the log performant and reduces GDPR surface area.
 
 ```
 UserLoggedIn  → {"userId":"u-1", "ip":"1.2.3.4", "method":"password"}
@@ -120,10 +122,10 @@ InvoiceApproved → {"invoiceId":"inv-1", "approvedBy":"user:admin", "amount":12
                   NOT the full invoice line items — the signal is the approval fact
 ```
 
-**`event_outbox` payload**: Designed for the external consumer's contract, not for internal use. Different external systems may need different projections of the same event. Build the outbox payload explicitly — do not reuse the `business_event_log` payload unless the contracts happen to match.
+**`papuma_event_outbox` payload**: Designed for the external consumer's contract, not for internal use. Different external systems may need different projections of the same event. Build the outbox payload explicitly — do not reuse the `papuma_event_feed` payload unless the contracts happen to match.
 
 ```
-Internal change_feed payload:  {"orderId":"o-1", "internalCustomerId":"c-42", "warehouseZoneId":"wz-7", "amount":99.00}
+Internal papuma_event_feed payload:  {"orderId":"o-1", "internalCustomerId":"c-42", "warehouseZoneId":"wz-7", "amount":99.00}
 Outbox payload for fulfillment: {"orderId":"o-1", "shippingAddress":{...}, "items":[...]}
 Outbox payload for analytics:   {"orderId":"o-1", "amount":99.00, "channel":"web"}
 ```
@@ -139,9 +141,9 @@ Every write operation follows this pattern:
 ```
 Open transaction
   → Write domain state (your SQL)
-  → ChangeWriter.AppendAsync()    ← change_feed (always for state changes)
-  → BusinessEventWriter.AppendAsync() ← business_event_log (if business signal)
-  → OutboxWriter.EnqueueAsync()   ← event_outbox (if external notification)
+  → ChangeWriter.AppendChangeAsync()    ← papuma_event_feed (always for state changes)
+  → ChangeWriter.AppendEventAsync() ← papuma_event_feed (if business signal)
+  → OutboxWriter.EnqueueAsync()   ← papuma_event_outbox (if external notification)
 Commit transaction
 ```
 
@@ -154,13 +156,13 @@ public class CreateOrderHandler
 {
     private readonly IUnitOfWork _uow;
     private readonly ChangeWriter _changeWriter;
-    private readonly BusinessEventWriter _eventWriter;
+    private readonly ChangeWriter _eventWriter;
     private readonly OutboxWriter _outboxWriter;
 
     public CreateOrderHandler(
         IUnitOfWork uow,
         ChangeWriter changeWriter,
-        BusinessEventWriter eventWriter,
+        ChangeWriter eventWriter,
         OutboxWriter outboxWriter)
     {
         _uow = uow;
@@ -191,7 +193,7 @@ public class CreateOrderHandler
 
             // 2. Change feed (state transition)
             var payload = $$"""{"orderId":"{{cmd.OrderId}}","amount":{{cmd.Amount}}}""";
-            await _changeWriter.AppendAsync(
+            await _changeWriter.AppendChangeAsync(
                 tx, scope,
                 entity: "Order",
                 entityId: cmd.OrderId,
@@ -204,7 +206,7 @@ public class CreateOrderHandler
                 ct: ct);
 
             // 3. Business event (semantic signal)
-            var eventId = await _eventWriter.AppendAsync(
+            var eventId = await _changeWriter.AppendEventAsync(
                 tx, scope,
                 eventType: "OrderPlaced",
                 actorId: actorId,
@@ -239,7 +241,7 @@ Pass a stable `idempotencyKey` whenever the operation might be retried:
 | Scheduled job | **YES** | `$"{jobRunId}:{entityId}"` |
 | Internal synchronous call | Optional | — |
 
-The same key works across `change_feed` and `business_event_log` — both tables have unique constraints on `(scope, tenant_id, idempotency_key)`. On collision, the write is silently skipped (no exception).
+The same key works across `papuma_event_feed` and `papuma_event_feed` — both tables have unique constraints on `(scope, tenant_id, idempotency_key)`. On collision, the write is silently skipped (no exception).
 
 ---
 
@@ -472,7 +474,7 @@ public async Task<IActionResult> Create(CreateOrderCommand cmd, CancellationToke
 
 ### How RLS Works
 
-`ScopeConnectionExtensions.SetScopeAsync()` sets `app.current_scope` and `app.current_tenant` as `SET LOCAL` session variables. PostgreSQL RLS policies on framework tables use these to enforce scope isolation. Every writer (`ChangeWriter`, `BusinessEventWriter`, `OutboxWriter`) calls `SetScopeAsync` before writing.
+`ScopeConnectionExtensions.SetScopeAsync()` sets `app.current_scope` and `app.current_tenant` as `SET LOCAL` session variables. PostgreSQL RLS policies on framework tables use these to enforce scope isolation. The `ChangeWriter` and `OutboxWriter` call `SetScopeAsync` before writing.
 
 ### Actor ID Resolution
 
@@ -517,8 +519,7 @@ public async Task<RedactionResult> RedactUserAsync(
         reason: reason, // e.g. "GDPR Art. 17 request #REQ-2026-042"
         ct: ct);
 
-    // result.FeedEventsRedacted — how many change_feed rows were redacted
-    // result.BusinessEventsRedacted — how many business_event_log rows were redacted
+    // result.EventsRedacted — how many papuma_event_feed rows were redacted
     // An 'EntityRedacted' audit event is written automatically
 
     return result;
@@ -526,8 +527,8 @@ public async Task<RedactionResult> RedactUserAsync(
 ```
 
 **What happens internally**:
-1. All `change_feed` rows for that entity/entityId get `payload = {"redacted": true}`, `redacted = TRUE`
-2. All `business_event_log` rows for that entity/entityId get `payload = {"redacted": true}`, `redacted = TRUE`
+1. All `papuma_event_feed` rows for that entity/entityId get `payload = {"redacted": true}`, `redacted = TRUE`
+2. All `papuma_event_feed` rows for that entity/entityId get `payload = {"redacted": true}`, `redacted = TRUE`
 3. An `EntityRedacted` business event is written as audit trail
 
 ### Sensitive Data Indirection (for PII)
@@ -547,7 +548,7 @@ await _sensitiveStore.AppendAsync(
     ct: ct);
 
 // 2. Event payload contains ONLY the reference
-await _changeWriter.AppendAsync(
+await _changeWriter.AppendChangeAsync(
     tx, scope,
     entity: "Profile",
     entityId: userId,
@@ -577,7 +578,7 @@ await _sensitiveStore.SetLegalHoldAsync(scope, ref, enabled: true, actorId, "Leg
 
 `ISensitiveDataStore.AppendAsync()` runs **outside the main write transaction** — it has no `NpgsqlTransaction` parameter. This is intentional: sensitive data is stored independently so it can be redacted without touching the event stream.
 
-**Implication**: If the main transaction rolls back after `AppendAsync` has already written to `sensitive_data_versions`, the sensitive record exists but no event references it. This is safe — an orphaned sensitive record causes no harm and will not be resolved by any projection. Do not attempt to manually compensate for this.
+**Implication**: If the main transaction rolls back after `AppendChangeAsync` has already written to `papuma_sensitive_data_versions`, the sensitive record exists but no event references it. This is safe — an orphaned sensitive record causes no harm and will not be resolved by any projection. Do not attempt to manually compensate for this.
 
 **Correct pattern**:
 ```csharp
@@ -590,7 +591,7 @@ await _sensitiveStore.AppendAsync(scope, sensitiveRef, schemaVersion: 1,
 await _uow.ExecuteAsync(async (conn, tx, ct) =>
 {
     // domain write ...
-    await _changeWriter.AppendAsync(tx, scope, "Profile", userId,
+    await _changeWriter.AppendChangeAsync(tx, scope, "Profile", userId,
         "ProfileEmailUpdated", version: 1,
         payloadJson: $$"""{"sensitiveRef":"{{sensitiveRef.Value}}"}""",
         actorId: actorId, ct: ct);
@@ -599,7 +600,7 @@ await _uow.ExecuteAsync(async (conn, tx, ct) =>
 
 ### Sensitive Store: Schema Versioning
 
-The `schemaVersion` parameter in `AppendAsync` tracks the shape of the sensitive payload. When the PII schema evolves (e.g., `phone` becomes `phoneNumbers[]`), increment `schemaVersion` and handle both versions in the resolver.
+The `schemaVersion` parameter in `AppendChangeAsync` tracks the shape of the sensitive payload. When the PII schema evolves (e.g., `phone` becomes `phoneNumbers[]`), increment `schemaVersion` and handle both versions in the resolver.
 
 ```csharp
 // Writing with schema version 2 (new shape)
@@ -647,7 +648,7 @@ await _outboxWriter.EnqueueAsync(tx, scope,
     eventType: "ProfileEmailUpdated",
     payloadJson: $$"""{"userId":"{{userId}}","email":{{piiJson}}}""",
     ct: ct);
-// WARNING: resolved PII is now in event_outbox — ensure the external system handles it under GDPR
+// WARNING: resolved PII is now in papuma_event_outbox — ensure the external system handles it under GDPR
 ```
 
 **Decision rule**:
@@ -663,8 +664,6 @@ builder.Services.AddRetentionWorker(options =>
 {
     options.RetentionWindow = TimeSpan.FromDays(365);
     options.BatchSize = 1000;
-    options.DeleteFromChangeFeed = true;
-    options.DeleteFromBusinessEventLog = false;  // Keep audit trail longer
 }, scopeFilter: ScopeFilter.Platform());
 ```
 
@@ -722,7 +721,7 @@ public sealed class RabbitMqOutboxPublisher : IOutboxPublisher
 - Throw only on non-retryable failures.
 
 The `OutboxWorker` handles:
-- Polling `event_outbox` for pending messages
+- Polling `papuma_event_outbox` for pending messages
 - Exponential backoff retry (base 5s, max 5min, up to 10 attempts)
 - Dead-lettering after max attempts
 - Scope filtering
@@ -743,21 +742,21 @@ var orderPayload = $$"""{"orderId":"{{orderId}}","amount":{{amount}},"currency":
 var fulfillmentPayload = $$"""{"orderId":"{{orderId}}","shippingAddress":{{shippingAddressJson}},"items":{{itemsJson}}}""";
 
 // Enqueue for analytics (amount only, no PII)
-var analyticsEventId = await _eventWriter.AppendAsync(tx, scope,
+var analyticsEventId = await _changeWriter.AppendEventAsync(tx, scope,
     eventType: "OrderPlaced", actorId: actorId, payloadJson: orderPayload, ct: ct);
 await _outboxWriter.EnqueueAsync(tx, scope,
     eventId: analyticsEventId, eventType: "OrderPlaced",
     payloadJson: orderPayload, ct: ct);
 
 // Enqueue for fulfillment (shipping details, no financial data)
-var fulfillmentEventId = await _eventWriter.AppendAsync(tx, scope,
+var fulfillmentEventId = await _changeWriter.AppendEventAsync(tx, scope,
     eventType: "OrderReadyForFulfillment", actorId: actorId, payloadJson: fulfillmentPayload, ct: ct);
 await _outboxWriter.EnqueueAsync(tx, scope,
     eventId: fulfillmentEventId, eventType: "OrderReadyForFulfillment",
     payloadJson: fulfillmentPayload, ct: ct);
 ```
 
-**Anti-pattern**: Do not reuse the `change_feed` payload as the outbox payload by default. The `change_feed` payload is optimized for projection replay; the outbox payload is optimized for external consumption. They serve different purposes and will diverge over time.
+**Anti-pattern**: Do not reuse the `papuma_event_feed` payload as the outbox payload by default. The `papuma_event_feed` payload is optimized for projection replay; the outbox payload is optimized for external consumption. They serve different purposes and will diverge over time.
 
 ---
 
@@ -795,7 +794,7 @@ public async Task HandleAsync_ValidCommand_WritesToChangeFeed()
         CancellationToken.None);
 
     // Assert
-    await changeWriter.Received(1).AppendAsync(
+    await changeWriter.Received(1).AppendChangeAsync(
         tx,
         Arg.Is<ScopeContext>(s => s.Scope == ScopeType.Tenant && s.TenantId == "acme"),
         "Order",
@@ -818,12 +817,12 @@ public async Task HandleAsync_ValidCommand_WritesToChangeFeed()
 public async Task AppendAsync_SameIdempotencyKeyTwice_DoesNotThrow()
 {
     // Append first time
-    await changeWriter.AppendAsync(tx, scope, "Order", "1", "OrderCreated",
+    await changeWriter.AppendChangeAsync(tx, scope, "Order", "1", "OrderCreated",
         1, "{}", "user:test", idempotencyKey: "key-123");
 
     // Append second time with same key — should not throw
     var ex = await Record.ExceptionAsync(() =>
-        changeWriter.AppendAsync(tx, scope, "Order", "1", "OrderCreated",
+        changeWriter.AppendChangeAsync(tx, scope, "Order", "1", "OrderCreated",
             1, "{}", "user:test", idempotencyKey: "key-123"));
 
     Assert.Null(ex);
@@ -920,8 +919,8 @@ When reviewing code before committing, verify these are NOT present:
 |---|-------------|----------------|-----|
 | 1 | **Synchronous projection in write transaction** | Couples write latency to projection speed, creates cascading failures | Projections are async workers, always |
 | 2 | **Missing actorId** | Audit trail broken, GDPR compliance impossible | `actorId` is always required |
-| 3 | **Writing state-change events only to business_event_log** | Read models can't be rebuilt from business events | State changes go to `change_feed` |
-| 4 | **Writing signal-only events to change_feed** | Bloats feed, slows replays, confuses projections | Signals go to `business_event_log` |
+| 3 | **Writing state-change events only to papuma_event_feed** | Read models can't be rebuilt from business events | State changes go to `papuma_event_feed` |
+| 4 | **Writing signal-only events to papuma_event_feed** | Bloats feed, slows replays, confuses projections | Signals go to `papuma_event_feed` |
 | 5 | **Non-idempotent projection handler** | Replay produces duplicates, at-least-once breaks | Use `ON CONFLICT`, dedup keys |
 | 6 | **Embedding sensitive data in event payloads** | GDPR redaction leaves PII in too many places | Use `SensitiveRef` indirection |
 | 7 | **Silent GDPR deletion without audit** | Compliance violation, no forensics possible | Always use `GdprProcessor.RedactEntityAsync` with reason + actorId |
@@ -930,8 +929,8 @@ When reviewing code before committing, verify these are NOT present:
 | 10 | **Sharing projections across apps with different security needs** | Data leaks between apps with different permissions | One projection per consumer |
 | 11 | **Mixing Platform and Tenant data in one projection without scope filter** | Security boundary violation | Use explicit `ScopeFilter` on worker registration |
 | 12 | **Skipping idempotencyKey on retryable commands** | Duplicate events on retry | Pass stable idempotency keys |
-| 13 | **Copying change_feed payload blindly into outbox** | External consumers get internal fields they can't interpret; contracts diverge silently | Build outbox payload explicitly for each external consumer |
-| 14 | **Copying change_feed payload blindly into business_event_log** | Bloats log with unnecessary data; increases GDPR surface area | Use selective, purpose-specific payload in business_event_log |
+| 13 | **Copying papuma_event_feed payload blindly into outbox** | External consumers get internal fields they can't interpret; contracts diverge silently | Build outbox payload explicitly for each external consumer |
+| 14 | **Copying papuma_event_feed payload blindly into papuma_event_feed** | Bloats log with unnecessary data; increases GDPR surface area | Use selective, purpose-specific payload in papuma_event_feed |
 | 15 | **Calling ISensitiveDataStore.AppendAsync inside the main transaction** | Sensitive store has no transaction parameter — the call runs outside; misunderstanding leads to incorrect rollback assumptions | Call AppendAsync before opening the main transaction |
 | 16 | **Sending resolved PII to external consumers without GDPR documentation** | PII leaves the controlled sensitive store boundary without audit trail | Document GDPR basis for each external consumer receiving resolved PII; prefer passing sensitiveRef to internal consumers |
 
@@ -949,13 +948,13 @@ using (var scope = app.Services.CreateScope())
 {
     var checker = scope.ServiceProvider.GetRequiredService<SchemaVersionChecker>();
     await checker.EnsureCurrentBaselineAsync();
-    // Throws InvalidOperationException if DB schema is behind version 4
+    // Throws InvalidOperationException if DB schema is behind version 5
 }
 
 app.Run();
 ```
 
-Current required baseline: **version 4**.
+Current required baseline: **version 5**.
 
 ---
 
@@ -1069,19 +1068,19 @@ When implementing a feature on Papuma.Kernel, follow this checklist:
 
 **Write path**:
 - [ ] Domain state written in same transaction as events
-- [ ] `ChangeWriter.AppendAsync()` called for every state change
-- [ ] `BusinessEventWriter.AppendAsync()` called for business signals
+- [ ] `ChangeWriter.AppendChangeAsync()` called for every state change
+- [ ] `ChangeWriter.AppendEventAsync()` called for business signals
 - [ ] `OutboxWriter.EnqueueAsync()` called if external systems need notification
 - [ ] `ScopeContext` explicitly passed to all writers
 - [ ] `actorId` is always set (never null, never empty)
 - [ ] `idempotencyKey` passed for retryable operations
 
 **Payload design**:
-- [ ] `change_feed` payload is complete (everything projections need for replay)
-- [ ] `business_event_log` payload is selective (only what the signal consumer needs)
+- [ ] `papuma_event_feed` payload is complete (everything projections need for replay)
+- [ ] `papuma_event_feed` payload is selective (only what the signal consumer needs)
 - [ ] Outbox payload is contract-driven (only what the external consumer's API requires)
 - [ ] Different external consumers get separate, tailored outbox messages
-- [ ] No `change_feed` payload blindly reused as outbox payload
+- [ ] No `papuma_event_feed` payload blindly reused as outbox payload
 
 **Projections**:
 - [ ] Handler is idempotent (`ON CONFLICT DO UPDATE/NOTHING`)

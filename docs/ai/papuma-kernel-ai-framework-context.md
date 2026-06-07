@@ -37,8 +37,8 @@ Papuma.Kernel prefers explicitness over abstraction.
 
 - `ChangeWriter` writes `change_feed` records inside the current DB transaction.
 - `ChangeFeedReader` reads feed data.
-- `BusinessEventWriter` writes semantic business events to `business_event_log`.
-- `OutboxWriter` writes integration messages to `event_outbox`.
+- `BusinessEventWriter` writes semantic business events to `papuma_event_feed`.
+- `OutboxWriter` writes integration messages to `papuma_event_outbox`.
 - `GdprProcessor` performs redaction and history access operations.
 - `SchemaVersionChecker` verifies schema baseline compatibility.
 - `IUnitOfWork` (`NpgsqlUnitOfWork`) provides transaction + retry handling for transient DB errors.
@@ -64,7 +64,7 @@ Papuma.Kernel prefers explicitness over abstraction.
 flowchart TD
     A[Command/API Request] --> B[Open transaction]
     B --> C[Write domain state]
-    C --> D[Append change_feed and optional business_event_log and outbox]
+    C --> D[Append change_feed and optional papuma_event_feed and outbox]
     D --> E[Commit]
     E --> F[Return success]
     E --> G[Async workers]
@@ -104,11 +104,11 @@ These are set with `SET LOCAL` on the active transaction.
 Primary framework tables:
 
 - `change_feed`
-- `projection_checkpoint`
-- `projection_failures`
-- `business_event_log`
-- `event_outbox`
-- `sensitive_data_versions`
+- `papuma_projection_checkpoint`
+- `papuma_projection_failures`
+- `papuma_event_feed`
+- `papuma_event_outbox`
+- `papuma_sensitive_data_versions`
 - `papuma_schema_version`
 
 Current required schema baseline is version `4`.
@@ -116,12 +116,12 @@ Current required schema baseline is version `4`.
 ## 7. Event Classes and Their Roles
 
 - Change events (`change_feed`): state transition facts used for replay and read-model rebuild.
-- Business events (`business_event_log`): domain signals for process, analytics, notifications, integration semantics.
+- Business events (`papuma_event_feed`): domain signals for process, analytics, notifications, integration semantics.
 
 Rule of thumb:
 
 - if needed for state reconstruction, write to `change_feed`
-- if meaningful as domain signal but not required for state reconstruction, write to `business_event_log`
+- if meaningful as domain signal but not required for state reconstruction, write to `papuma_event_feed`
 
 ## 8. Reliability and Idempotency Rules
 
@@ -136,7 +136,7 @@ Implications:
 The framework schema supports idempotency keys in:
 
 - `change_feed` (unique index by scope + tenant + key)
-- `business_event_log` (unique index by scope + tenant + key)
+- `papuma_event_feed` (unique index by scope + tenant + key)
 
 ## 9. GDPR and Sensitive Data Strategy
 
@@ -154,7 +154,7 @@ GDPR handling is explicit and auditable:
 For high-risk payloads, use reference indirection:
 
 - put only a reference (`SensitiveRef`) into normal event payloads
-- store sensitive content in `sensitive_data_versions`
+- store sensitive content in `papuma_sensitive_data_versions`
 - resolve via `ISensitiveDataResolver` only where needed
 
 This reduces data sprawl and improves compliance handling.
@@ -229,7 +229,11 @@ Avoid these anti-patterns:
 
 ## 13. Suggested Prompt Snippet for Other Repositories
 
-Use this snippet in another application repository to align AI behavior:
+Use this snippet in another application repository to align AI behavior.
+
+> **Ready-to-use file**: See [papuma-kernel-agents-snippet.md](papuma-kernel-agents-snippet.md) for a complete, copy-paste-ready `AGENTS.md` snippet including placement guidance and customization notes.
+
+Minimal version:
 
 ```text
 This application is built on Papuma.Kernel (.NET 10 + PostgreSQL).
@@ -237,8 +241,10 @@ Use a CRUD-truth + change-feed architecture.
 Keep writes transactional (state write + change feed append).
 Treat projections/outbox as asynchronous at-least-once workers and implement idempotency.
 Use explicit ScopeContext (Platform/Tenant) and respect RLS session variables.
-Use business_event_log for semantic domain signals.
+Use papuma_event_feed for semantic domain signals (selective payload, not a copy of change_feed).
+Design outbox payloads as external consumer contracts, not copies of internal payloads.
 Use GDPR redaction patterns and SensitiveRef indirection for high-risk PII.
+Call ISensitiveDataStore.AppendAsync() before the main transaction, not inside it.
 Do not introduce heavy event-sourcing abstractions unless explicitly requested.
 ```
 

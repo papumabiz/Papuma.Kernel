@@ -10,7 +10,7 @@ This document is a companion to [Papuma.Kernel AI Framework Context](papuma-kern
 - **Npgsql** (PostgreSQL ADO.NET driver)
 - **PostgreSQL** with Row-Level Security support
 - **NuGet packages**: `Papuma.Kernel`, `Papuma.Kernel.AspNetCore`
-- **Required schema baseline**: version **4** (`papuma_schema_version` table)
+- **Required schema baseline**: version **5** (`papuma_schema_version` table)
 
 ---
 
@@ -55,7 +55,7 @@ public class CreateOrderHandler
             // INSERT INTO orders ...
 
             // 2. Append change feed record
-            await _changeWriter.AppendAsync(
+            await _changeWriter.AppendChangeAsync(
                 tx, scope,
                 entity: "Order",
                 entityId: cmd.OrderId,
@@ -114,7 +114,7 @@ All configuration uses the **Options Pattern** — each component has its own `*
 |--------|-------------|---------|
 | Top-level kernel | `PapumaKernelOptions` | — |
 | Change writer | `ChangeWriterOptions` | `MaxPayloadSizeBytes = 256 * 1024` |
-| Business event writer | `BusinessEventWriterOptions` | `MaxPayloadSizeBytes = 256 * 1024` |
+| Change writer (events) | `ChangeWriterOptions` | `MaxPayloadSizeBytes = 256 * 1024` |
 | Outbox writer | `OutboxWriterOptions` | `MaxPayloadSizeBytes = 256 * 1024` |
 | Outbox worker | `OutboxWorkerOptions` | Poll 100ms, Batch 100, 10 attempts, 5s-5m backoff |
 | Projection worker | `ProjectionWorkerOptions` | Poll 100ms, Batch 100, 10 attempts, 5s-5m backoff |
@@ -167,7 +167,7 @@ public static IServiceCollection AddPapumaKernel(
 Registers the core Papuma.Kernel services as singletons:
 - `ChangeWriter`
 - `ChangeFeedReader`
-- `BusinessEventWriter`
+- `ChangeWriter`
 - `OutboxWriter`
 - `GdprProcessor`
 - `SchemaVersionChecker`
@@ -196,15 +196,17 @@ Represents a persisted change feed entry.
 ```csharp
 public sealed record ChangeRecord(
     long SequenceId,
-    string Entity,
-    string EntityId,
+    string Kind,
+    Guid? EventId,
+    string? Entity,
+    string? EntityId,
     string EventType,
-    int Version,
+    int? Version,
     string? CorrelationId,
     string? CausationId,
     string ActorId,
     string PayloadJson,
-    DateTimeOffset Timestamp,
+    DateTimeOffset OccurredAt,
     ScopeType Scope,
     string? TenantId
 );
@@ -213,15 +215,17 @@ public sealed record ChangeRecord(
 | Property | Type | Description |
 |----------|------|-------------|
 | `SequenceId` | `long` | The sequence identifier assigned by the store. |
-| `Entity` | `string` | The logical entity name that produced the change. |
-| `EntityId` | `string` | The entity identifier within its logical namespace. |
-| `EventType` | `string` | The event type that describes the change. |
-| `Version` | `int` | The aggregate version associated with the change. |
+| `Kind` | `string` | The discriminator: `"Change"` (state mutation) or `"Event"` (business signal). |
+| `EventId` | `Guid?` | The UUID-based event identity; `null` for Change records (no Outbox correlation). |
+| `Entity` | `string?` | The logical entity name, or `null` for entity-independent events. |
+| `EntityId` | `string?` | The entity identifier, or `null` when no entity is bound. |
+| `EventType` | `string` | The event type that describes the change or signal. |
+| `Version` | `int?` | The aggregate version for Change records; `null` for Event records. |
 | `CorrelationId` | `string?` | Optional correlation identifier. |
 | `CausationId` | `string?` | Optional causation identifier. |
 | `ActorId` | `string` | The actor that caused the change. |
 | `PayloadJson` | `string` | The JSON payload associated with the change. |
-| `Timestamp` | `DateTimeOffset` | The timestamp at which the change was recorded. |
+| `OccurredAt` | `DateTimeOffset` | The timestamp at which the record was persisted. |
 | `Scope` | `ScopeType` | The scope associated with the change (`Platform` or `Tenant`). |
 | `TenantId` | `string?` | The tenant identifier for tenant scope; otherwise `null`. |
 
@@ -259,7 +263,7 @@ public ChangeWriter(ChangeWriterOptions? options = null)
 #### Methods
 
 ```csharp
-public async Task AppendAsync(
+public async Task AppendChangeAsync(
     NpgsqlTransaction transaction,
     ScopeContext scope,
     string entity,
@@ -291,9 +295,9 @@ Appends a new scoped change feed record to the current transaction. Sets `app.cu
 | `idempotencyKey` | `string?` | No | If provided: non-empty, max 200 chars. |
 | `ct` | `CancellationToken` | No | — |
 
-**Idempotency behavior**: When an `idempotencyKey` is provided and a row with the same (scope, tenant, key) already exists, the method silently returns — no exception is thrown. This relies on the unique constraint `ux_change_feed_idempotency_key` on the `change_feed` table.
+**Idempotency behavior**: When an `idempotencyKey` is provided and a row with the same (scope, tenant, key) already exists, the method silently returns — no exception is thrown. This relies on the unique constraint `ux_papuma_event_feed_idempotency_key` on the `papuma_event_feed` table.
 
-**Database table**: `change_feed`
+**Database table**: `papuma_event_feed`
 
 ```csharp
 public void ValidateInputs(
@@ -306,7 +310,7 @@ public void ValidateInputs(
     string? idempotencyKey = null)
 ```
 
-Validates change feed input values. Throws `ArgumentException` on any validation failure. Called by `AppendAsync` before writing.
+Validates change feed input values. Throws `ArgumentException` on any validation failure. Called by `AppendChangeAsync` before writing.
 
 ---
 
@@ -393,35 +397,14 @@ Registers `ChangeFeedReader` as a singleton service. (Already included in `AddPa
 
 ## Papuma.Kernel.Events
 
-### BusinessEventWriterOptions
+### AppendEventAsync (on ChangeWriter)
 
-**Kind**: sealed class
-**Namespace**: `Papuma.Kernel.Events`
+The `ChangeWriter` (documented in the `Papuma.Kernel.ChangeFeed` namespace above) also exposes a method for business events:
 
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `MaxPayloadSizeBytes` | `int` | `256 * 1024` | Maximum allowed payload size in bytes. |
-
----
-
-### BusinessEventWriter
-
-**Kind**: sealed class
-**Namespace**: `Papuma.Kernel.Events`
-**Lifetime**: Singleton (registered by `AddPapumaKernel`)
-
-Writes business events into the current PostgreSQL transaction. Handles idempotency key conflicts by returning the existing event ID.
-
-#### Constructor
+#### Method
 
 ```csharp
-public BusinessEventWriter(BusinessEventWriterOptions? options = null)
-```
-
-#### Methods
-
-```csharp
-public async Task<Guid> AppendAsync(
+public async Task AppendEventAsync(
     NpgsqlTransaction transaction,
     ScopeContext scope,
     string eventType,
@@ -435,7 +418,7 @@ public async Task<Guid> AppendAsync(
     CancellationToken ct = default)
 ```
 
-Appends a scoped business event to the current transaction. Returns the generated `Guid` event identifier (or the existing one on idempotency conflict).
+Appends a business event (`kind='Event'`) to the current transaction. Returns the generated `Guid` event identifier (or the existing one on idempotency conflict).
 
 | Parameter | Type | Required | Validation |
 |-----------|------|----------|------------|
@@ -451,9 +434,9 @@ Appends a scoped business event to the current transaction. Returns the generate
 | `idempotencyKey` | `string?` | No | If provided: non-empty, max 200 chars. |
 | `ct` | `CancellationToken` | No | — |
 
-**Idempotency behavior**: On unique violation of `ux_business_event_log_idempotency_key`, the existing `event_id` is looked up and returned. No exception is thrown.
+**Idempotency behavior**: On unique violation of `ux_papuma_event_feed_idempotency_key`, the existing `event_id` is looked up and returned. No exception is thrown.
 
-**Database table**: `business_event_log`
+**Database table**: `papuma_event_feed`
 
 ---
 
@@ -500,12 +483,12 @@ Enqueues a scoped outbox message in the current transaction.
 |-----------|------|----------|-------------|
 | `transaction` | `NpgsqlTransaction` | Yes | The ambient PostgreSQL transaction. |
 | `scope` | `ScopeContext` | Yes | The scope context for the outbox message. |
-| `eventId` | `Guid` | Yes | The event identifier (typically from `BusinessEventWriter.AppendAsync`). |
+| `eventId` | `Guid` | Yes | The event identifier (typically from `ChangeWriter.AppendEventAsync`). |
 | `eventType` | `string` | Yes | The business event type. |
 | `payloadJson` | `string` | Yes | UTF-8 byte count <= `MaxPayloadSizeBytes`. |
 | `ct` | `CancellationToken` | No | — |
 
-**Database table**: `event_outbox`
+**Database table**: `papuma_event_outbox`
 
 ---
 
@@ -580,7 +563,7 @@ public OutboxWorker(
 | `options` | `OutboxWorkerOptions?` | No | Polling/retry configuration. |
 | `scopeFilter` | `ScopeFilter?` | No | Restrict processing to a specific scope. `null` = all scopes. |
 
-**Database tables**: `event_outbox` (read), projection-style checkpoint tracking.
+**Database tables**: `papuma_event_outbox` (read), projection-style checkpoint tracking.
 
 ---
 
@@ -834,7 +817,7 @@ Applies the supplied change record within the provided transaction. The worker m
 | `transaction` | `NpgsqlTransaction` | The transaction that scopes handler writes and checkpoint updates. |
 | `ct` | `CancellationToken` | — |
 
-**Database tables**: User's read model tables + `projection_checkpoint` (framework-managed).
+**Database tables**: User's read model tables + `papuma_projection_checkpoint` (framework-managed).
 
 ---
 
@@ -991,7 +974,7 @@ Task RequestReplayAsync(CancellationToken ct = default)    // Request a full rep
 Task<ProjectionLagSnapshot> GetLagSnapshotAsync(CancellationToken ct = default)  // Current lag
 ```
 
-**Database tables**: `change_feed` (read), `projection_checkpoint` (track position), `projection_failures` (dead-letter).
+**Database tables**: `papuma_event_feed` (read), `papuma_projection_checkpoint` (track position), `papuma_projection_failures` (dead-letter).
 
 ---
 
@@ -1167,7 +1150,7 @@ Registers a `ReplayService` that auto-discovers all `ProjectionWorker` instances
 **Kind**: readonly record struct
 **Namespace**: `Papuma.Kernel.Gdpr`
 
-Represents a stable reference to versioned sensitive data. Used as an indirection to keep sensitive payloads out of event streams — instead of embedding PII directly in `change_feed` or `business_event_log` payloads, store only a `SensitiveRef` and resolve via `ISensitiveDataResolver`.
+Represents a stable reference to versioned sensitive data. Used as an indirection to keep sensitive payloads out of event streams — instead of embedding PII directly in `papuma_event_feed` or `papuma_event_feed` payloads, store only a `SensitiveRef` and resolve via `ISensitiveDataResolver`.
 
 ```csharp
 public readonly record struct SensitiveRef(Guid Value)
@@ -1232,7 +1215,7 @@ public sealed record SensitiveDataVersion(
 | `Reason` | `string?` | Optional documented reason for the lifecycle change. |
 | `Scope` | `ScopeContext` | The scope context. |
 
-**Database table**: `sensitive_data_versions`
+**Database table**: `papuma_sensitive_data_versions`
 
 ---
 
@@ -1247,7 +1230,7 @@ Provides versioned write and lifecycle operations for sensitive payloads. All op
 #### Methods
 
 ```csharp
-Task<SensitiveDataVersion> AppendAsync(
+Task<SensitiveDataVersion>.AppendChangeAsync(
     ScopeContext scope,
     SensitiveRef sensitiveRef,
     int schemaVersion,
@@ -1376,36 +1359,13 @@ Registers `NpgsqlSensitiveDataStore` as both `ISensitiveDataStore` and `ISensiti
 
 ```csharp
 public sealed record RedactionResult(
-    int FeedEventsRedacted,
-    int BusinessEventsRedacted
+    int EventsRedacted
 );
 ```
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `FeedEventsRedacted` | `int` | Number of `change_feed` rows redacted. |
-| `BusinessEventsRedacted` | `int` | Number of `business_event_log` rows redacted. |
-
----
-
-### BusinessEventRecord
-
-**Kind**: sealed record
-**Namespace**: `Papuma.Kernel.Gdpr`
-
-```csharp
-public sealed record BusinessEventRecord(
-    Guid EventId,
-    string EventType,
-    string ActorId,
-    string PayloadJson,
-    DateTimeOffset OccurredAt,
-    ScopeType Scope,
-    string? TenantId
-);
-```
-
-Represents a business event entry returned for GDPR history requests.
+| `EventsRedacted` | `int` | Number of `papuma_event_feed` rows redacted. |
 
 ---
 
@@ -1416,12 +1376,11 @@ Represents a business event entry returned for GDPR history requests.
 
 ```csharp
 public sealed record EntityHistory(
-    IReadOnlyList<ChangeRecord> ChangeRecords,
-    IReadOnlyList<BusinessEventRecord> BusinessEvents
+    IReadOnlyList<ChangeRecord> Records
 );
 ```
 
-Represents the stored history for one entity across change feed and business event log.
+Represents the stored history for one entity from the unified event feed. Both Change and Event records are returned, distinguished by `record.Kind`.
 
 ---
 
@@ -1438,14 +1397,14 @@ Provides GDPR-oriented history and redaction operations. Callers should enforce 
 ```csharp
 public GdprProcessor(
     NpgsqlDataSource dataSource,
-    BusinessEventWriter businessEventWriter,
+    ChangeWriter businessEventWriter,
     ILogger<GdprProcessor> logger)
 ```
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `dataSource` | `NpgsqlDataSource` | Yes | Data source for redaction and history queries. |
-| `businessEventWriter` | `BusinessEventWriter` | Yes | Writer used to audit redaction operations. |
+| `businessEventWriter` | `ChangeWriter` | Yes | Writer used to audit redaction operations. |
 | `logger` | `ILogger<GdprProcessor>` | Yes | Logger for operational diagnostics. |
 
 #### Methods
@@ -1471,7 +1430,7 @@ Redacts all change feed and business event log entries for a specific entity and
 | `reason` | `string` | Yes | Documented reason — must not be empty/whitespace. |
 | `ct` | `CancellationToken` | No | — |
 
-**Database tables affected**: `change_feed` (UPDATE), `business_event_log` (UPDATE + INSERT audit event).
+**Database tables affected**: `papuma_event_feed` (UPDATE), `papuma_event_feed` (UPDATE + INSERT audit event).
 
 ```csharp
 public async Task<EntityHistory> GetEntityHistoryAsync(
@@ -1501,9 +1460,7 @@ Returns the stored history for one entity and scope across change feed and busin
 |----------|------|---------|-------------|
 | `PollInterval` | `TimeSpan` | `1 hour` | Idle wait time between cleanup cycles. |
 | `RetentionWindow` | `TimeSpan` | `365 days` | Redacted rows older than now minus this window are eligible for deletion. |
-| `BatchSize` | `int` | `1000` | Max rows deleted per table and cycle. |
-| `DeleteFromChangeFeed` | `bool` | `true` | Whether redacted `change_feed` rows are eligible. |
-| `DeleteFromBusinessEventLog` | `bool` | `false` | Whether redacted `business_event_log` rows are eligible. |
+| `BatchSize` | `int` | `1000` | Max rows deleted per cycle. |
 
 ---
 
@@ -1552,7 +1509,7 @@ Registers a `RetentionWorker` as a hosted service.
 
 Checks whether the database schema has reached a required migration version.
 
-**Constant**: `CurrentRequiredVersion = 4`
+**Constant**: `CurrentRequiredVersion = 5`
 
 #### Constructor
 
@@ -1589,7 +1546,7 @@ Ensures the database schema version is at least the required version. Throws `In
 public async Task EnsureCurrentBaselineAsync(CancellationToken ct = default)
 ```
 
-Ensures the database schema version matches the library's required baseline (`CurrentRequiredVersion = 4`). Equivalent to `EnsureMinimumVersionAsync(4, ct)`.
+Ensures the database schema version matches the library's required baseline (`CurrentRequiredVersion = 5`). Equivalent to `EnsureMinimumVersionAsync(4, ct)`.
 
 **Database table**: `papuma_schema_version`
 
@@ -1808,13 +1765,13 @@ public class CreateOrderHandler
 {
     private readonly IUnitOfWork _uow;
     private readonly ChangeWriter _changeWriter;
-    private readonly BusinessEventWriter _eventWriter;
+    private readonly ChangeWriter _eventWriter;
     private readonly OutboxWriter _outboxWriter;
 
     public CreateOrderHandler(
         IUnitOfWork uow,
         ChangeWriter changeWriter,
-        BusinessEventWriter eventWriter,
+        ChangeWriter eventWriter,
         OutboxWriter outboxWriter)
     {
         _uow = uow;
@@ -1845,7 +1802,7 @@ public class CreateOrderHandler
 
             // 2. Append change feed record
             var payload = $$"""{"orderId":"{{orderId}}","amount":{{amount}}}""";
-            await _changeWriter.AppendAsync(
+            await _changeWriter.AppendChangeAsync(
                 tx, scope,
                 entity: "Order",
                 entityId: orderId,
@@ -1858,7 +1815,7 @@ public class CreateOrderHandler
                 ct: ct);
 
             // 3. Write business event + enqueue outbox in one step
-            var eventId = await _eventWriter.AppendAsync(
+            var eventId = await _changeWriter.AppendEventAsync(
                 tx, scope,
                 eventType: "OrderPlaced",
                 actorId: actorId,
@@ -2103,8 +2060,7 @@ public class GdprRedactionHandler
             reason: "GDPR Article 17 — Right to erasure, request #REQ-2026-042",
             ct: ct);
 
-        // result.FeedEventsRedacted — change_feed rows redacted
-        // result.BusinessEventsRedacted — business_event_log rows redacted
+        // result.EventsRedacted — papuma_event_feed rows redacted
         // An EntityRedacted audit event is written automatically
 
         return result;
@@ -2162,7 +2118,7 @@ public class ProfileWriteHandler
             ct: ct);
 
         // 2. Write change feed with ONLY the reference
-        await _changeWriter.AppendAsync(
+        await _changeWriter.AppendChangeAsync(
             tx, scope,
             entity: "Profile",
             entityId: userId,
@@ -2198,7 +2154,7 @@ using (var scope = app.Services.CreateScope())
 {
     var checker = scope.ServiceProvider.GetRequiredService<SchemaVersionChecker>();
     await checker.EnsureCurrentBaselineAsync();
-    // Throws InvalidOperationException if DB schema is behind version 4
+    // Throws InvalidOperationException if DB schema is behind version 5
 }
 
 app.Run();
@@ -2248,20 +2204,20 @@ app.MapHealthChecks("/health");
 
 | Table | Purpose | Key Columns |
 |-------|---------|-------------|
-| `change_feed` | Append-only event log for state transitions | `sequence_id`, `scope`, `tenant_id`, `entity`, `entity_id`, `event_type`, `version`, `payload` (JSONB), `actor_id`, `correlation_id`, `causation_id`, `timestamp`, `redacted`, `idempotency_key` |
-| `business_event_log` | Semantic business events for auditing and integration | `event_id` (UUID), `scope`, `tenant_id`, `event_type`, `entity`, `entity_id`, `actor_id`, `payload` (JSONB), `correlation_id`, `causation_id`, `occurred_at`, `redacted`, `idempotency_key` |
-| `event_outbox` | Transactional outbox for reliable message publishing | `id`, `scope`, `tenant_id`, `event_id`, `event_type`, `payload` (JSONB), `created_at`, `published`, `attempt_count`, `last_error`, `next_retry_at` |
-| `projection_checkpoint` | Per-projection read position tracking | `projection_name`, `last_sequence_id` |
-| `projection_failures` | Dead-letter store for failed projection events | `projection_name`, `sequence_id`, `event_type`, `error_message`, `failed_at` |
-| `sensitive_data_versions` | Versioned sensitive payload storage (GDPR) | `sensitive_ref` (UUID), `version`, `schema_version`, `payload` (JSONB), `state` (Active/Redacted/Deleted), `legal_hold`, `actor_id`, `created_at`, `reason` |
+| `papuma_event_feed` | Append-only event log for state transitions | `sequence_id`, `scope`, `tenant_id`, `entity`, `entity_id`, `event_type`, `version`, `payload` (JSONB), `actor_id`, `correlation_id`, `causation_id`, `timestamp`, `redacted`, `idempotency_key` |
+| `papuma_event_feed` | Semantic business events for auditing and integration | `event_id` (UUID), `scope`, `tenant_id`, `event_type`, `entity`, `entity_id`, `actor_id`, `payload` (JSONB), `correlation_id`, `causation_id`, `occurred_at`, `redacted`, `idempotency_key` |
+| `papuma_event_outbox` | Transactional outbox for reliable message publishing | `id`, `scope`, `tenant_id`, `event_id`, `event_type`, `payload` (JSONB), `created_at`, `published`, `attempt_count`, `last_error`, `next_retry_at` |
+| `papuma_projection_checkpoint` | Per-projection read position tracking | `projection_name`, `last_sequence_id` |
+| `papuma_projection_failures` | Dead-letter store for failed projection events | `projection_name`, `sequence_id`, `event_type`, `error_message`, `failed_at` |
+| `papuma_sensitive_data_versions` | Versioned sensitive payload storage (GDPR) | `sensitive_ref` (UUID), `version`, `schema_version`, `payload` (JSONB), `state` (Active/Redacted/Deleted), `legal_hold`, `actor_id`, `created_at`, `reason` |
 | `papuma_schema_version` | Schema migration tracking | `version`, `applied_at` |
 
 ### Unique Constraints
 
 | Table | Constraint | Columns |
 |-------|-----------|---------|
-| `change_feed` | `ux_change_feed_idempotency_key` | `(scope, tenant_id, idempotency_key)` |
-| `business_event_log` | `ux_business_event_log_idempotency_key` | `(scope, tenant_id, idempotency_key)` |
+| `papuma_event_feed` | `ux_papuma_event_feed_idempotency_key` | `(scope, tenant_id, idempotency_key)` |
+| `papuma_event_feed` | `ux_papuma_event_feed_idempotency_key` | `(scope, tenant_id, idempotency_key)` |
 
 ### Row-Level Security
 
@@ -2290,7 +2246,7 @@ The `NpgsqlUnitOfWork` retries on these PostgreSQL error codes:
 | `PapumaKernelOptions` | `MaxPayloadSizeBytes` | `262144` (256 KB) |
 | `PapumaKernelOptions` | `UnitOfWork` | `null` (uses `UnitOfWorkOptions` defaults) |
 | `ChangeWriterOptions` | `MaxPayloadSizeBytes` | `262144` |
-| `BusinessEventWriterOptions` | `MaxPayloadSizeBytes` | `262144` |
+| `ChangeWriterOptions` | `MaxPayloadSizeBytes` | `262144` |
 | `OutboxWriterOptions` | `MaxPayloadSizeBytes` | `262144` |
 | `UnitOfWorkOptions` | `MaxRetries` | `3` |
 | `UnitOfWorkOptions` | `BaseRetryDelay` | `100 ms` |
@@ -2307,8 +2263,6 @@ The `NpgsqlUnitOfWork` retries on these PostgreSQL error codes:
 | `RetentionWorkerOptions` | `PollInterval` | `1 hour` |
 | `RetentionWorkerOptions` | `RetentionWindow` | `365 days` |
 | `RetentionWorkerOptions` | `BatchSize` | `1000` |
-| `RetentionWorkerOptions` | `DeleteFromChangeFeed` | `true` |
-| `RetentionWorkerOptions` | `DeleteFromBusinessEventLog` | `false` |
 | `ProjectionHealthCheckOptions` | `MaxAllowedLag` | `1000` |
 | `SchemaVersionChecker` | `CurrentRequiredVersion` | `4` |
 
@@ -2318,7 +2272,7 @@ The `NpgsqlUnitOfWork` retries on these PostgreSQL error codes:
 
 | Method | Registers | Lifetime |
 |--------|-----------|----------|
-| `AddPapumaKernel(...)` | `ChangeWriter`, `ChangeFeedReader`, `BusinessEventWriter`, `OutboxWriter`, `GdprProcessor`, `SchemaVersionChecker`, `ISensitiveDataStore`, `ISensitiveDataResolver`, `IUnitOfWork` | All Singleton |
+| `AddPapumaKernel(...)` | `ChangeWriter`, `ChangeFeedReader`, `OutboxWriter`, `GdprProcessor`, `SchemaVersionChecker`, `ISensitiveDataStore`, `ISensitiveDataResolver`, `IUnitOfWork` | All Singleton |
 | `AddChangeFeedReader()` | `ChangeFeedReader` | Singleton |
 | `AddProjection<THandler>(...)` | `THandler` + `ProjectionWorker` (as `IHostedService`) | Singleton |
 | `AddExternalProjection<THandler>(...)` | `THandler` + `ExternalProjectionWorker` (as `IHostedService`) | Singleton |
@@ -2334,3 +2288,9 @@ The `NpgsqlUnitOfWork` retries on these PostgreSQL error codes:
 ---
 
 > For architectural design rules, philosophy, anti-patterns, and AI decision guidance, see the companion document: [Papuma.Kernel AI Framework Context](papuma-kernel-ai-framework-context.md).
+rk Context](papuma-kernel-ai-framework-context.md).
+nt: [Papuma.Kernel AI Framework Context](papuma-kernel-ai-framework-context.md).
+rk Context](papuma-kernel-ai-framework-context.md).
+ext.md).
+nt: [Papuma.Kernel AI Framework Context](papuma-kernel-ai-framework-context.md).
+rk Context](papuma-kernel-ai-framework-context.md).
