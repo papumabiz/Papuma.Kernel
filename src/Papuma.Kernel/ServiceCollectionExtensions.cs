@@ -22,7 +22,7 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Registers the core Papuma.Kernel services: <see cref="ChangeWriter"/>,
     /// <see cref="ChangeFeedReader"/>,
-    /// <see cref="BusinessEventWriter"/>, <see cref="OutboxWriter"/>,
+    /// <see cref="OutboxWriter"/>,
     /// <see cref="GdprProcessor"/>, <see cref="SchemaVersionChecker"/>,
     /// <see cref="ISensitiveDataStore"/>, <see cref="ISensitiveDataResolver"/> and <see cref="IUnitOfWork"/>.
     /// </summary>
@@ -43,11 +43,6 @@ public static class ServiceCollectionExtensions
             MaxPayloadSizeBytes = options.MaxPayloadSizeBytes,
         });
 
-        services.AddSingleton(new BusinessEventWriterOptions
-        {
-            MaxPayloadSizeBytes = options.MaxPayloadSizeBytes,
-        });
-
         services.AddSingleton(new OutboxWriterOptions
         {
             MaxPayloadSizeBytes = options.MaxPayloadSizeBytes,
@@ -58,9 +53,6 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<ChangeFeedReader>();
 
-        services.AddSingleton<BusinessEventWriter>(sp =>
-            new BusinessEventWriter(sp.GetRequiredService<BusinessEventWriterOptions>()));
-
         services.AddSingleton<OutboxWriter>(sp =>
             new OutboxWriter(sp.GetRequiredService<OutboxWriterOptions>()));
 
@@ -69,7 +61,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<GdprProcessor>(sp =>
             new GdprProcessor(
                 sp.GetRequiredService<NpgsqlDataSource>(),
-                sp.GetRequiredService<BusinessEventWriter>(),
+                sp.GetRequiredService<ChangeWriter>(),
                 sp.GetRequiredService<ILogger<GdprProcessor>>()));
 
         services.AddSensitiveDataStore();

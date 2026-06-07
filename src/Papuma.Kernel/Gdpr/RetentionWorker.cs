@@ -11,7 +11,7 @@ using Papuma.Kernel.Tenancy;
 namespace Papuma.Kernel.Gdpr;
 
 /// <summary>
-/// Deletes redacted records older than the configured retention window.
+/// Deletes redacted records older than the configured retention window from the unified event feed.
 /// </summary>
 public sealed class RetentionWorker : BackgroundService
 {
@@ -25,10 +25,10 @@ public sealed class RetentionWorker : BackgroundService
     /// <summary>
     /// Initializes a new instance of the <see cref="RetentionWorker"/> class.
     /// </summary>
-    /// <param name="dataSource">The data source used to perform retention cleanup.</param>
-    /// <param name="logger">The logger used for worker diagnostics.</param>
-    /// <param name="options">Optional retention worker options.</param>
-    /// <param name="scopeFilter">Optional scope filter for retention cleanup.</param>
+    /// <param name="dataSource">The PostgreSQL data source.</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="options">Optional worker configuration.</param>
+    /// <param name="scopeFilter">Optional scope filter to limit retention to a specific scope.</param>
     public RetentionWorker(
         NpgsqlDataSource dataSource,
         ILogger<RetentionWorker> logger,
@@ -46,7 +46,6 @@ public sealed class RetentionWorker : BackgroundService
         ValidateOptions(_options);
     }
 
-    /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("RetentionWorker started.");
@@ -76,6 +75,9 @@ public sealed class RetentionWorker : BackgroundService
         _logger.LogInformation("RetentionWorker stopped.");
     }
 
+    /// <summary>
+    /// Deletes redacted rows older than the cutoff timestamp, limited to the configured batch size.
+    /// </summary>
     private async Task<int> RunCleanupCycleAsync(CancellationToken ct)
     {
         var cutoff = DateTimeOffset.UtcNow - _options.RetentionWindow;
@@ -87,30 +89,25 @@ public sealed class RetentionWorker : BackgroundService
         }
         await using var tx = await conn.BeginTransactionAsync(ct);
 
-        var feedDeleted = _options.DeleteFromChangeFeed
-            ? await DeleteRedactedFeedRecordsAsync(conn, tx, cutoff, ct)
-            : 0;
-
-        var businessDeleted = _options.DeleteFromBusinessEventLog
-            ? await DeleteRedactedBusinessRecordsAsync(conn, tx, cutoff, ct)
-            : 0;
+        var deleted = await DeleteRedactedRecordsAsync(conn, tx, cutoff, ct);
 
         await tx.CommitAsync(ct);
 
-        var deleted = feedDeleted + businessDeleted;
         if (deleted > 0)
         {
             _logger.LogInformation(
-                "RetentionWorker deleted {FeedDeleted} change_feed rows and {BusinessDeleted} business_event_log rows older than {Cutoff}.",
-                feedDeleted,
-                businessDeleted,
+                "RetentionWorker deleted {Deleted} event_feed rows older than {Cutoff}.",
+                deleted,
                 cutoff);
         }
 
         return deleted;
     }
 
-    private async Task<int> DeleteRedactedFeedRecordsAsync(
+    /// <summary>
+    /// Deletes redacted <c>event_feed</c> rows older than the cutoff using a CTE-based DELETE.
+    /// </summary>
+    private async Task<int> DeleteRedactedRecordsAsync(
         NpgsqlConnection conn,
         NpgsqlTransaction tx,
         DateTimeOffset cutoff,
@@ -121,9 +118,9 @@ public sealed class RetentionWorker : BackgroundService
         cmd.CommandText = """
             WITH candidates AS (
                 SELECT sequence_id
-                FROM change_feed
+                FROM event_feed
                 WHERE redacted = TRUE
-                  AND timestamp < @cutoff
+                  AND occurred_at < @cutoff
                   AND (@scope IS NULL OR scope = @scope)
                   AND (
                       @scope IS NULL
@@ -135,9 +132,9 @@ public sealed class RetentionWorker : BackgroundService
                 ORDER BY sequence_id
                 LIMIT @batchSize
             )
-            DELETE FROM change_feed cf
+            DELETE FROM event_feed ef
             USING candidates
-            WHERE cf.sequence_id = candidates.sequence_id
+            WHERE ef.sequence_id = candidates.sequence_id
             """;
 
         cmd.Parameters.AddWithValue("cutoff", cutoff);
@@ -148,44 +145,9 @@ public sealed class RetentionWorker : BackgroundService
         return await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    private async Task<int> DeleteRedactedBusinessRecordsAsync(
-        NpgsqlConnection conn,
-        NpgsqlTransaction tx,
-        DateTimeOffset cutoff,
-        CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = """
-            WITH candidates AS (
-                SELECT event_id
-                FROM business_event_log
-                WHERE redacted = TRUE
-                  AND occurred_at < @cutoff
-                  AND (@scope IS NULL OR scope = @scope)
-                  AND (
-                      @scope IS NULL
-                      OR
-                      @scope <> 'Tenant'
-                      OR
-                      tenant_id = @tenantId
-                  )
-                ORDER BY occurred_at
-                LIMIT @batchSize
-            )
-            DELETE FROM business_event_log bel
-            USING candidates
-            WHERE bel.event_id = candidates.event_id
-            """;
-
-        cmd.Parameters.AddWithValue("cutoff", cutoff);
-        cmd.Parameters.AddWithValue("scope", (object?)_scopeFilter.Scope?.Scope.ToString() ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("tenantId", (object?)_scopeFilter.Scope?.TenantId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("batchSize", _options.BatchSize);
-
-        return await cmd.ExecuteNonQueryAsync(ct);
-    }
-
+    /// <summary>
+    /// Validates that the configured options fall within acceptable ranges.
+    /// </summary>
     private static void ValidateOptions(RetentionWorkerOptions options)
     {
         if (options.BatchSize < 1)

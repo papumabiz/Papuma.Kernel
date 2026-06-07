@@ -6,7 +6,7 @@ namespace Papuma.Kernel.ChangeFeed;
 using Papuma.Kernel.Tenancy;
 
 /// <summary>
-/// Represents a persisted change feed entry.
+/// Represents a persisted entry in the unified event feed.
 /// </summary>
 public sealed record ChangeRecord(
     /// <summary>
@@ -14,21 +14,29 @@ public sealed record ChangeRecord(
     /// </summary>
     long SequenceId,
     /// <summary>
-    /// Gets the logical entity name that produced the change.
+    /// Gets the kind of event: <c>"Change"</c> for state mutations or <c>"Event"</c> for semantic events.
     /// </summary>
-    string Entity,
+    string Kind,
     /// <summary>
-    /// Gets the entity identifier within its logical namespace.
+    /// Gets the optional event identifier for Outbox correlation. Only set for <c>Kind = Event</c>.
     /// </summary>
-    string EntityId,
+    Guid? EventId,
+    /// <summary>
+    /// Gets the logical entity name that produced the change, if any.
+    /// </summary>
+    string? Entity,
+    /// <summary>
+    /// Gets the entity identifier within its logical namespace, if any.
+    /// </summary>
+    string? EntityId,
     /// <summary>
     /// Gets the event type that describes the change.
     /// </summary>
     string EventType,
     /// <summary>
-    /// Gets the aggregate version associated with the change.
+    /// Gets the aggregate version associated with the change, if any.
     /// </summary>
-    int Version,
+    int? Version,
     /// <summary>
     /// Gets the optional correlation identifier.
     /// </summary>
@@ -48,7 +56,7 @@ public sealed record ChangeRecord(
     /// <summary>
     /// Gets the timestamp at which the change was recorded.
     /// </summary>
-    DateTimeOffset Timestamp,
+    DateTimeOffset OccurredAt,
     /// <summary>
     /// Gets the scope associated with the change.
     /// </summary>

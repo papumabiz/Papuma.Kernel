@@ -6,4 +6,4 @@ namespace Papuma.Kernel.Gdpr;
 /// <summary>
 /// Captures how many entries were redacted during a GDPR redaction request.
 /// </summary>
-public sealed record RedactionResult(int FeedEventsRedacted, int BusinessEventsRedacted);
+public sealed record RedactionResult(int EventsRedacted);

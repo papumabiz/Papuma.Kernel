@@ -9,7 +9,7 @@ using Papuma.Kernel.Validation;
 namespace Papuma.Kernel.ChangeFeed;
 
 /// <summary>
-/// Reads change feed records for ad-hoc queries (debugging, exports, admin tools).
+/// Reads event feed records for ad-hoc queries (debugging, exports, admin tools).
 /// </summary>
 public sealed class ChangeFeedReader
 {
@@ -18,7 +18,7 @@ public sealed class ChangeFeedReader
     /// <summary>
     /// Initializes a new instance of the <see cref="ChangeFeedReader"/> class.
     /// </summary>
-    /// <param name="dataSource">The data source used to read change feed records.</param>
+    /// <param name="dataSource">The PostgreSQL data source.</param>
     public ChangeFeedReader(NpgsqlDataSource dataSource)
     {
         ArgumentNullException.ThrowIfNull(dataSource);
@@ -26,14 +26,14 @@ public sealed class ChangeFeedReader
     }
 
     /// <summary>
-    /// Gets all change feed records for a specific entity.
+    /// Returns all event feed records for a specific entity, ordered by sequence.
     /// </summary>
-    /// <param name="scope">The scope context to query in.</param>
-    /// <param name="entity">The entity name.</param>
+    /// <param name="scope">The scope context.</param>
+    /// <param name="entity">The logical entity name.</param>
     /// <param name="entityId">The entity identifier.</param>
     /// <param name="limit">The maximum number of records to return.</param>
     /// <param name="ct">A cancellation token.</param>
-    /// <returns>A list of matching change records ordered by sequence id.</returns>
+    /// <returns>The matching event feed records.</returns>
     public async Task<IReadOnlyList<ChangeRecord>> GetByEntityAsync(
         ScopeContext scope,
         string entity,
@@ -53,9 +53,9 @@ public sealed class ChangeFeedReader
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
-            SELECT sequence_id, scope, tenant_id, entity, entity_id, event_type, version,
-                   correlation_id, causation_id, actor_id, payload::text, timestamp
-            FROM change_feed
+            SELECT sequence_id, kind, event_id, scope, tenant_id, entity, entity_id, event_type, version,
+                   correlation_id, causation_id, actor_id, payload::text, occurred_at
+            FROM event_feed
             WHERE entity = @entity
               AND entity_id = @entityId
               AND (@scope IS NULL OR scope = @scope)
@@ -80,14 +80,14 @@ public sealed class ChangeFeedReader
     }
 
     /// <summary>
-    /// Gets change feed records for a sequence id range.
+    /// Returns event feed records within the given sequence range, ordered by sequence.
     /// </summary>
-    /// <param name="scope">The scope context to query in.</param>
-    /// <param name="fromSequenceId">The inclusive start sequence id.</param>
-    /// <param name="toSequenceId">The inclusive end sequence id.</param>
+    /// <param name="scope">The scope context.</param>
+    /// <param name="fromSequenceId">The inclusive lower sequence bound.</param>
+    /// <param name="toSequenceId">The inclusive upper sequence bound.</param>
     /// <param name="limit">The maximum number of records to return.</param>
     /// <param name="ct">A cancellation token.</param>
-    /// <returns>A list of matching change records ordered by sequence id.</returns>
+    /// <returns>The matching event feed records.</returns>
     public async Task<IReadOnlyList<ChangeRecord>> GetBySequenceRangeAsync(
         ScopeContext scope,
         long fromSequenceId,
@@ -115,9 +115,9 @@ public sealed class ChangeFeedReader
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
-            SELECT sequence_id, scope, tenant_id, entity, entity_id, event_type, version,
-                   correlation_id, causation_id, actor_id, payload::text, timestamp
-            FROM change_feed
+            SELECT sequence_id, kind, event_id, scope, tenant_id, entity, entity_id, event_type, version,
+                   correlation_id, causation_id, actor_id, payload::text, occurred_at
+            FROM event_feed
             WHERE sequence_id BETWEEN @fromSequenceId AND @toSequenceId
               AND (@scope IS NULL OR scope = @scope)
               AND (
@@ -140,12 +140,6 @@ public sealed class ChangeFeedReader
         return await ReadRecordsAsync(cmd, ct);
     }
 
-    /// <summary>
-    /// Gets the latest sequence id visible in the selected scope.
-    /// </summary>
-    /// <param name="scope">The scope context to query in.</param>
-    /// <param name="ct">A cancellation token.</param>
-    /// <returns>The latest sequence id, or <c>0</c> if no records exist.</returns>
     public async Task<long> GetLatestSequenceIdAsync(
         ScopeContext scope,
         CancellationToken ct = default)
@@ -160,7 +154,7 @@ public sealed class ChangeFeedReader
         cmd.Transaction = tx;
         cmd.CommandText = """
             SELECT COALESCE(MAX(sequence_id), 0)
-            FROM change_feed
+            FROM event_feed
             WHERE (@scope IS NULL OR scope = @scope)
               AND (
                   @scope IS NULL
@@ -178,6 +172,9 @@ public sealed class ChangeFeedReader
         return result is long latestSequenceId ? latestSequenceId : 0L;
     }
 
+    /// <summary>
+    /// Reads all matching records from the command into a list of <see cref="ChangeRecord"/>.
+    /// </summary>
     private static async Task<IReadOnlyList<ChangeRecord>> ReadRecordsAsync(NpgsqlCommand cmd, CancellationToken ct)
     {
         var records = new List<ChangeRecord>();
@@ -187,17 +184,19 @@ public sealed class ChangeFeedReader
         {
             records.Add(new ChangeRecord(
                 SequenceId: reader.GetInt64(0),
-                Entity: reader.GetString(3),
-                EntityId: reader.GetString(4),
-                EventType: reader.GetString(5),
-                Version: reader.GetInt32(6),
-                CorrelationId: reader.IsDBNull(7) ? null : reader.GetString(7),
-                CausationId: reader.IsDBNull(8) ? null : reader.GetString(8),
-                ActorId: reader.GetString(9),
-                PayloadJson: reader.GetString(10),
-                Timestamp: reader.GetFieldValue<DateTimeOffset>(11),
-                Scope: Enum.Parse<ScopeType>(reader.GetString(1), ignoreCase: false),
-                TenantId: reader.IsDBNull(2) ? null : reader.GetString(2)));
+                Kind: reader.GetString(1),
+                EventId: reader.IsDBNull(2) ? null : reader.GetGuid(2),
+                Entity: reader.IsDBNull(4) ? null : reader.GetString(4),
+                EntityId: reader.IsDBNull(5) ? null : reader.GetString(5),
+                EventType: reader.GetString(6),
+                Version: reader.IsDBNull(7) ? null : reader.GetInt32(7),
+                CorrelationId: reader.IsDBNull(8) ? null : reader.GetString(8),
+                CausationId: reader.IsDBNull(9) ? null : reader.GetString(9),
+                ActorId: reader.GetString(10),
+                PayloadJson: reader.GetString(11),
+                OccurredAt: reader.GetFieldValue<DateTimeOffset>(12),
+                Scope: Enum.Parse<ScopeType>(reader.GetString(3), ignoreCase: false),
+                TenantId: reader.IsDBNull(4) ? null : reader.GetString(4)));
         }
 
         return records;

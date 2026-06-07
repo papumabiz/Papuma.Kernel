@@ -4,7 +4,7 @@
 namespace Papuma.Kernel.Gdpr;
 
 /// <summary>
-/// Configures retention cleanup behavior for redacted records.
+/// Configures retention cleanup behavior for redacted records in the unified event feed.
 /// </summary>
 public sealed class RetentionWorkerOptions
 {
@@ -19,18 +19,7 @@ public sealed class RetentionWorkerOptions
     public TimeSpan RetentionWindow { get; set; } = TimeSpan.FromDays(365);
 
     /// <summary>
-    /// Gets or sets the maximum number of rows deleted per table and cycle.
+    /// Gets or sets the maximum number of rows deleted per cycle.
     /// </summary>
     public int BatchSize { get; set; } = 1000;
-
-    /// <summary>
-    /// Gets or sets a value indicating whether redacted rows in change_feed are eligible for cleanup.
-    /// </summary>
-    public bool DeleteFromChangeFeed { get; set; } = true;
-
-    /// <summary>
-    /// Gets or sets a value indicating whether redacted rows in business_event_log are eligible for cleanup.
-    /// Defaults to false because business_event_log can be used as long-term audit/event history.
-    /// </summary>
-    public bool DeleteFromBusinessEventLog { get; set; } = false;
 }

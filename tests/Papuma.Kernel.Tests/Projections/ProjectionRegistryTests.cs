@@ -15,18 +15,20 @@ public class ProjectionRegistryTests
         var registry = new ProjectionRegistry();
         var handler = new TestVersionedHandler();
         var record = new ChangeRecord(
-            1,
-            "User",
-            "user-1",
-            "UserEmailUpdated",
-            2,
-            null,
-            null,
-            "user:123",
-            "{\"Value\":\"alice@example.com\"}",
-            DateTimeOffset.UtcNow,
-            ScopeType.Tenant,
-            "acme");
+            SequenceId: 1,
+            Kind: "Change",
+            EventId: null,
+            Entity: "User",
+            EntityId: "user-1",
+            EventType: "UserEmailUpdated",
+            Version: 2,
+            CorrelationId: null,
+            CausationId: null,
+            ActorId: "user:123",
+            PayloadJson: "{\"Value\":\"alice@example.com\"}",
+            OccurredAt: DateTimeOffset.UtcNow,
+            Scope: ScopeType.Tenant,
+            TenantId: "acme");
 
         registry.Register("UserEmailUpdated", handler);
 
@@ -41,22 +43,47 @@ public class ProjectionRegistryTests
     {
         var registry = new ProjectionRegistry();
         var record = new ChangeRecord(
-            1,
-            "User",
-            "user-1",
-            "UserEmailUpdated",
-            99,
-            null,
-            null,
-            "user:123",
-            "{}",
-            DateTimeOffset.UtcNow,
-            ScopeType.Tenant,
-            "acme");
+            SequenceId: 1,
+            Kind: "Change",
+            EventId: null,
+            Entity: "User",
+            EntityId: "user-1",
+            EventType: "UserEmailUpdated",
+            Version: 99,
+            CorrelationId: null,
+            CausationId: null,
+            ActorId: "user:123",
+            PayloadJson: "{}",
+            OccurredAt: DateTimeOffset.UtcNow,
+            Scope: ScopeType.Tenant,
+            TenantId: "acme");
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => registry.DispatchAsync(record));
 
         Assert.Contains("UserEmailUpdated", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_ThrowsWhenVersionIsNull()
+    {
+        var registry = new ProjectionRegistry();
+        var record = new ChangeRecord(
+            SequenceId: 1,
+            Kind: "Event",
+            EventId: Guid.NewGuid(),
+            Entity: null,
+            EntityId: null,
+            EventType: "UserLoggedIn",
+            Version: null,
+            CorrelationId: null,
+            CausationId: null,
+            ActorId: "user:123",
+            PayloadJson: "{}",
+            OccurredAt: DateTimeOffset.UtcNow,
+            Scope: ScopeType.Tenant,
+            TenantId: "acme");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => registry.DispatchAsync(record));
     }
 
     private sealed class TestVersionedHandler : IVersionedHandler<TestPayload>

@@ -44,7 +44,11 @@ public sealed class ProjectionRegistry
     {
         ArgumentNullException.ThrowIfNull(record);
 
-        var key = (record.EventType, record.Version);
+        var version = record.Version
+            ?? throw new InvalidOperationException(
+                $"Event '{record.EventType}' has no version set. Only Change records can be dispatched through the registry.");
+
+        var key = (record.EventType, version);
         if (_handlers.TryGetValue(key, out var handle))
         {
             await handle(record, ct);
@@ -52,6 +56,6 @@ public sealed class ProjectionRegistry
         }
 
         throw new InvalidOperationException(
-            $"No handler registered for event '{record.EventType}' version {record.Version}.");
+            $"No handler registered for event '{record.EventType}' version {version}.");
     }
 }

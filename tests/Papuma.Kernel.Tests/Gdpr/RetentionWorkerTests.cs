@@ -60,8 +60,9 @@ public class RetentionWorkerTests
     {
         var options = new RetentionWorkerOptions();
 
-        Assert.True(options.DeleteFromChangeFeed);
-        Assert.False(options.DeleteFromBusinessEventLog);
+        Assert.Equal(TimeSpan.FromHours(1), options.PollInterval);
+        Assert.Equal(TimeSpan.FromDays(365), options.RetentionWindow);
+        Assert.Equal(1000, options.BatchSize);
     }
 
     private static NpgsqlDataSource CreateDataSource() =>

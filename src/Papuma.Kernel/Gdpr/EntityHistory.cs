@@ -6,8 +6,6 @@ using Papuma.Kernel.ChangeFeed;
 namespace Papuma.Kernel.Gdpr;
 
 /// <summary>
-/// Represents the stored history for one entity across change feed and business events.
+/// Represents the stored history for one entity from the unified event feed.
 /// </summary>
-public sealed record EntityHistory(
-    IReadOnlyList<ChangeRecord> ChangeRecords,
-    IReadOnlyList<BusinessEventRecord> BusinessEvents);
+public sealed record EntityHistory(IReadOnlyList<ChangeRecord> Records);

@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 using Npgsql;
 
-using Papuma.Kernel.Events;
+using Papuma.Kernel.ChangeFeed;
 using Papuma.Kernel.Gdpr;
 using Papuma.Kernel.Tenancy;
 
@@ -18,18 +18,18 @@ public class GdprProcessorTests
     {
         Assert.Throws<ArgumentNullException>(() => new GdprProcessor(
             dataSource: null!,
-            new BusinessEventWriter(),
+            new ChangeWriter(),
             NullLogger<GdprProcessor>.Instance));
     }
 
     [Fact]
-    public void Constructor_ThrowsForNullBusinessEventWriter()
+    public void Constructor_ThrowsForNullChangeWriter()
     {
         using var dataSource = CreateDataSource();
 
         Assert.Throws<ArgumentNullException>(() => new GdprProcessor(
             dataSource,
-            businessEventWriter: null!,
+            changeWriter: null!,
             NullLogger<GdprProcessor>.Instance));
     }
 
@@ -40,7 +40,7 @@ public class GdprProcessorTests
 
         Assert.Throws<ArgumentNullException>(() => new GdprProcessor(
             dataSource,
-            new BusinessEventWriter(),
+            new ChangeWriter(),
             logger: null!));
     }
 
@@ -91,7 +91,7 @@ public class GdprProcessorTests
     }
 
     [Fact]
-        public async Task RedactEntityAsync_ThrowsForNullScope()
+    public async Task RedactEntityAsync_ThrowsForNullScope()
     {
         using var dataSource = CreateDataSource();
         var sut = CreateSut(dataSource);
@@ -105,7 +105,7 @@ public class GdprProcessorTests
     }
 
     [Fact]
-        public async Task GetEntityHistoryAsync_ThrowsForNullScope()
+    public async Task GetEntityHistoryAsync_ThrowsForNullScope()
     {
         using var dataSource = CreateDataSource();
         var sut = CreateSut(dataSource);
@@ -149,7 +149,7 @@ public class GdprProcessorTests
     }
 
     private static GdprProcessor CreateSut(NpgsqlDataSource dataSource) =>
-        new(dataSource, new BusinessEventWriter(), NullLogger<GdprProcessor>.Instance);
+        new(dataSource, new ChangeWriter(), NullLogger<GdprProcessor>.Instance);
 
     private static NpgsqlDataSource CreateDataSource() =>
         NpgsqlDataSource.Create("Host=localhost;Port=1;Database=test;Username=test;Password=test");

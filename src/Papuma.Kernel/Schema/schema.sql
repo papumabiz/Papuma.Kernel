@@ -1,22 +1,24 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- change_feed
-CREATE TABLE change_feed (
+-- event_feed (unified change + business event log)
+CREATE TABLE event_feed (
     sequence_id    BIGSERIAL   PRIMARY KEY,
+    kind           TEXT        NOT NULL CHECK (kind IN ('Change', 'Event')),
+    event_id       UUID        NULL,
     scope          TEXT        NOT NULL CHECK (scope IN ('Platform', 'Tenant')),
     tenant_id      TEXT        NULL,
-    entity         TEXT        NOT NULL,
-    entity_id      TEXT        NOT NULL,
+    entity         TEXT        NULL,
+    entity_id      TEXT        NULL,
     event_type     TEXT        NOT NULL,
-    version        INT         NOT NULL DEFAULT 1,
+    version        INT         NULL,
     correlation_id TEXT        NULL,
     causation_id   TEXT        NULL,
     actor_id       TEXT        NOT NULL,
     payload        JSONB       NOT NULL,
     idempotency_key TEXT       NULL,
-    timestamp      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    occurred_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     redacted       BOOLEAN     NOT NULL DEFAULT FALSE,
-    CONSTRAINT ck_change_feed_scope_tenant
+    CONSTRAINT ck_event_feed_scope_tenant
         CHECK (
             (scope = 'Platform' AND tenant_id IS NULL)
             OR
@@ -24,21 +26,22 @@ CREATE TABLE change_feed (
         )
 );
 
-CREATE INDEX idx_change_feed_sequence      ON change_feed (sequence_id);
-CREATE INDEX idx_change_feed_scope_tenant_seq ON change_feed (scope, tenant_id, sequence_id);
-CREATE INDEX idx_change_feed_entity_id     ON change_feed (scope, tenant_id, entity, entity_id);
-CREATE INDEX idx_change_feed_event_type    ON change_feed (event_type);
-CREATE INDEX idx_change_feed_not_redacted  ON change_feed (scope, tenant_id, sequence_id) WHERE redacted = FALSE;
-CREATE INDEX idx_change_feed_correlation   ON change_feed (correlation_id) WHERE correlation_id IS NOT NULL;
-CREATE INDEX idx_change_feed_actor         ON change_feed (actor_id);
-CREATE UNIQUE INDEX ux_change_feed_idempotency_key
-    ON change_feed (scope, tenant_id, idempotency_key)
+CREATE INDEX idx_event_feed_sequence      ON event_feed (sequence_id);
+CREATE INDEX idx_event_feed_scope_tenant_seq ON event_feed (scope, tenant_id, sequence_id);
+CREATE INDEX idx_event_feed_entity_id     ON event_feed (scope, tenant_id, entity, entity_id);
+CREATE INDEX idx_event_feed_event_type    ON event_feed (event_type);
+CREATE INDEX idx_event_feed_not_redacted  ON event_feed (scope, tenant_id, sequence_id) WHERE redacted = FALSE;
+CREATE INDEX idx_event_feed_correlation   ON event_feed (correlation_id) WHERE correlation_id IS NOT NULL;
+CREATE INDEX idx_event_feed_actor         ON event_feed (actor_id);
+CREATE UNIQUE INDEX ux_event_feed_idempotency_key
+    ON event_feed (scope, tenant_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
+CREATE UNIQUE INDEX ux_event_feed_event_id
+    ON event_feed (event_id) WHERE event_id IS NOT NULL;
 
-ALTER TABLE change_feed ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS tenant_isolation_change_feed ON change_feed;
-DROP POLICY IF EXISTS scope_isolation_change_feed ON change_feed;
-CREATE POLICY scope_isolation_change_feed ON change_feed
+ALTER TABLE event_feed ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS scope_isolation_event_feed ON event_feed;
+CREATE POLICY scope_isolation_event_feed ON event_feed
     USING (
         (
             current_setting('app.current_scope', true) = 'Tenant'
@@ -84,66 +87,6 @@ CREATE TABLE projection_failures (
     PRIMARY KEY (projection_name, sequence_id)
 );
 
--- business_event_log
-CREATE TABLE business_event_log (
-    event_id       UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    scope          TEXT        NOT NULL CHECK (scope IN ('Platform', 'Tenant')),
-    tenant_id      TEXT        NULL,
-    event_type     TEXT        NOT NULL,
-    entity         TEXT        NULL,
-    entity_id      TEXT        NULL,
-    actor_id       TEXT        NOT NULL,
-    correlation_id TEXT        NULL,
-    causation_id   TEXT        NULL,
-    payload        JSONB       NOT NULL,
-    idempotency_key TEXT       NULL,
-    occurred_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    redacted       BOOLEAN     NOT NULL DEFAULT FALSE,
-    CONSTRAINT ck_business_event_scope_tenant
-        CHECK (
-            (scope = 'Platform' AND tenant_id IS NULL)
-            OR
-            (scope = 'Tenant' AND tenant_id IS NOT NULL)
-        )
-);
-
-CREATE INDEX idx_business_event_type        ON business_event_log (event_type);
-CREATE INDEX idx_business_event_occurred_at ON business_event_log (occurred_at);
-CREATE INDEX idx_business_event_entity      ON business_event_log (scope, tenant_id, entity, entity_id);
-CREATE INDEX idx_business_event_actor       ON business_event_log (actor_id);
-CREATE UNIQUE INDEX ux_business_event_log_idempotency_key
-    ON business_event_log (scope, tenant_id, idempotency_key)
-    WHERE idempotency_key IS NOT NULL;
-
-ALTER TABLE business_event_log ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS tenant_isolation_business_event_log ON business_event_log;
-DROP POLICY IF EXISTS scope_isolation_business_event_log ON business_event_log;
-CREATE POLICY scope_isolation_business_event_log ON business_event_log
-    USING (
-        (
-            current_setting('app.current_scope', true) = 'Tenant'
-            AND scope = 'Tenant'
-            AND tenant_id = current_setting('app.current_tenant', true)
-        )
-        OR
-        (
-            current_setting('app.current_scope', true) = 'Platform'
-            AND scope = 'Platform'
-        )
-    )
-    WITH CHECK (
-        (
-            current_setting('app.current_scope', true) = 'Tenant'
-            AND scope = 'Tenant'
-            AND tenant_id = current_setting('app.current_tenant', true)
-        )
-        OR
-        (
-            current_setting('app.current_scope', true) = 'Platform'
-            AND scope = 'Platform'
-        )
-    );
-
 -- event_outbox
 CREATE TABLE event_outbox (
     outbox_id      BIGSERIAL   PRIMARY KEY,
@@ -171,7 +114,6 @@ CREATE TABLE event_outbox (
 CREATE INDEX idx_event_outbox_status_retry ON event_outbox (scope, tenant_id, status, next_retry_at);
 
 ALTER TABLE event_outbox ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS tenant_isolation_event_outbox ON event_outbox;
 DROP POLICY IF EXISTS scope_isolation_event_outbox ON event_outbox;
 CREATE POLICY scope_isolation_event_outbox ON event_outbox
     USING (
@@ -264,5 +206,5 @@ CREATE TABLE IF NOT EXISTS papuma_schema_version (
 );
 
 INSERT INTO papuma_schema_version (version)
-VALUES (4)
+VALUES (5)
 ON CONFLICT (version) DO NOTHING;

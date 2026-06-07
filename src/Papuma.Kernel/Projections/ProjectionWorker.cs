@@ -14,7 +14,7 @@ using Papuma.Kernel.Tenancy;
 namespace Papuma.Kernel.Projections;
 
 /// <summary>
-/// Polls the change feed and applies matching events to a projection with at-least-once semantics.
+/// Polls the unified event feed and applies matching events to a projection with at-least-once semantics.
 /// </summary>
 public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
 {
@@ -28,19 +28,16 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
     private readonly string _projectionName;
     private readonly Channel<ReplayRequest> _replayChannel = Channel.CreateBounded<ReplayRequest>(1);
 
-    /// <summary>
-    /// Gets the unique projection name used for checkpointing and failure tracking.
-    /// </summary>
     public string ProjectionName => _projectionName;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ProjectionWorker"/> class.
     /// </summary>
-    /// <param name="handler">The projection handler that applies change feed records.</param>
-    /// <param name="dataSource">The data source used to load and checkpoint records.</param>
-    /// <param name="logger">The logger used for worker diagnostics.</param>
-    /// <param name="options">Optional polling and retry configuration.</param>
-    /// <param name="scopeFilter">Scope filter for this worker. Use <see cref="ScopeFilter.All()"/> to process all scopes.</param>
+    /// <param name="handler">The projection handler that processes events.</param>
+    /// <param name="dataSource">The PostgreSQL data source.</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="options">Optional worker configuration.</param>
+    /// <param name="scopeFilter">Optional scope filter to isolate the worker to a specific scope.</param>
     public ProjectionWorker(
         IProjectionHandler handler,
         NpgsqlDataSource dataSource,
@@ -67,7 +64,7 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
     }
 
     /// <summary>
-    /// Requests a full replay for this projection worker.
+    /// Requests a full replay of this projection by resetting the checkpoint to 0.
     /// </summary>
     /// <param name="ct">A cancellation token.</param>
     public async Task RequestReplayAsync(CancellationToken ct = default)
@@ -76,10 +73,10 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
     }
 
     /// <summary>
-    /// Gets a lag snapshot containing checkpoint and latest sequence id for this projection.
+    /// Returns the current lag snapshot (checkpoint, latest sequence_id, lag) for this projection.
     /// </summary>
     /// <param name="ct">A cancellation token.</param>
-    /// <returns>The current lag snapshot.</returns>
+    /// <returns>A lag snapshot with the projection name, checkpoint, latest sequence_id, and lag.</returns>
     public async Task<ProjectionLagSnapshot> GetLagSnapshotAsync(CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
@@ -95,7 +92,6 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
         return new ProjectionLagSnapshot(_projectionName, checkpoint, latestSequenceId, lag);
     }
 
-    /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("ProjectionWorker [{Name}] started.", _projectionName);
@@ -132,7 +128,6 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
             {
                 _logger.LogError(ex, "Error in ProjectionWorker [{Name}]", _projectionName);
 
-                // Use at least 5 seconds to avoid log flooding when the database is unreachable.
                 var errorDelay = _options.PollInterval < MinErrorDelay ? MinErrorDelay : _options.PollInterval;
                 await Task.Delay(errorDelay, stoppingToken);
             }
@@ -141,6 +136,10 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
         _logger.LogInformation("ProjectionWorker [{Name}] stopped.", _projectionName);
     }
 
+    /// <summary>
+    /// Loads the next batch of visible events, applies each through the handler within a transaction,
+    /// and updates the checkpoint. Returns the number of events processed.
+    /// </summary>
     private async Task<int> ProcessBatchAsync(CancellationToken ct)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
@@ -166,11 +165,6 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
             {
                 await tx.RollbackAsync(ct);
 
-                // RegisterFailureAsync runs outside the rolled-back transaction.
-                // If the worker crashes between here and the next loop iteration the
-                // failure row is persisted but the checkpoint is not advanced.  On
-                // restart the event will be reloaded and the attempts counter will be
-                // incremented again – this is correct at-least-once behaviour.
                 var movedToDeadLetter = await RegisterFailureAsync(conn, change, ex, ct);
                 if (movedToDeadLetter)
                 {
@@ -187,6 +181,9 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
         return changes.Count;
     }
 
+    /// <summary>
+    /// Reads the last processed sequence_id for this projection from <c>projection_checkpoint</c>.
+    /// </summary>
     private async Task<long> LoadCheckpointAsync(NpgsqlConnection conn, CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
@@ -201,6 +198,10 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
         return result is long id ? id : 0L;
     }
 
+    /// <summary>
+    /// Loads non-redacted, visible events from <c>event_feed</c> matching the handler's event types,
+    /// skipping entries that are currently in retry backoff.
+    /// </summary>
     private async Task<List<ChangeRecord>> LoadChangesAsync(
         NpgsqlConnection conn,
         long fromSequenceId,
@@ -208,9 +209,9 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
     {
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT sequence_id, scope, tenant_id, entity, entity_id, event_type, version,
-                   correlation_id, causation_id, actor_id, payload::text, timestamp
-            FROM change_feed
+            SELECT sequence_id, kind, event_id, scope, tenant_id, entity, entity_id, event_type, version,
+                   correlation_id, causation_id, actor_id, payload::text, occurred_at
+            FROM event_feed
             WHERE sequence_id > @lastSeen
               AND (@scope IS NULL OR scope = @scope)
               AND (
@@ -227,7 +228,7 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
                   SELECT 1
                   FROM projection_failures pf
                   WHERE pf.projection_name = @name
-                    AND pf.sequence_id = change_feed.sequence_id
+                    AND pf.sequence_id = event_feed.sequence_id
                     AND (
                         pf.attempts >= @maxAttempts
                         OR pf.next_retry_at > NOW())
@@ -237,8 +238,8 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
             """;
 
         cmd.Parameters.AddWithValue("lastSeen", fromSequenceId);
-    cmd.Parameters.AddWithValue("scope", (object?)_scopeFilter.Scope?.Scope.ToString() ?? DBNull.Value);
-    cmd.Parameters.AddWithValue("tenantId", (object?)_scopeFilter.Scope?.TenantId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("scope", (object?)_scopeFilter.Scope?.Scope.ToString() ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("tenantId", (object?)_scopeFilter.Scope?.TenantId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("name", _projectionName);
         cmd.Parameters.AddWithValue("maxAttempts", _options.MaxAttemptsPerEvent);
         cmd.Parameters.AddWithValue("eventTypes", _handler.EventTypes.ToArray());
@@ -250,28 +251,33 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
         {
             records.Add(new ChangeRecord(
                 SequenceId: reader.GetInt64(0),
-                Entity: reader.GetString(3),
-                EntityId: reader.GetString(4),
-                EventType: reader.GetString(5),
-                Version: reader.GetInt32(6),
-                CorrelationId: reader.IsDBNull(7) ? null : reader.GetString(7),
-                CausationId: reader.IsDBNull(8) ? null : reader.GetString(8),
-                ActorId: reader.GetString(9),
-                PayloadJson: reader.GetString(10),
-                Timestamp: reader.GetFieldValue<DateTimeOffset>(11),
-                Scope: Enum.Parse<ScopeType>(reader.GetString(1), ignoreCase: false),
-                TenantId: reader.IsDBNull(2) ? null : reader.GetString(2)));
+                Kind: reader.GetString(1),
+                EventId: reader.IsDBNull(2) ? null : reader.GetGuid(2),
+                Entity: reader.IsDBNull(4) ? null : reader.GetString(4),
+                EntityId: reader.IsDBNull(5) ? null : reader.GetString(5),
+                EventType: reader.GetString(6),
+                Version: reader.IsDBNull(7) ? null : reader.GetInt32(7),
+                CorrelationId: reader.IsDBNull(8) ? null : reader.GetString(8),
+                CausationId: reader.IsDBNull(9) ? null : reader.GetString(9),
+                ActorId: reader.GetString(10),
+                PayloadJson: reader.GetString(11),
+                OccurredAt: reader.GetFieldValue<DateTimeOffset>(12),
+                Scope: Enum.Parse<ScopeType>(reader.GetString(3), ignoreCase: false),
+                TenantId: reader.IsDBNull(4) ? null : reader.GetString(4)));
         }
 
         return records;
     }
 
+    /// <summary>
+    /// Returns the highest visible sequence_id that matches the handler's event types, used for lag calculation.
+    /// </summary>
     private async Task<long> LoadLatestRelevantSequenceIdAsync(NpgsqlConnection conn, CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT COALESCE(MAX(sequence_id), 0)
-            FROM change_feed
+            FROM event_feed
             WHERE (@scope IS NULL OR scope = @scope)
               AND (
                   @scope IS NULL
@@ -293,6 +299,9 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
         return result is long latestSequenceId ? latestSequenceId : 0L;
     }
 
+    /// <summary>
+    /// Persists the checkpoint for this projection within the handler transaction, using upsert semantics.
+    /// </summary>
     private async Task SaveCheckpointAsync(
         NpgsqlConnection conn,
         NpgsqlTransaction tx,
@@ -313,6 +322,9 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
+    /// <summary>
+    /// Removes any failure record for this event after successful processing.
+    /// </summary>
     private async Task ClearFailureAsync(
         NpgsqlConnection conn,
         NpgsqlTransaction tx,
@@ -332,6 +344,9 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
+    /// <summary>
+    /// Records or increments a failure for the given event with exponential backoff. Returns true when max retries exceeded.
+    /// </summary>
     private async Task<bool> RegisterFailureAsync(
         NpgsqlConnection conn,
         ChangeRecord change,
@@ -371,6 +386,9 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
         return attempts >= _options.MaxAttemptsPerEvent;
     }
 
+    /// <summary>
+    /// Resets the projection's checkpoint to 0 and clears all failure records for a full replay.
+    /// </summary>
     private async Task ResetProjectionStateAsync(CancellationToken ct)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
@@ -407,6 +425,9 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
         await tx.CommitAsync(ct);
     }
 
+    /// <summary>
+    /// Validates that the configured options fall within acceptable ranges.
+    /// </summary>
     private static void ValidateOptions(ProjectionWorkerOptions options)
     {
         if (options.BatchSize < 1)

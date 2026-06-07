@@ -10,6 +10,7 @@ namespace Papuma.Kernel.Events;
 
 /// <summary>
 /// Enqueues external publication work into the transactional outbox.
+/// References <c>event_feed.event_id</c> for correlation.
 /// </summary>
 public sealed class OutboxWriter
 {
@@ -29,7 +30,7 @@ public sealed class OutboxWriter
     /// </summary>
     /// <param name="transaction">The ambient PostgreSQL transaction.</param>
     /// <param name="scope">The scope context for the outbox message.</param>
-    /// <param name="eventId">The event identifier associated with the outbox entry.</param>
+    /// <param name="eventId">The event identifier from <c>event_feed.event_id</c>.</param>
     /// <param name="eventType">The business event type.</param>
     /// <param name="payloadJson">The JSON payload to persist.</param>
     /// <param name="ct">A cancellation token.</param>

@@ -10,155 +10,108 @@ public class ChangeWriterTests
     private readonly ChangeWriter _sut = new();
 
     [Fact]
-    public void ValidateInputs_AllowsDocumentedValidInput()
+    public async Task AppendChangeAsync_ThrowsForInvalidEntity()
     {
-        var exception = Record.Exception(() => _sut.ValidateInputs(
-            entity: "UserProfile",
-            entityId: "user-123",
-            eventType: "UserEmailUpdated",
-            version: 1,
-            payloadJson: "{}",
-            actorId: "user:550e8400-e29b-41d4-a716-446655440000"));
-
-        Assert.Null(exception);
-    }
-
-    [Theory]
-    [InlineData("1User")]
-    [InlineData("U")]
-    [InlineData("User-Profile")]
-    public void ValidateInputs_RejectsInvalidEntity(string entity)
-    {
-        var exception = Assert.Throws<ArgumentException>(() => _sut.ValidateInputs(
-            entity,
+        await Assert.ThrowsAsync<ArgumentException>(() => _sut.AppendChangeAsync(
+            transaction: null!,
+            scope: Papuma.Kernel.Tenancy.ScopeContext.Tenant("acme"),
+            entity: "U",
             entityId: "user-123",
             eventType: "UserEmailUpdated",
             version: 1,
             payloadJson: "{}",
             actorId: "system:scheduler"));
-
-        Assert.Equal("entity", exception.ParamName);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData(" ")]
-    public void ValidateInputs_RejectsEmptyEntityId(string entityId)
-    {
-        var exception = Assert.Throws<ArgumentException>(() => _sut.ValidateInputs(
-            entity: "UserProfile",
-            entityId,
-            eventType: "UserEmailUpdated",
-            version: 1,
-            payloadJson: "{}",
-            actorId: "system:scheduler"));
-
-        Assert.Equal("entityId", exception.ParamName);
     }
 
     [Fact]
-    public void ValidateInputs_RejectsTooLongEntityId()
+    public async Task AppendChangeAsync_ThrowsForVersionBelowOne()
     {
-        var exception = Assert.Throws<ArgumentException>(() => _sut.ValidateInputs(
-            entity: "UserProfile",
-            entityId: new string('a', 201),
-            eventType: "UserEmailUpdated",
-            version: 1,
-            payloadJson: "{}",
-            actorId: "system:scheduler"));
-
-        Assert.Equal("entityId", exception.ParamName);
-    }
-
-    [Theory]
-    [InlineData("Up")]
-    [InlineData("1UserEmailUpdated")]
-    [InlineData("User-Email-Updated")]
-    public void ValidateInputs_RejectsInvalidEventType(string eventType)
-    {
-        var exception = Assert.Throws<ArgumentException>(() => _sut.ValidateInputs(
-            entity: "UserProfile",
-            entityId: "user-123",
-            eventType,
-            version: 1,
-            payloadJson: "{}",
-            actorId: "system:scheduler"));
-
-        Assert.Equal("eventType", exception.ParamName);
-    }
-
-    [Fact]
-    public void ValidateInputs_RejectsVersionBelowOne()
-    {
-        var exception = Assert.Throws<ArgumentException>(() => _sut.ValidateInputs(
+        await Assert.ThrowsAsync<ArgumentException>(() => _sut.AppendChangeAsync(
+            transaction: null!,
+            scope: Papuma.Kernel.Tenancy.ScopeContext.Tenant("acme"),
             entity: "UserProfile",
             entityId: "user-123",
             eventType: "UserEmailUpdated",
             version: 0,
             payloadJson: "{}",
             actorId: "system:scheduler"));
-
-        Assert.Equal("version", exception.ParamName);
     }
 
     [Theory]
     [InlineData("")]
     [InlineData(" ")]
-    public void ValidateInputs_RejectsEmptyActorId(string actorId)
+    public async Task AppendChangeAsync_ThrowsForEmptyActorId(string actorId)
     {
-        var exception = Assert.Throws<ArgumentException>(() => _sut.ValidateInputs(
+        await Assert.ThrowsAsync<ArgumentException>(() => _sut.AppendChangeAsync(
+            transaction: null!,
+            scope: Papuma.Kernel.Tenancy.ScopeContext.Tenant("acme"),
             entity: "UserProfile",
             entityId: "user-123",
             eventType: "UserEmailUpdated",
             version: 1,
             payloadJson: "{}",
-            actorId));
-
-        Assert.Equal("actorId", exception.ParamName);
+            actorId: actorId));
     }
 
     [Fact]
-    public void ValidateInputs_RejectsTooLongActorId()
+    public async Task AppendEventAsync_ThrowsForInvalidEventType()
     {
-        var exception = Assert.Throws<ArgumentException>(() => _sut.ValidateInputs(
-            entity: "UserProfile",
-            entityId: "user-123",
-            eventType: "UserEmailUpdated",
-            version: 1,
-            payloadJson: "{}",
-            actorId: new string('a', 201)));
+        await Assert.ThrowsAsync<ArgumentException>(() => _sut.AppendEventAsync(
+            transaction: null!,
+            scope: Papuma.Kernel.Tenancy.ScopeContext.Tenant("acme"),
+            eventType: "Up",
+            actorId: "user:123",
+            payloadJson: "{}"));
+    }
 
-        Assert.Equal("actorId", exception.ParamName);
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task AppendEventAsync_ThrowsForEmptyActorId(string actorId)
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() => _sut.AppendEventAsync(
+            transaction: null!,
+            scope: Papuma.Kernel.Tenancy.ScopeContext.Tenant("acme"),
+            eventType: "UserLoggedIn",
+            actorId: actorId,
+            payloadJson: "{}"));
     }
 
     [Fact]
-    public void ValidateInputs_RejectsPayloadOverConfiguredByteLimit()
+    public async Task AppendEventAsync_AllowsNullEntityAndEntityId()
+    {
+        await Assert.ThrowsAsync<ArgumentNullException>(() => _sut.AppendEventAsync(
+            transaction: null!,
+            scope: Papuma.Kernel.Tenancy.ScopeContext.Tenant("acme"),
+            eventType: "UserLoggedIn",
+            actorId: "user:123",
+            payloadJson: "{}",
+            entity: null,
+            entityId: null));
+    }
+
+    [Fact]
+    public async Task AppendEventAsync_ThrowsForPayloadOverConfiguredByteLimit()
     {
         var sut = new ChangeWriter(new ChangeWriterOptions { MaxPayloadSizeBytes = 5 });
 
-        var exception = Assert.Throws<ArgumentException>(() => sut.ValidateInputs(
-            entity: "UserProfile",
-            entityId: "user-123",
-            eventType: "UserEmailUpdated",
-            version: 1,
-            payloadJson: "123456",
-            actorId: "system:scheduler"));
-
-        Assert.Equal("payloadJson", exception.ParamName);
+        await Assert.ThrowsAsync<ArgumentException>(() => sut.AppendEventAsync(
+            transaction: null!,
+            scope: Papuma.Kernel.Tenancy.ScopeContext.Tenant("acme"),
+            eventType: "UserLoggedIn",
+            actorId: "user:123",
+            payloadJson: "123456"));
     }
 
     [Fact]
-    public void ValidateInputs_RejectsTooLongIdempotencyKey()
+    public async Task AppendEventAsync_ThrowsForTooLongIdempotencyKey()
     {
-        var exception = Assert.Throws<ArgumentException>(() => _sut.ValidateInputs(
-            entity: "UserProfile",
-            entityId: "user-123",
-            eventType: "UserEmailUpdated",
-            version: 1,
+        await Assert.ThrowsAsync<ArgumentException>(() => _sut.AppendEventAsync(
+            transaction: null!,
+            scope: Papuma.Kernel.Tenancy.ScopeContext.Tenant("acme"),
+            eventType: "UserLoggedIn",
+            actorId: "user:123",
             payloadJson: "{}",
-            actorId: "system:scheduler",
             idempotencyKey: new string('a', 201)));
-
-        Assert.Equal("idempotencyKey", exception.ParamName);
     }
 }

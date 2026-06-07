@@ -37,7 +37,6 @@ public class ServiceCollectionExtensionsTests
 
         Assert.NotNull(provider.GetRequiredService<ChangeWriter>());
         Assert.NotNull(provider.GetRequiredService<ChangeFeedReader>());
-        Assert.NotNull(provider.GetRequiredService<BusinessEventWriter>());
         Assert.NotNull(provider.GetRequiredService<OutboxWriter>());
         Assert.NotNull(provider.GetRequiredService<GdprProcessor>());
         Assert.NotNull(provider.GetRequiredService<SchemaVersionChecker>());
@@ -62,9 +61,6 @@ public class ServiceCollectionExtensionsTests
 
         var changeWriterOptions = provider.GetRequiredService<ChangeWriterOptions>();
         Assert.Equal(512 * 1024, changeWriterOptions.MaxPayloadSizeBytes);
-
-        var businessEventWriterOptions = provider.GetRequiredService<BusinessEventWriterOptions>();
-        Assert.Equal(512 * 1024, businessEventWriterOptions.MaxPayloadSizeBytes);
 
         var outboxWriterOptions = provider.GetRequiredService<OutboxWriterOptions>();
         Assert.Equal(512 * 1024, outboxWriterOptions.MaxPayloadSizeBytes);
