@@ -1,7 +1,7 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- event_feed (unified change + business event log)
-CREATE TABLE event_feed (
+-- papuma_event_feed (unified change + business event log)
+CREATE TABLE papuma_event_feed (
     sequence_id    BIGSERIAL   PRIMARY KEY,
     kind           TEXT        NOT NULL CHECK (kind IN ('Change', 'Event')),
     event_id       UUID        NULL,
@@ -18,7 +18,7 @@ CREATE TABLE event_feed (
     idempotency_key TEXT       NULL,
     occurred_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     redacted       BOOLEAN     NOT NULL DEFAULT FALSE,
-    CONSTRAINT ck_event_feed_scope_tenant
+    CONSTRAINT ck_papuma_event_feed_scope_tenant
         CHECK (
             (scope = 'Platform' AND tenant_id IS NULL)
             OR
@@ -26,22 +26,22 @@ CREATE TABLE event_feed (
         )
 );
 
-CREATE INDEX idx_event_feed_sequence      ON event_feed (sequence_id);
-CREATE INDEX idx_event_feed_scope_tenant_seq ON event_feed (scope, tenant_id, sequence_id);
-CREATE INDEX idx_event_feed_entity_id     ON event_feed (scope, tenant_id, entity, entity_id);
-CREATE INDEX idx_event_feed_event_type    ON event_feed (event_type);
-CREATE INDEX idx_event_feed_not_redacted  ON event_feed (scope, tenant_id, sequence_id) WHERE redacted = FALSE;
-CREATE INDEX idx_event_feed_correlation   ON event_feed (correlation_id) WHERE correlation_id IS NOT NULL;
-CREATE INDEX idx_event_feed_actor         ON event_feed (actor_id);
-CREATE UNIQUE INDEX ux_event_feed_idempotency_key
-    ON event_feed (scope, tenant_id, idempotency_key)
+CREATE INDEX idx_papuma_event_feed_sequence      ON papuma_event_feed (sequence_id);
+CREATE INDEX idx_papuma_event_feed_scope_tenant_seq ON papuma_event_feed (scope, tenant_id, sequence_id);
+CREATE INDEX idx_papuma_event_feed_entity_id     ON papuma_event_feed (scope, tenant_id, entity, entity_id);
+CREATE INDEX idx_papuma_event_feed_event_type    ON papuma_event_feed (event_type);
+CREATE INDEX idx_papuma_event_feed_not_redacted  ON papuma_event_feed (scope, tenant_id, sequence_id) WHERE redacted = FALSE;
+CREATE INDEX idx_papuma_event_feed_correlation   ON papuma_event_feed (correlation_id) WHERE correlation_id IS NOT NULL;
+CREATE INDEX idx_papuma_event_feed_actor         ON papuma_event_feed (actor_id);
+CREATE UNIQUE INDEX ux_papuma_event_feed_idempotency_key
+    ON papuma_event_feed (scope, tenant_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
-CREATE UNIQUE INDEX ux_event_feed_event_id
-    ON event_feed (event_id) WHERE event_id IS NOT NULL;
+CREATE UNIQUE INDEX ux_papuma_event_feed_event_id
+    ON papuma_event_feed (event_id) WHERE event_id IS NOT NULL;
 
-ALTER TABLE event_feed ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS scope_isolation_event_feed ON event_feed;
-CREATE POLICY scope_isolation_event_feed ON event_feed
+ALTER TABLE papuma_event_feed ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS scope_isolation_papuma_event_feed ON papuma_event_feed;
+CREATE POLICY scope_isolation_papuma_event_feed ON papuma_event_feed
     USING (
         (
             current_setting('app.current_scope', true) = 'Tenant'
@@ -67,15 +67,15 @@ CREATE POLICY scope_isolation_event_feed ON event_feed
         )
     );
 
--- projection_checkpoint
-CREATE TABLE projection_checkpoint (
+-- papuma_projection_checkpoint
+CREATE TABLE papuma_projection_checkpoint (
     projection_name  TEXT   PRIMARY KEY,
     last_sequence_id BIGINT NOT NULL DEFAULT 0,
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- projection_failures
-CREATE TABLE projection_failures (
+-- papuma_projection_failures
+CREATE TABLE papuma_projection_failures (
     projection_name TEXT        NOT NULL,
     sequence_id     BIGINT      NOT NULL,
     event_type      TEXT        NOT NULL,
@@ -87,8 +87,8 @@ CREATE TABLE projection_failures (
     PRIMARY KEY (projection_name, sequence_id)
 );
 
--- event_outbox
-CREATE TABLE event_outbox (
+-- papuma_event_outbox
+CREATE TABLE papuma_event_outbox (
     outbox_id      BIGSERIAL   PRIMARY KEY,
     scope          TEXT        NOT NULL CHECK (scope IN ('Platform', 'Tenant')),
     tenant_id      TEXT        NULL,
@@ -103,7 +103,7 @@ CREATE TABLE event_outbox (
     last_error     TEXT        NULL,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT ck_event_outbox_scope_tenant
+    CONSTRAINT ck_papuma_event_outbox_scope_tenant
         CHECK (
             (scope = 'Platform' AND tenant_id IS NULL)
             OR
@@ -111,11 +111,11 @@ CREATE TABLE event_outbox (
         )
 );
 
-CREATE INDEX idx_event_outbox_status_retry ON event_outbox (scope, tenant_id, status, next_retry_at);
+CREATE INDEX idx_papuma_event_outbox_status_retry ON papuma_event_outbox (scope, tenant_id, status, next_retry_at);
 
-ALTER TABLE event_outbox ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS scope_isolation_event_outbox ON event_outbox;
-CREATE POLICY scope_isolation_event_outbox ON event_outbox
+ALTER TABLE papuma_event_outbox ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS scope_isolation_papuma_event_outbox ON papuma_event_outbox;
+CREATE POLICY scope_isolation_papuma_event_outbox ON papuma_event_outbox
     USING (
         (
             current_setting('app.current_scope', true) = 'Tenant'
@@ -141,8 +141,8 @@ CREATE POLICY scope_isolation_event_outbox ON event_outbox
         )
     );
 
--- sensitive_data_versions
-CREATE TABLE IF NOT EXISTS sensitive_data_versions (
+-- papuma_sensitive_data_versions
+CREATE TABLE IF NOT EXISTS papuma_sensitive_data_versions (
     sensitive_ref  UUID        NOT NULL,
     version        INT         NOT NULL,
     scope          TEXT        NOT NULL CHECK (scope IN ('Platform', 'Tenant')),
@@ -157,7 +157,7 @@ CREATE TABLE IF NOT EXISTS sensitive_data_versions (
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     superseded_at  TIMESTAMPTZ NULL,
     PRIMARY KEY (sensitive_ref, version),
-    CONSTRAINT ck_sensitive_data_scope_tenant
+    CONSTRAINT ck_papuma_sensitive_data_scope_tenant
         CHECK (
             (scope = 'Platform' AND tenant_id IS NULL)
             OR
@@ -165,15 +165,15 @@ CREATE TABLE IF NOT EXISTS sensitive_data_versions (
         )
 );
 
-CREATE INDEX idx_sensitive_scope_tenant_ref
-    ON sensitive_data_versions (scope, tenant_id, sensitive_ref, version DESC);
+CREATE INDEX idx_papuma_sensitive_scope_tenant_ref
+    ON papuma_sensitive_data_versions (scope, tenant_id, sensitive_ref, version DESC);
 
-CREATE INDEX idx_sensitive_active
-    ON sensitive_data_versions (scope, tenant_id, redacted, deleted, legal_hold, created_at);
+CREATE INDEX idx_papuma_sensitive_active
+    ON papuma_sensitive_data_versions (scope, tenant_id, redacted, deleted, legal_hold, created_at);
 
-ALTER TABLE sensitive_data_versions ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS scope_isolation_sensitive_data_versions ON sensitive_data_versions;
-CREATE POLICY scope_isolation_sensitive_data_versions ON sensitive_data_versions
+ALTER TABLE papuma_sensitive_data_versions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS scope_isolation_papuma_sensitive_data_versions ON papuma_sensitive_data_versions;
+CREATE POLICY scope_isolation_papuma_sensitive_data_versions ON papuma_sensitive_data_versions
     USING (
         (
             current_setting('app.current_scope', true) = 'Tenant'

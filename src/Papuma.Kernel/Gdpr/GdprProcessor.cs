@@ -80,7 +80,7 @@ public sealed class GdprProcessor
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
-            UPDATE event_feed
+            UPDATE papuma_event_feed
             SET payload  = '{"redacted": true}'::jsonb,
                 redacted = TRUE
             WHERE scope     = @scope
@@ -155,7 +155,7 @@ public sealed class GdprProcessor
         cmd.CommandText = """
              SELECT sequence_id, kind, event_id, scope, tenant_id, entity, entity_id, event_type, version,
                  correlation_id, causation_id, actor_id, payload::text, occurred_at
-            FROM event_feed
+            FROM papuma_event_feed
              WHERE scope     = @scope
             AND (
                  (@tenantId IS NULL AND tenant_id IS NULL)

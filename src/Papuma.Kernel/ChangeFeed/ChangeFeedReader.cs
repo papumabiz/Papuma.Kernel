@@ -55,7 +55,7 @@ public sealed class ChangeFeedReader
         cmd.CommandText = """
             SELECT sequence_id, kind, event_id, scope, tenant_id, entity, entity_id, event_type, version,
                    correlation_id, causation_id, actor_id, payload::text, occurred_at
-            FROM event_feed
+            FROM papuma_event_feed
             WHERE entity = @entity
               AND entity_id = @entityId
               AND (@scope IS NULL OR scope = @scope)
@@ -117,7 +117,7 @@ public sealed class ChangeFeedReader
         cmd.CommandText = """
             SELECT sequence_id, kind, event_id, scope, tenant_id, entity, entity_id, event_type, version,
                    correlation_id, causation_id, actor_id, payload::text, occurred_at
-            FROM event_feed
+            FROM papuma_event_feed
             WHERE sequence_id BETWEEN @fromSequenceId AND @toSequenceId
               AND (@scope IS NULL OR scope = @scope)
               AND (
@@ -154,7 +154,7 @@ public sealed class ChangeFeedReader
         cmd.Transaction = tx;
         cmd.CommandText = """
             SELECT COALESCE(MAX(sequence_id), 0)
-            FROM event_feed
+            FROM papuma_event_feed
             WHERE (@scope IS NULL OR scope = @scope)
               AND (
                   @scope IS NULL

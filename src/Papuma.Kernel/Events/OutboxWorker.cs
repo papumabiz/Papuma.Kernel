@@ -145,7 +145,7 @@ public sealed class OutboxWorker : BackgroundService
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT outbox_id, scope, tenant_id, event_id, event_type, payload::text, attempts
-            FROM event_outbox
+            FROM papuma_event_outbox
             WHERE status IN ('Pending', 'Failed')
               AND next_retry_at <= NOW()
               AND attempts < @maxAttempts
@@ -194,7 +194,7 @@ public sealed class OutboxWorker : BackgroundService
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
-            UPDATE event_outbox
+            UPDATE papuma_event_outbox
             SET status = 'Sent',
                 attempts = 0,
                 last_error = NULL,
@@ -216,7 +216,7 @@ public sealed class OutboxWorker : BackgroundService
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
-            UPDATE event_outbox
+            UPDATE papuma_event_outbox
             SET status = 'Failed',
                 attempts = attempts + 1,
                 last_error = @error,

@@ -170,7 +170,7 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT last_sequence_id
-            FROM projection_checkpoint
+            FROM papuma_projection_checkpoint
             WHERE projection_name = @name
             """;
         cmd.Parameters.AddWithValue("name", _projectionName);
@@ -180,7 +180,7 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
     }
 
     /// <summary>
-    /// Loads non-redacted, visible events from <c>event_feed</c> matching the handler's event types.
+    /// Loads non-redacted, visible events from <c>papuma_event_feed</c> matching the handler's event types.
     /// </summary>
     private async Task<List<ChangeRecord>> LoadChangesAsync(
         NpgsqlConnection conn,
@@ -191,7 +191,7 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
         cmd.CommandText = """
             SELECT sequence_id, kind, event_id, scope, tenant_id, entity, entity_id, event_type, version,
                    correlation_id, causation_id, actor_id, payload::text, occurred_at
-            FROM event_feed
+            FROM papuma_event_feed
             WHERE sequence_id > @lastSeen
               AND (@scope IS NULL OR scope = @scope)
               AND (
@@ -206,9 +206,9 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
               AND xmin::text::bigint < pg_snapshot_xmin(pg_current_snapshot())::text::bigint
               AND NOT EXISTS (
                   SELECT 1
-                  FROM projection_failures pf
+                  FROM papuma_projection_failures pf
                   WHERE pf.projection_name = @name
-                    AND pf.sequence_id = event_feed.sequence_id
+                    AND pf.sequence_id = papuma_event_feed.sequence_id
                     AND (
                         pf.attempts >= @maxAttempts
                         OR pf.next_retry_at > NOW())
@@ -257,7 +257,7 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT COALESCE(MAX(sequence_id), 0)
-            FROM event_feed
+            FROM papuma_event_feed
             WHERE (@scope IS NULL OR scope = @scope)
               AND (
                   @scope IS NULL
@@ -291,7 +291,7 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
-            INSERT INTO projection_checkpoint (projection_name, last_sequence_id, updated_at)
+            INSERT INTO papuma_projection_checkpoint (projection_name, last_sequence_id, updated_at)
             VALUES (@name, @sequenceId, NOW())
             ON CONFLICT (projection_name)
             DO UPDATE SET last_sequence_id = @sequenceId, updated_at = NOW()
@@ -314,7 +314,7 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
-            DELETE FROM projection_failures
+            DELETE FROM papuma_projection_failures
             WHERE projection_name = @name
               AND sequence_id = @sequenceId
             """;
@@ -335,7 +335,7 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
     {
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO projection_failures
+            INSERT INTO papuma_projection_failures
                 (projection_name, sequence_id, event_type, attempts, last_error, next_retry_at)
             VALUES
                 (@name, @sequenceId, @eventType, 1, @error,
@@ -345,10 +345,10 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
                  ) * INTERVAL '1 second')
             ON CONFLICT (projection_name, sequence_id)
             DO UPDATE SET
-                attempts = projection_failures.attempts + 1,
+                attempts = papuma_projection_failures.attempts + 1,
                 last_error = EXCLUDED.last_error,
                 next_retry_at = NOW() + LEAST(
-                    @baseDelay * POWER(2, projection_failures.attempts),
+                    @baseDelay * POWER(2, papuma_projection_failures.attempts),
                     @maxDelay
                 ) * INTERVAL '1 second',
                 updated_at = NOW()
@@ -378,7 +378,7 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
         {
             checkpointCmd.Transaction = tx;
             checkpointCmd.CommandText = """
-                INSERT INTO projection_checkpoint (projection_name, last_sequence_id, updated_at)
+                INSERT INTO papuma_projection_checkpoint (projection_name, last_sequence_id, updated_at)
                 VALUES (@name, 0, NOW())
                 ON CONFLICT (projection_name)
                 DO UPDATE SET last_sequence_id = 0, updated_at = NOW()
@@ -391,7 +391,7 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
         {
             failuresCmd.Transaction = tx;
             failuresCmd.CommandText = """
-                DELETE FROM projection_failures
+                DELETE FROM papuma_projection_failures
                 WHERE projection_name = @name
                 """;
             failuresCmd.Parameters.AddWithValue("name", _projectionName);

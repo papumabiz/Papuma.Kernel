@@ -267,7 +267,7 @@ public sealed class NpgsqlSensitiveDataStore : ISensitiveDataStore, ISensitiveDa
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
-            INSERT INTO sensitive_data_versions
+            INSERT INTO papuma_sensitive_data_versions
                 (sensitive_ref, version, scope, tenant_id, schema_version, payload,
                  redacted, deleted, legal_hold, reason, actor_id)
             VALUES
@@ -303,7 +303,7 @@ public sealed class NpgsqlSensitiveDataStore : ISensitiveDataStore, ISensitiveDa
         cmd.CommandText = lockRow
             ? """
                 SELECT version, schema_version, payload::text, redacted, deleted, legal_hold, actor_id, created_at, reason
-                FROM sensitive_data_versions
+                FROM papuma_sensitive_data_versions
                 WHERE sensitive_ref = @sensitiveRef
                   AND scope = @scope
                   AND ((@tenantId IS NULL AND tenant_id IS NULL) OR tenant_id = @tenantId)
@@ -313,7 +313,7 @@ public sealed class NpgsqlSensitiveDataStore : ISensitiveDataStore, ISensitiveDa
                 """
             : """
                 SELECT version, schema_version, payload::text, redacted, deleted, legal_hold, actor_id, created_at, reason
-                FROM sensitive_data_versions
+                FROM papuma_sensitive_data_versions
                 WHERE sensitive_ref = @sensitiveRef
                   AND scope = @scope
                   AND ((@tenantId IS NULL AND tenant_id IS NULL) OR tenant_id = @tenantId)

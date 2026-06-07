@@ -96,7 +96,7 @@ public sealed class RetentionWorker : BackgroundService
         if (deleted > 0)
         {
             _logger.LogInformation(
-                "RetentionWorker deleted {Deleted} event_feed rows older than {Cutoff}.",
+                "RetentionWorker deleted {Deleted} papuma_event_feed rows older than {Cutoff}.",
                 deleted,
                 cutoff);
         }
@@ -105,7 +105,7 @@ public sealed class RetentionWorker : BackgroundService
     }
 
     /// <summary>
-    /// Deletes redacted <c>event_feed</c> rows older than the cutoff using a CTE-based DELETE.
+    /// Deletes redacted <c>papuma_event_feed</c> rows older than the cutoff using a CTE-based DELETE.
     /// </summary>
     private async Task<int> DeleteRedactedRecordsAsync(
         NpgsqlConnection conn,
@@ -118,7 +118,7 @@ public sealed class RetentionWorker : BackgroundService
         cmd.CommandText = """
             WITH candidates AS (
                 SELECT sequence_id
-                FROM event_feed
+                FROM papuma_event_feed
                 WHERE redacted = TRUE
                   AND occurred_at < @cutoff
                   AND (@scope IS NULL OR scope = @scope)
@@ -132,7 +132,7 @@ public sealed class RetentionWorker : BackgroundService
                 ORDER BY sequence_id
                 LIMIT @batchSize
             )
-            DELETE FROM event_feed ef
+            DELETE FROM papuma_event_feed ef
             USING candidates
             WHERE ef.sequence_id = candidates.sequence_id
             """;

@@ -13,7 +13,7 @@ namespace Papuma.Kernel.ChangeFeed;
 /// </summary>
 public sealed class ChangeWriter
 {
-    private const string IdempotencyConflictConstraintName = "ux_event_feed_idempotency_key";
+    private const string IdempotencyConflictConstraintName = "ux_papuma_event_feed_idempotency_key";
 
     private readonly ChangeWriterOptions _options;
 
@@ -155,7 +155,7 @@ public sealed class ChangeWriter
             lookupCmd.Transaction = transaction;
             lookupCmd.CommandText = """
                 SELECT event_id
-                FROM event_feed
+                FROM papuma_event_feed
                 WHERE scope = @scope
                   AND ((@tenantId IS NULL AND tenant_id IS NULL) OR tenant_id = @tenantId)
                   AND idempotency_key = @idempotencyKey
@@ -194,7 +194,7 @@ public sealed class ChangeWriter
             await using var cmd = transaction.Connection!.CreateCommand();
             cmd.Transaction = transaction;
             cmd.CommandText = """
-                INSERT INTO event_feed
+                INSERT INTO papuma_event_feed
                     (kind, event_id, scope, tenant_id, entity, entity_id, event_type, version,
                      correlation_id, causation_id, actor_id, payload, idempotency_key)
                 VALUES
