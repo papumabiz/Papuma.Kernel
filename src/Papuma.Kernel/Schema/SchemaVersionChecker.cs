@@ -13,7 +13,7 @@ public sealed class SchemaVersionChecker
     /// <summary>
     /// The schema version expected by the current library build.
     /// </summary>
-    public const int CurrentRequiredVersion = 4;
+    public const int CurrentRequiredVersion = 5;
 
     private readonly NpgsqlDataSource _dataSource;
 
