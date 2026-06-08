@@ -59,20 +59,30 @@ public sealed class ChangeWriter
         ArgumentNullException.ThrowIfNull(transaction);
         ArgumentNullException.ThrowIfNull(scope);
 
-        await AppendAsync(
-            transaction, scope,
-            kind: "Change",
-            eventId: null,
-            entity: entity,
-            entityId: entityId,
-            eventType: eventType,
-            version: version,
-            payloadJson: payloadJson,
-            actorId: actorId,
-            correlationId: correlationId,
-            causationId: causationId,
-            idempotencyKey: idempotencyKey,
-            ct: ct);
+        try
+        {
+            await AppendAsync(
+                transaction, scope,
+                kind: "Change",
+                eventId: null,
+                entity: entity,
+                entityId: entityId,
+                eventType: eventType,
+                version: version,
+                payloadJson: payloadJson,
+                actorId: actorId,
+                correlationId: correlationId,
+                causationId: causationId,
+                idempotencyKey: idempotencyKey,
+                ct: ct);
+        }
+        catch (PostgresException ex) when (
+            idempotencyKey is not null &&
+            ex.SqlState == PostgresErrorCodes.UniqueViolation &&
+            string.Equals(ex.ConstraintName, IdempotencyConflictConstraintName, StringComparison.Ordinal))
+        {
+            // Duplicate change record — idempotency key already exists. Silently ignore.
+        }
     }
 
     /// <summary>
@@ -127,6 +137,33 @@ public sealed class ChangeWriter
 
         var eventId = Guid.NewGuid();
 
+        if (idempotencyKey is null)
+        {
+            // No idempotency key — no duplicate detection needed, no savepoint overhead.
+            await AppendAsync(
+                transaction, scope,
+                kind: "Event",
+                eventId: eventId,
+                entity: entity,
+                entityId: entityId,
+                eventType: eventType,
+                version: null,
+                payloadJson: payloadJson,
+                actorId: actorId,
+                correlationId: correlationId,
+                causationId: causationId,
+                idempotencyKey: null,
+                ct: ct);
+
+            return eventId;
+        }
+
+        // Use a savepoint so that a UniqueViolation on the idempotency key does not abort
+        // the surrounding transaction. PostgreSQL marks a transaction as aborted after any
+        // error; rolling back to a savepoint restores it to a usable state.
+        const string savepointName = "idempotency_check";
+        await ExecuteSavepointCommandAsync(transaction, $"SAVEPOINT {savepointName}", ct);
+
         try
         {
             await AppendAsync(
@@ -143,13 +180,17 @@ public sealed class ChangeWriter
                 causationId: causationId,
                 idempotencyKey: idempotencyKey,
                 ct: ct);
+
+            await ExecuteSavepointCommandAsync(transaction, $"RELEASE SAVEPOINT {savepointName}", ct);
+            return eventId;
         }
         catch (PostgresException ex) when (
-            idempotencyKey is not null &&
             ex.SqlState == PostgresErrorCodes.UniqueViolation &&
             string.Equals(ex.ConstraintName, IdempotencyConflictConstraintName, StringComparison.Ordinal))
         {
-            await transaction.Connection!.SetScopeAsync(scope, ct);
+            // Roll back to the savepoint to restore the transaction to a usable state,
+            // then look up the event_id that was written by the original caller.
+            await ExecuteSavepointCommandAsync(transaction, $"ROLLBACK TO SAVEPOINT {savepointName}", ct);
 
             await using var lookupCmd = transaction.Connection!.CreateCommand();
             lookupCmd.Transaction = transaction;
@@ -167,8 +208,6 @@ public sealed class ChangeWriter
             var existingEventId = await lookupCmd.ExecuteScalarAsync(ct);
             return existingEventId is Guid guid ? guid : eventId;
         }
-
-        return eventId;
     }
 
     private async Task AppendAsync(
@@ -189,42 +228,47 @@ public sealed class ChangeWriter
     {
         await transaction.Connection!.SetScopeAsync(scope, ct);
 
-        try
-        {
-            await using var cmd = transaction.Connection!.CreateCommand();
-            cmd.Transaction = transaction;
-            cmd.CommandText = """
-                INSERT INTO papuma_event_feed
-                    (kind, event_id, scope, tenant_id, entity, entity_id, event_type, version,
-                     correlation_id, causation_id, actor_id, payload, idempotency_key)
-                VALUES
-                    (@kind, @eventId, @scope, @tenantId, @entity, @entityId, @eventType, @version,
-                     @correlationId, @causationId, @actorId, @payload::jsonb, @idempotencyKey)
-                """;
+        await using var cmd = transaction.Connection!.CreateCommand();
+        cmd.Transaction = transaction;
+        cmd.CommandText = """
+            INSERT INTO papuma_event_feed
+                (kind, event_id, scope, tenant_id, entity, entity_id, event_type, version,
+                 correlation_id, causation_id, actor_id, payload, idempotency_key)
+            VALUES
+                (@kind, @eventId, @scope, @tenantId, @entity, @entityId, @eventType, @version,
+                 @correlationId, @causationId, @actorId, @payload::jsonb, @idempotencyKey)
+            """;
 
-            cmd.Parameters.AddWithValue("kind", kind);
-            cmd.Parameters.AddWithValue("eventId", (object?)eventId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
-            cmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("entity", (object?)entity ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("entityId", (object?)entityId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("eventType", eventType);
-            cmd.Parameters.AddWithValue("version", (object?)version ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("correlationId", (object?)correlationId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("causationId", (object?)causationId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("actorId", actorId);
-            cmd.Parameters.AddWithValue("payload", payloadJson);
-            cmd.Parameters.AddWithValue("idempotencyKey", (object?)idempotencyKey ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("kind", kind);
+        cmd.Parameters.AddWithValue("eventId", (object?)eventId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+        cmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("entity", (object?)entity ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("entityId", (object?)entityId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("eventType", eventType);
+        cmd.Parameters.AddWithValue("version", (object?)version ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("correlationId", (object?)correlationId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("causationId", (object?)causationId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("actorId", actorId);
+        cmd.Parameters.AddWithValue("payload", payloadJson);
+        cmd.Parameters.AddWithValue("idempotencyKey", (object?)idempotencyKey ?? DBNull.Value);
 
-            await cmd.ExecuteNonQueryAsync(ct);
-        }
-        catch (PostgresException ex) when (
-            idempotencyKey is not null &&
-            ex.SqlState == PostgresErrorCodes.UniqueViolation &&
-            string.Equals(ex.ConstraintName, IdempotencyConflictConstraintName, StringComparison.Ordinal))
-        {
-            return;
-        }
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>
+    /// Executes a savepoint control statement (<c>SAVEPOINT</c>, <c>RELEASE SAVEPOINT</c>,
+    /// or <c>ROLLBACK TO SAVEPOINT</c>) on the connection associated with the given transaction.
+    /// </summary>
+    private static async Task ExecuteSavepointCommandAsync(
+        NpgsqlTransaction transaction,
+        string sql,
+        CancellationToken ct)
+    {
+        await using var cmd = transaction.Connection!.CreateCommand();
+        cmd.Transaction = transaction;
+        cmd.CommandText = sql;
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     /// <summary>
