@@ -151,8 +151,11 @@ public sealed class GdprProcessor
         InputValidator.ValidateEntityId(entityId);
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        await conn.SetScopeAsync(scope, ct);
 
         await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = """
              SELECT sequence_id, kind, event_id, scope, tenant_id, entity, entity_id, event_type, version,
                  correlation_id, causation_id, actor_id, payload::text, occurred_at
@@ -174,6 +177,8 @@ public sealed class GdprProcessor
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         var records = await ChangeRecordMapper.ReadAllAsync(reader, ct);
+        await reader.CloseAsync();
+        await tx.CommitAsync(ct);
 
         return new EntityHistory(records);
     }

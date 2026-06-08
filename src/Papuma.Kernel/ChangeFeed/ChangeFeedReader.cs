@@ -76,7 +76,9 @@ public sealed class ChangeFeedReader
         cmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("limit", limit);
 
-        return await ReadRecordsAsync(cmd, ct);
+        var result = await ReadRecordsAsync(cmd, ct);
+        await tx.CommitAsync(ct);
+        return result;
     }
 
     /// <summary>
@@ -137,7 +139,9 @@ public sealed class ChangeFeedReader
         cmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("limit", limit);
 
-        return await ReadRecordsAsync(cmd, ct);
+        var result = await ReadRecordsAsync(cmd, ct);
+        await tx.CommitAsync(ct);
+        return result;
     }
 
     public async Task<long> GetLatestSequenceIdAsync(
@@ -168,8 +172,10 @@ public sealed class ChangeFeedReader
         cmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
         cmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
 
-        var result = await cmd.ExecuteScalarAsync(ct);
-        return result is long latestSequenceId ? latestSequenceId : 0L;
+        var scalar = await cmd.ExecuteScalarAsync(ct);
+        var latestSequenceId = scalar is long id ? id : 0L;
+        await tx.CommitAsync(ct);
+        return latestSequenceId;
     }
 
     /// <summary>
