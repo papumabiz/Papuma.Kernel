@@ -41,7 +41,7 @@ public sealed class NpgsqlSensitiveDataStore : ISensitiveDataStore, ISensitiveDa
         await using var tx = await conn.BeginTransactionAsync(ct);
         await conn.SetScopeAsync(scope, ct);
 
-        var current = await LoadLatestRowAsync(conn, tx, scope, sensitiveRef, lockRow: false, ct);
+        var current = await LoadLatestRowAsync(conn, tx, scope, sensitiveRef, lockRow: true, ct);
         var nextVersion = (current?.Version ?? 0) + 1;
 
         await InsertVersionAsync(
