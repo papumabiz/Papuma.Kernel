@@ -133,22 +133,42 @@ public sealed class GdprProcessor
     }
 
     /// <summary>
-    /// Returns the complete event feed history for a given entity within the scope, including redacted records.
+    /// Returns a page of event feed history for a given entity within the scope, including redacted records.
     /// </summary>
     /// <param name="scope">The scope context.</param>
     /// <param name="entity">The logical entity name.</param>
     /// <param name="entityId">The entity identifier.</param>
+    /// <param name="afterSequenceId">
+    /// Cursor for keyset pagination. Pass <c>0</c> (default) to start from the beginning,
+    /// or the <see cref="EntityHistory.NextCursorSequenceId"/> from the previous page to continue.
+    /// </param>
+    /// <param name="limit">The maximum number of records per page (default: 1000).</param>
     /// <param name="ct">A cancellation token.</param>
-    /// <returns>The entity history containing all matching records.</returns>
+    /// <returns>
+    /// A page of entity history. Check <see cref="EntityHistory.HasMore"/> to determine
+    /// whether additional pages are available.
+    /// </returns>
     public async Task<EntityHistory> GetEntityHistoryAsync(
         ScopeContext scope,
         string entity,
         string entityId,
+        long afterSequenceId = 0,
+        int limit = 1000,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(scope);
         InputValidator.ValidateEntity(entity);
         InputValidator.ValidateEntityId(entityId);
+
+        if (afterSequenceId < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(afterSequenceId), "afterSequenceId must be greater than or equal to 0.");
+        }
+
+        if (limit < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit), "limit must be greater than or equal to 1.");
+        }
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
@@ -156,30 +176,40 @@ public sealed class GdprProcessor
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
+        // Fetch limit + 1 to detect whether a next page exists without a separate COUNT query.
         cmd.CommandText = """
-             SELECT sequence_id, kind, event_id, scope, tenant_id, entity, entity_id, event_type, version,
-                 correlation_id, causation_id, actor_id, payload::text, occurred_at
+            SELECT sequence_id, kind, event_id, scope, tenant_id, entity, entity_id, event_type, version,
+                   correlation_id, causation_id, actor_id, payload::text, occurred_at
             FROM papuma_event_feed
-             WHERE scope     = @scope
-            AND (
-                 (@tenantId IS NULL AND tenant_id IS NULL)
-                 OR
-                 tenant_id = @tenantId
-            )
-              AND entity    = @entity
-              AND entity_id = @entityId
+            WHERE scope = @scope
+              AND (
+                  (@tenantId IS NULL AND tenant_id IS NULL)
+                  OR
+                  tenant_id = @tenantId
+              )
+              AND entity      = @entity
+              AND entity_id   = @entityId
+              AND sequence_id > @afterSequenceId
             ORDER BY sequence_id
+            LIMIT @limit
             """;
         cmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
         cmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("entity", entity);
         cmd.Parameters.AddWithValue("entityId", entityId);
+        cmd.Parameters.AddWithValue("afterSequenceId", afterSequenceId);
+        // Request one extra record to detect whether more pages exist.
+        cmd.Parameters.AddWithValue("limit", limit + 1);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
-        var records = await ChangeRecordMapper.ReadAllAsync(reader, ct);
+        var all = await ChangeRecordMapper.ReadAllAsync(reader, ct);
         await reader.CloseAsync();
         await tx.CommitAsync(ct);
 
-        return new EntityHistory(records);
+        var hasMore = all.Count > limit;
+        var records = hasMore ? all.Take(limit).ToList() : (IReadOnlyList<ChangeRecord>)all;
+        var nextCursor = hasMore ? records[^1].SequenceId : (long?)null;
+
+        return new EntityHistory(records, hasMore, nextCursor);
     }
 }
