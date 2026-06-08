@@ -3,10 +3,8 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>Papuma.Kernel.AspNetCore</PackageId>
-    <Version>0.1.0</Version>
-    <Authors>Harald Lapp</Authors>
-    <Description>Optional ASP.NET Core integration package for Papuma.Kernel.</Description>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Description>Optional ASP.NET Core integration package for Papuma.Kernel — scope resolution middleware, projection lag health checks.</Description>
+    <PackageTags>aspnetcore;multi-tenancy;health-checks;projections</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

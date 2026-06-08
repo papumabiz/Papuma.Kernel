@@ -1,12 +1,11 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>Papuma.Kernel</PackageId>
-    <Version>0.1.0</Version>
-    <Authors>Harald Lapp</Authors>
-    <Description>Kernel library for Papuma.</Description>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Description>PostgreSQL-based event-informed application kernel for .NET 10 — change feed, multi-tenancy, projections, outbox, and GDPR-sensitive data handling.</Description>
+    <PackageTags>postgresql;events;projections;outbox;multi-tenancy;gdpr;change-feed;rls</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
