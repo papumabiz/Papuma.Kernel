@@ -38,8 +38,8 @@ public sealed class NpgsqlSensitiveDataStore : ISensitiveDataStore, ISensitiveDa
         ValidateWriteInputs(scope, sensitiveRef, schemaVersion, payloadJson, actorId);
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.SetScopeAsync(scope, ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
+        await conn.SetScopeAsync(scope, ct);
 
         var current = await LoadLatestRowAsync(conn, tx, scope, sensitiveRef, lockRow: false, ct);
         var nextVersion = (current?.Version ?? 0) + 1;
@@ -83,9 +83,10 @@ public sealed class NpgsqlSensitiveDataStore : ISensitiveDataStore, ISensitiveDa
         ValidateScopeAndReference(scope, sensitiveRef);
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
         await conn.SetScopeAsync(scope, ct);
 
-        var current = await LoadLatestRowAsync(conn, transaction: null, scope, sensitiveRef, lockRow: false, ct);
+        var current = await LoadLatestRowAsync(conn, tx, scope, sensitiveRef, lockRow: false, ct);
         return current is null
             ? null
             : ToVersion(current, scope, sensitiveRef);
@@ -102,8 +103,8 @@ public sealed class NpgsqlSensitiveDataStore : ISensitiveDataStore, ISensitiveDa
         ValidateStateTransitionInputs(scope, sensitiveRef, actorId, reason);
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.SetScopeAsync(scope, ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
+        await conn.SetScopeAsync(scope, ct);
 
         var latest = await RequireLatestRowForMutationAsync(conn, tx, scope, sensitiveRef, ct);
         var nextVersion = latest.Version + 1;
@@ -137,8 +138,8 @@ public sealed class NpgsqlSensitiveDataStore : ISensitiveDataStore, ISensitiveDa
         ValidateStateTransitionInputs(scope, sensitiveRef, actorId, reason);
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.SetScopeAsync(scope, ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
+        await conn.SetScopeAsync(scope, ct);
 
         var latest = await RequireLatestRowForMutationAsync(conn, tx, scope, sensitiveRef, ct);
         var nextVersion = latest.Version + 1;
@@ -173,8 +174,8 @@ public sealed class NpgsqlSensitiveDataStore : ISensitiveDataStore, ISensitiveDa
         ValidateStateTransitionInputs(scope, sensitiveRef, actorId, reason);
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await conn.SetScopeAsync(scope, ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
+        await conn.SetScopeAsync(scope, ct);
 
         var latest = await RequireLatestRowForMutationAsync(conn, tx, scope, sensitiveRef, ct);
         var nextVersion = latest.Version + 1;

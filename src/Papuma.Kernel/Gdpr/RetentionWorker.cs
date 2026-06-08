@@ -83,11 +83,11 @@ public sealed class RetentionWorker : BackgroundService
         var cutoff = DateTimeOffset.UtcNow - _options.RetentionWindow;
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
         if (!_scopeFilter.IsAll)
         {
             await conn.SetScopeAsync(_scopeFilter.Scope!, ct);
         }
-        await using var tx = await conn.BeginTransactionAsync(ct);
 
         var deleted = await DeleteRedactedRecordsAsync(conn, tx, cutoff, ct);
 

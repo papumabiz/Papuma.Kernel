@@ -11,10 +11,41 @@ namespace Papuma.Kernel.Tenancy;
 public static class ScopeConnectionExtensions
 {
     /// <summary>
-    /// Sets <c>app.current_scope</c> and <c>app.current_tenant</c> as <c>SET LOCAL</c>
-    /// session variables on the connection. <c>SET LOCAL</c> scopes the values to the
-    /// current transaction; callers must ensure a transaction is active.
+    /// Sets <c>app.current_scope</c> and <c>app.current_tenant</c> as PostgreSQL <c>SET LOCAL</c>
+    /// session variables on the connection for the duration of the active transaction.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Security model — two independent layers:</b>
+    /// </para>
+    /// <para>
+    /// <b>Layer 1 (primary):</b> All SQL statements in this library carry explicit
+    /// <c>WHERE scope = @scope AND tenant_id = @tenantId</c> predicates that are bound
+    /// via parameterised queries. This layer is always active and does not depend on
+    /// session state.
+    /// </para>
+    /// <para>
+    /// <b>Layer 2 (defence-in-depth):</b> PostgreSQL Row Level Security (RLS) policies
+    /// on all framework tables read <c>current_setting('app.current_scope')</c> and
+    /// <c>current_setting('app.current_tenant')</c>. This method sets those variables
+    /// using <c>SET LOCAL</c>, which confines them to the current transaction and
+    /// automatically resets them on commit or rollback — preventing scope leaks across
+    /// pooled connections.
+    /// </para>
+    /// <para>
+    /// <b>Invariant:</b> This method must always be called <em>after</em>
+    /// <c>BeginTransactionAsync</c> and <em>before</em> any data-access statement.
+    /// Calling it outside a transaction causes <c>SET LOCAL</c> to behave like
+    /// <c>SET</c> (session-level), which can leak the scope to the next caller that
+    /// reuses the same pooled connection.
+    /// </para>
+    /// <para>
+    /// <b>Background workers with <c>ScopeFilter.All()</c>:</b> Workers that process
+    /// all scopes skip this call. Their database user must be configured with
+    /// <c>BYPASSRLS</c> so that RLS does not block cross-scope reads. In that case
+    /// Layer 1 (explicit WHERE predicates) is the sole isolation mechanism.
+    /// </para>
+    /// </remarks>
     /// <param name="connection">The open PostgreSQL connection.</param>
     /// <param name="scope">The scope context to apply.</param>
     /// <param name="ct">A cancellation token.</param>

@@ -85,12 +85,14 @@ public sealed class OutboxWorker : BackgroundService
     private async Task<int> ProcessBatchAsync(CancellationToken ct)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var loadTx = await conn.BeginTransactionAsync(ct);
         if (!_scopeFilter.IsAll)
         {
             await conn.SetScopeAsync(_scopeFilter.Scope!, ct);
         }
 
-        var entries = await LoadEntriesAsync(conn, ct);
+        var entries = await LoadEntriesAsync(conn, loadTx, ct);
+        await loadTx.CommitAsync(ct);
 
         foreach (var entry in entries)
         {
@@ -140,9 +142,10 @@ public sealed class OutboxWorker : BackgroundService
         return entries.Count;
     }
 
-    private async Task<List<OutboxEntry>> LoadEntriesAsync(NpgsqlConnection conn, CancellationToken ct)
+    private async Task<List<OutboxEntry>> LoadEntriesAsync(NpgsqlConnection conn, NpgsqlTransaction tx, CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = """
             SELECT outbox_id, scope, tenant_id, event_id, event_type, payload::text, attempts
             FROM papuma_event_outbox

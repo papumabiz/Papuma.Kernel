@@ -80,6 +80,7 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
     public async Task<ProjectionLagSnapshot> GetLagSnapshotAsync(CancellationToken ct = default)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
         if (!_scopeFilter.IsAll)
         {
             await conn.SetScopeAsync(_scopeFilter.Scope!, ct);
@@ -143,6 +144,7 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
     private async Task<int> ProcessBatchAsync(CancellationToken ct)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var loadTx = await conn.BeginTransactionAsync(ct);
         if (!_scopeFilter.IsAll)
         {
             await conn.SetScopeAsync(_scopeFilter.Scope!, ct);
@@ -150,6 +152,7 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
 
         var checkpoint = await LoadCheckpointAsync(conn, ct);
         var changes = await LoadChangesAsync(conn, checkpoint, ct);
+        await loadTx.CommitAsync(ct);
 
         foreach (var change in changes)
         {
