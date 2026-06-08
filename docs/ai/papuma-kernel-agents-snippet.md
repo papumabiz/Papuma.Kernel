@@ -55,15 +55,15 @@ Before implementing any feature, read the following documents in `docs/`:
 ### Core Architecture Rules
 
 - Use a **CRUD-truth + change-feed** architecture. Domain tables are the source of truth.
-- Every state mutation must append a `change_feed` record **in the same transaction** as the domain write.
+- Every state mutation must call `ChangeWriter.AppendChangeAsync()` **in the same transaction** as the domain write.
 - Projections and outbox workers are **asynchronous at-least-once workers** — always implement idempotency.
 - Use explicit `ScopeContext` (`Platform` or `Tenant`) on every write. Never omit it.
 - Respect PostgreSQL RLS session variables (`app.current_scope`, `app.current_tenant`).
 
 ### Payload Design Rules
 
-- `change_feed` payload: **complete** — everything projections need to reconstruct state on replay.
-- `business_event_log` payload: **selective** — only what the signal consumer needs; lean payloads for high-frequency events.
+- Change payload (`AppendChangeAsync`, kind=Change): **complete** — everything projections need to reconstruct state on replay.
+- Event payload (`AppendEventAsync`, kind=Event): **selective** — only what the signal consumer needs; lean payloads for high-frequency events.
 - Outbox payload: **contract-driven** — designed for the external consumer's API, not copied from internal payloads.
 - Different external consumers get separate, explicitly built outbox messages.
 
@@ -79,9 +79,9 @@ Before implementing any feature, read the following documents in `docs/`:
 ### What NOT to Do
 
 - Do not model the application as pure event sourcing — domain tables remain the truth.
-- Do not write signal-only events (login, page view) to `change_feed`.
-- Do not write state-change events only to `business_event_log`.
-- Do not copy `change_feed` payloads blindly into outbox or `business_event_log`.
+- Do not write signal-only events (login, page view) via `AppendChangeAsync` — use `AppendEventAsync` instead.
+- Do not write state-change events via `AppendEventAsync` — use `AppendChangeAsync` instead.
+- Do not copy Change payloads blindly into outbox or Event-kind entries.
 - Do not introduce Kafka, EventStore, or heavy CQRS abstractions unless explicitly requested.
 - Do not call `ISensitiveDataStore.AppendAsync()` inside a `NpgsqlTransaction` — it has no transaction parameter by design.
 

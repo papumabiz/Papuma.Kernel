@@ -35,9 +35,8 @@ Papuma.Kernel prefers explicitness over abstraction.
 
 ### Core services
 
-- `ChangeWriter` writes `change_feed` records inside the current DB transaction.
+- `ChangeWriter` writes change records (`AppendChangeAsync`, kind=Change) and business events (`AppendEventAsync`, kind=Event) into the unified `papuma_event_feed` table.
 - `ChangeFeedReader` reads feed data.
-- `BusinessEventWriter` writes semantic business events to `papuma_event_feed`.
 - `OutboxWriter` writes integration messages to `papuma_event_outbox`.
 - `GdprProcessor` performs redaction and history access operations.
 - `SchemaVersionChecker` verifies schema baseline compatibility.
@@ -64,7 +63,7 @@ Papuma.Kernel prefers explicitness over abstraction.
 flowchart TD
     A[Command/API Request] --> B[Open transaction]
     B --> C[Write domain state]
-    C --> D[Append change_feed and optional papuma_event_feed and outbox]
+    C --> D[Append to papuma_event_feed (Change/Event) and optional outbox]
     D --> E[Commit]
     E --> F[Return success]
     E --> G[Async workers]
@@ -103,25 +102,26 @@ These are set with `SET LOCAL` on the active transaction.
 
 Primary framework tables:
 
-- `change_feed`
+- `papuma_event_feed` — unified change and business event log (distinguished by `kind` column: `Change` or `Event`)
 - `papuma_projection_checkpoint`
 - `papuma_projection_failures`
-- `papuma_event_feed`
 - `papuma_event_outbox`
 - `papuma_sensitive_data_versions`
 - `papuma_schema_version`
 
-Current required schema baseline is version `4`.
+Current required schema baseline is version `5`.
 
 ## 7. Event Classes and Their Roles
 
-- Change events (`change_feed`): state transition facts used for replay and read-model rebuild.
-- Business events (`papuma_event_feed`): domain signals for process, analytics, notifications, integration semantics.
+Both change records and business events live in the unified `papuma_event_feed` table, distinguished by the `kind` column:
+
+- **Change** (`kind='Change'`): state transition facts used for replay and read-model rebuild. Written via `ChangeWriter.AppendChangeAsync()`.
+- **Event** (`kind='Event'`): domain signals for process, analytics, notifications, integration semantics. Written via `ChangeWriter.AppendEventAsync()`.
 
 Rule of thumb:
 
-- if needed for state reconstruction, write to `change_feed`
-- if meaningful as domain signal but not required for state reconstruction, write to `papuma_event_feed`
+- if needed for state reconstruction, write a **Change** via `AppendChangeAsync`
+- if meaningful as domain signal but not required for state reconstruction, write an **Event** via `AppendEventAsync`
 
 ## 8. Reliability and Idempotency Rules
 
@@ -135,8 +135,7 @@ Implications:
 
 The framework schema supports idempotency keys in:
 
-- `change_feed` (unique index by scope + tenant + key)
-- `papuma_event_feed` (unique index by scope + tenant + key)
+- `papuma_event_feed` (unique index `ux_papuma_event_feed_idempotency_key` on scope + tenant + key)
 
 ## 9. GDPR and Sensitive Data Strategy
 
@@ -241,7 +240,7 @@ Use a CRUD-truth + change-feed architecture.
 Keep writes transactional (state write + change feed append).
 Treat projections/outbox as asynchronous at-least-once workers and implement idempotency.
 Use explicit ScopeContext (Platform/Tenant) and respect RLS session variables.
-Use papuma_event_feed for semantic domain signals (selective payload, not a copy of change_feed).
+Use ChangeWriter.AppendEventAsync() for semantic domain signals (selective payload, not a copy of change payload).
 Design outbox payloads as external consumer contracts, not copies of internal payloads.
 Use GDPR redaction patterns and SensitiveRef indirection for high-risk PII.
 Call ISensitiveDataStore.AppendAsync() before the main transaction, not inside it.

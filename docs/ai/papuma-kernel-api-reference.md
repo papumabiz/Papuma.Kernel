@@ -1150,7 +1150,7 @@ Registers a `ReplayService` that auto-discovers all `ProjectionWorker` instances
 **Kind**: readonly record struct
 **Namespace**: `Papuma.Kernel.Gdpr`
 
-Represents a stable reference to versioned sensitive data. Used as an indirection to keep sensitive payloads out of event streams — instead of embedding PII directly in `papuma_event_feed` or `papuma_event_feed` payloads, store only a `SensitiveRef` and resolve via `ISensitiveDataResolver`.
+Represents a stable reference to versioned sensitive data. Used as an indirection to keep sensitive payloads out of event streams — instead of embedding PII directly in `papuma_event_feed` payloads, store only a `SensitiveRef` and resolve via `ISensitiveDataResolver`.
 
 ```csharp
 public readonly record struct SensitiveRef(Guid Value)
@@ -1430,7 +1430,7 @@ Redacts all change feed and business event log entries for a specific entity and
 | `reason` | `string` | Yes | Documented reason — must not be empty/whitespace. |
 | `ct` | `CancellationToken` | No | — |
 
-**Database tables affected**: `papuma_event_feed` (UPDATE), `papuma_event_feed` (UPDATE + INSERT audit event).
+**Database tables affected**: `papuma_event_feed` (UPDATE — both Change and Event kinds, plus INSERT of audit Event).
 
 ```csharp
 public async Task<EntityHistory> GetEntityHistoryAsync(
@@ -1546,7 +1546,7 @@ Ensures the database schema version is at least the required version. Throws `In
 public async Task EnsureCurrentBaselineAsync(CancellationToken ct = default)
 ```
 
-Ensures the database schema version matches the library's required baseline (`CurrentRequiredVersion = 5`). Equivalent to `EnsureMinimumVersionAsync(4, ct)`.
+Ensures the database schema version matches the library's required baseline (`CurrentRequiredVersion = 5`). Equivalent to `EnsureMinimumVersionAsync(5, ct)`.
 
 **Database table**: `papuma_schema_version`
 
@@ -2217,7 +2217,6 @@ app.MapHealthChecks("/health");
 | Table | Constraint | Columns |
 |-------|-----------|---------|
 | `papuma_event_feed` | `ux_papuma_event_feed_idempotency_key` | `(scope, tenant_id, idempotency_key)` |
-| `papuma_event_feed` | `ux_papuma_event_feed_idempotency_key` | `(scope, tenant_id, idempotency_key)` |
 
 ### Row-Level Security
 
@@ -2264,7 +2263,7 @@ The `NpgsqlUnitOfWork` retries on these PostgreSQL error codes:
 | `RetentionWorkerOptions` | `RetentionWindow` | `365 days` |
 | `RetentionWorkerOptions` | `BatchSize` | `1000` |
 | `ProjectionHealthCheckOptions` | `MaxAllowedLag` | `1000` |
-| `SchemaVersionChecker` | `CurrentRequiredVersion` | `4` |
+| `SchemaVersionChecker` | `CurrentRequiredVersion` | `5` |
 
 ---
 
