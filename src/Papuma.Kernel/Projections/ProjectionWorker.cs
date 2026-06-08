@@ -3,7 +3,6 @@
 
 using System.Threading.Channels;
 
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
@@ -15,20 +14,16 @@ namespace Papuma.Kernel.Projections;
 
 /// <summary>
 /// Polls the unified event feed and applies matching events to a projection with at-least-once semantics.
+/// The handler receives the ambient <see cref="NpgsqlTransaction"/> so that its writes and the
+/// checkpoint update are committed atomically.
 /// </summary>
-public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
+public sealed class ProjectionWorker : ProjectionWorkerBase
 {
-    private static readonly TimeSpan MinErrorDelay = TimeSpan.FromSeconds(5);
-
     private readonly IProjectionHandler _handler;
-    private readonly NpgsqlDataSource _dataSource;
-    private readonly ILogger<ProjectionWorker> _logger;
-    private readonly ProjectionWorkerOptions _options;
-    private readonly ScopeFilter _scopeFilter;
-    private readonly string _projectionName;
     private readonly Channel<ReplayRequest> _replayChannel = Channel.CreateBounded<ReplayRequest>(1);
 
-    public string ProjectionName => _projectionName;
+    /// <inheritdoc />
+    protected override IReadOnlyCollection<string> EventTypes => _handler.EventTypes;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ProjectionWorker"/> class.
@@ -44,23 +39,15 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
         ILogger<ProjectionWorker> logger,
         ProjectionWorkerOptions? options = null,
         ScopeFilter? scopeFilter = null)
+        : base(
+            handlerName: (handler ?? throw new ArgumentNullException(nameof(handler))).Name,
+            dataSource: dataSource ?? throw new ArgumentNullException(nameof(dataSource)),
+            logger: logger ?? throw new ArgumentNullException(nameof(logger)),
+            options: options ?? new ProjectionWorkerOptions(),
+            scopeFilter: scopeFilter ?? ScopeFilter.All())
     {
-        ArgumentNullException.ThrowIfNull(handler);
-        ArgumentNullException.ThrowIfNull(dataSource);
-        ArgumentNullException.ThrowIfNull(logger);
-
         _handler = handler;
-        _dataSource = dataSource;
-        _logger = logger;
-        _options = options ?? new ProjectionWorkerOptions();
-        _scopeFilter = scopeFilter ?? ScopeFilter.All();
-        _projectionName = _scopeFilter.IsAll
-            ? handler.Name
-            : _scopeFilter.Scope!.Scope == ScopeType.Platform
-                ? $"{handler.Name}@Platform"
-                : $"{handler.Name}@Tenant:{_scopeFilter.Scope!.TenantId}";
-
-        ValidateOptions(_options);
+        ValidateOptions(options ?? new ProjectionWorkerOptions());
     }
 
     /// <summary>
@@ -72,375 +59,47 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
         await _replayChannel.Writer.WriteAsync(new ReplayRequest(), ct);
     }
 
-    /// <summary>
-    /// Returns the current lag snapshot (checkpoint, latest sequence_id, lag) for this projection.
-    /// </summary>
-    /// <param name="ct">A cancellation token.</param>
-    /// <returns>A lag snapshot with the projection name, checkpoint, latest sequence_id, and lag.</returns>
-    public async Task<ProjectionLagSnapshot> GetLagSnapshotAsync(CancellationToken ct = default)
+    /// <inheritdoc />
+    protected override bool TryDequeueReplayRequest() =>
+        _replayChannel.Reader.TryRead(out _);
+
+    /// <inheritdoc />
+    protected override async Task OnReplayRequestedAsync(CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        if (_scopeFilter.IsAll)
-            await conn.SetAllScopesAsync(ct);
-        else
-            await conn.SetScopeAsync(_scopeFilter.Scope!, ct);
-
-        var checkpoint = await LoadCheckpointAsync(conn, ct);
-        var latestSequenceId = await LoadLatestRelevantSequenceIdAsync(conn, ct);
-        var lag = latestSequenceId > checkpoint ? latestSequenceId - checkpoint : 0L;
-
-        return new ProjectionLagSnapshot(_projectionName, checkpoint, latestSequenceId, lag);
-    }
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        _logger.LogInformation("ProjectionWorker [{Name}] started.", _projectionName);
-
-        while (!stoppingToken.IsCancellationRequested)
+        if (_handler is IReplayableProjection replayable)
         {
-            if (_replayChannel.Reader.TryRead(out _))
-            {
-                _logger.LogInformation(
-                    "ProjectionWorker [{Name}] replay requested, resetting projection state.",
-                    _projectionName);
-
-                await ResetProjectionStateAsync(stoppingToken);
-
-                if (_handler is IReplayableProjection replayable)
-                {
-                    await replayable.PrepareReplayAsync(stoppingToken);
-                }
-            }
-
-            try
-            {
-                var processed = await ProcessBatchAsync(stoppingToken);
-                if (processed < _options.BatchSize)
-                {
-                    await Task.Delay(_options.PollInterval, stoppingToken);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in ProjectionWorker [{Name}]", _projectionName);
-
-                var errorDelay = _options.PollInterval < MinErrorDelay ? MinErrorDelay : _options.PollInterval;
-                await Task.Delay(errorDelay, stoppingToken);
-            }
+            await replayable.PrepareReplayAsync(ct);
         }
-
-        _logger.LogInformation("ProjectionWorker [{Name}] stopped.", _projectionName);
     }
 
-    /// <summary>
-    /// Loads the next batch of visible events, applies each through the handler within a transaction,
-    /// and updates the checkpoint. Returns the number of events processed.
-    /// </summary>
-    private async Task<int> ProcessBatchAsync(CancellationToken ct)
-    {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var loadTx = await conn.BeginTransactionAsync(ct);
-        if (_scopeFilter.IsAll)
-            await conn.SetAllScopesAsync(ct);
-        else
-            await conn.SetScopeAsync(_scopeFilter.Scope!, ct);
-
-        var checkpoint = await LoadCheckpointAsync(conn, ct);
-        var changes = await LoadChangesAsync(conn, checkpoint, ct);
-        await loadTx.CommitAsync(ct);
-
-        foreach (var change in changes)
-        {
-            await using var tx = await conn.BeginTransactionAsync(ct);
-            try
-            {
-                await _handler.HandleAsync(change, conn, tx, ct);
-                await ClearFailureAsync(conn, tx, change.SequenceId, ct);
-                await SaveCheckpointAsync(conn, tx, change.SequenceId, ct);
-                await tx.CommitAsync(ct);
-            }
-            catch (Exception ex)
-            {
-                await tx.RollbackAsync(ct);
-
-                var movedToDeadLetter = await RegisterFailureAsync(conn, change, ex, ct);
-                if (movedToDeadLetter)
-                {
-                    await using var skipTx = await conn.BeginTransactionAsync(ct);
-                    await SaveCheckpointAsync(conn, skipTx, change.SequenceId, ct);
-                    await skipTx.CommitAsync(ct);
-                    continue;
-                }
-
-                throw;
-            }
-        }
-
-        return changes.Count;
-    }
-
-    /// <summary>
-    /// Reads the last processed sequence_id for this projection from <c>papuma_projection_checkpoint</c>.
-    /// </summary>
-    private async Task<long> LoadCheckpointAsync(NpgsqlConnection conn, CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT last_sequence_id
-            FROM papuma_projection_checkpoint
-            WHERE projection_name = @name
-            """;
-        cmd.Parameters.AddWithValue("name", _projectionName);
-
-        var result = await cmd.ExecuteScalarAsync(ct);
-        return result is long id ? id : 0L;
-    }
-
-    /// <summary>
-    /// Loads non-redacted, visible events from <c>papuma_event_feed</c> matching the handler's event types,
-    /// skipping entries that are currently in retry backoff.
-    /// </summary>
-    private async Task<List<ChangeRecord>> LoadChangesAsync(
-        NpgsqlConnection conn,
-        long fromSequenceId,
-        CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT sequence_id, kind, event_id, scope, tenant_id, entity, entity_id, event_type, version,
-                   correlation_id, causation_id, actor_id, payload::text, occurred_at
-            FROM papuma_event_feed
-            WHERE sequence_id > @lastSeen
-              AND (@scope IS NULL OR scope = @scope)
-              AND (
-                  @scope IS NULL
-                  OR
-                  @scope <> 'Tenant'
-                  OR
-                  tenant_id = @tenantId
-              )
-              AND redacted = FALSE
-              AND event_type = ANY(@eventTypes)
-              AND xmin::text::bigint < pg_snapshot_xmin(pg_current_snapshot())::text::bigint
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM papuma_projection_failures pf
-                  WHERE pf.projection_name = @name
-                    AND pf.sequence_id = papuma_event_feed.sequence_id
-                    AND (
-                        pf.attempts >= @maxAttempts
-                        OR pf.next_retry_at > NOW())
-              )
-            ORDER BY sequence_id
-            LIMIT @batchSize
-            """;
-
-        cmd.Parameters.AddWithValue("lastSeen", fromSequenceId);
-        cmd.Parameters.AddWithValue("scope", (object?)_scopeFilter.Scope?.Scope.ToString() ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("tenantId", (object?)_scopeFilter.Scope?.TenantId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("name", _projectionName);
-        cmd.Parameters.AddWithValue("maxAttempts", _options.MaxAttemptsPerEvent);
-        cmd.Parameters.AddWithValue("eventTypes", _handler.EventTypes.ToArray());
-        cmd.Parameters.AddWithValue("batchSize", _options.BatchSize);
-
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        return await ChangeRecordMapper.ReadAllAsync(reader, ct);
-    }
-
-    /// <summary>
-    /// Returns the highest visible sequence_id that matches the handler's event types, used for lag calculation.
-    /// </summary>
-    private async Task<long> LoadLatestRelevantSequenceIdAsync(NpgsqlConnection conn, CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT COALESCE(MAX(sequence_id), 0)
-            FROM papuma_event_feed
-            WHERE (@scope IS NULL OR scope = @scope)
-              AND (
-                  @scope IS NULL
-                  OR
-                  @scope <> 'Tenant'
-                  OR
-                  tenant_id = @tenantId
-              )
-              AND redacted = FALSE
-              AND event_type = ANY(@eventTypes)
-              AND xmin::text::bigint < pg_snapshot_xmin(pg_current_snapshot())::text::bigint
-            """;
-
-        cmd.Parameters.AddWithValue("scope", (object?)_scopeFilter.Scope?.Scope.ToString() ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("tenantId", (object?)_scopeFilter.Scope?.TenantId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("eventTypes", _handler.EventTypes.ToArray());
-
-        var result = await cmd.ExecuteScalarAsync(ct);
-        return result is long latestSequenceId ? latestSequenceId : 0L;
-    }
-
-    /// <summary>
-    /// Persists the checkpoint for this projection within the handler transaction, using upsert semantics.
-    /// </summary>
-    private async Task SaveCheckpointAsync(
-        NpgsqlConnection conn,
-        NpgsqlTransaction tx,
-        long sequenceId,
-        CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = """
-            INSERT INTO papuma_projection_checkpoint (projection_name, last_sequence_id, updated_at)
-            VALUES (@name, @sequenceId, NOW())
-            ON CONFLICT (projection_name)
-            DO UPDATE SET last_sequence_id = @sequenceId, updated_at = NOW()
-            """;
-        cmd.Parameters.AddWithValue("name", _projectionName);
-        cmd.Parameters.AddWithValue("sequenceId", sequenceId);
-
-        await cmd.ExecuteNonQueryAsync(ct);
-    }
-
-    /// <summary>
-    /// Removes any failure record for this event after successful processing.
-    /// </summary>
-    private async Task ClearFailureAsync(
-        NpgsqlConnection conn,
-        NpgsqlTransaction tx,
-        long sequenceId,
-        CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = """
-            DELETE FROM papuma_projection_failures
-            WHERE projection_name = @name
-              AND sequence_id = @sequenceId
-            """;
-        cmd.Parameters.AddWithValue("name", _projectionName);
-        cmd.Parameters.AddWithValue("sequenceId", sequenceId);
-
-        await cmd.ExecuteNonQueryAsync(ct);
-    }
-
-    /// <summary>
-    /// Records or increments a failure for the given event with exponential backoff. Returns true when max retries exceeded.
-    /// </summary>
-    private async Task<bool> RegisterFailureAsync(
-        NpgsqlConnection conn,
+    /// <inheritdoc />
+    protected override async Task ProcessEventAsync(
         ChangeRecord change,
-        Exception ex,
+        NpgsqlConnection conn,
         CancellationToken ct)
     {
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO papuma_projection_failures
-                (projection_name, sequence_id, event_type, attempts, last_error, next_retry_at)
-            VALUES
-                (@name, @sequenceId, @eventType, 1, @error,
-                 NOW() + LEAST(
-                     @baseDelay * POWER(2, 0),
-                     @maxDelay
-                 ) * INTERVAL '1 second')
-            ON CONFLICT (projection_name, sequence_id)
-            DO UPDATE SET
-                attempts = papuma_projection_failures.attempts + 1,
-                last_error = EXCLUDED.last_error,
-                next_retry_at = NOW() + LEAST(
-                    @baseDelay * POWER(2, papuma_projection_failures.attempts),
-                    @maxDelay
-                ) * INTERVAL '1 second',
-                updated_at = NOW()
-            RETURNING attempts
-            """;
-
-        cmd.Parameters.AddWithValue("name", _projectionName);
-        cmd.Parameters.AddWithValue("sequenceId", change.SequenceId);
-        cmd.Parameters.AddWithValue("eventType", change.EventType);
-        cmd.Parameters.AddWithValue("error", $"{ex.GetType().Name}: {ex.Message}");
-        cmd.Parameters.AddWithValue("baseDelay", _options.BaseRetryDelay.TotalSeconds);
-        cmd.Parameters.AddWithValue("maxDelay", _options.MaxRetryDelay.TotalSeconds);
-
-        var attempts = (int)(await cmd.ExecuteScalarAsync(ct) ?? 1);
-        return attempts >= _options.MaxAttemptsPerEvent;
-    }
-
-    /// <summary>
-    /// Resets the projection's checkpoint to 0 and clears all failure records for a full replay.
-    /// </summary>
-    private async Task ResetProjectionStateAsync(CancellationToken ct)
-    {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        if (_scopeFilter.IsAll)
-            await conn.SetAllScopesAsync(ct);
-        else
-            await conn.SetScopeAsync(_scopeFilter.Scope!, ct);
-
-        await using (var checkpointCmd = conn.CreateCommand())
+        try
         {
-            checkpointCmd.Transaction = tx;
-            checkpointCmd.CommandText = """
-                INSERT INTO papuma_projection_checkpoint (projection_name, last_sequence_id, updated_at)
-                VALUES (@name, 0, NOW())
-                ON CONFLICT (projection_name)
-                DO UPDATE SET last_sequence_id = 0, updated_at = NOW()
-                """;
-            checkpointCmd.Parameters.AddWithValue("name", _projectionName);
-            await checkpointCmd.ExecuteNonQueryAsync(ct);
+            await _handler.HandleAsync(change, conn, tx, ct);
+            await ClearFailureAsync(conn, tx, change.SequenceId, ct);
+            await SaveCheckpointAsync(conn, tx, change.SequenceId, ct);
+            await tx.CommitAsync(ct);
         }
-
-        await using (var failuresCmd = conn.CreateCommand())
+        catch (Exception ex)
         {
-            failuresCmd.Transaction = tx;
-            failuresCmd.CommandText = """
-                DELETE FROM papuma_projection_failures
-                WHERE projection_name = @name
-                """;
-            failuresCmd.Parameters.AddWithValue("name", _projectionName);
-            await failuresCmd.ExecuteNonQueryAsync(ct);
-        }
+            await tx.RollbackAsync(ct);
 
-        await tx.CommitAsync(ct);
-    }
+            var movedToDeadLetter = await RegisterFailureAsync(conn, change, ex, ct);
+            if (movedToDeadLetter)
+            {
+                await using var skipTx = await conn.BeginTransactionAsync(ct);
+                await SaveCheckpointAsync(conn, skipTx, change.SequenceId, ct);
+                await skipTx.CommitAsync(ct);
+                return;
+            }
 
-    /// <summary>
-    /// Validates that the configured options fall within acceptable ranges.
-    /// </summary>
-    private static void ValidateOptions(ProjectionWorkerOptions options)
-    {
-        if (options.BatchSize < 1)
-        {
-            throw new ArgumentOutOfRangeException(nameof(options), "BatchSize must be greater than or equal to 1.");
-        }
-
-        if (options.MaxAttemptsPerEvent < 1)
-        {
-            throw new ArgumentOutOfRangeException(nameof(options), "MaxAttemptsPerEvent must be greater than or equal to 1.");
-        }
-
-        if (options.PollInterval < TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(options), "PollInterval must not be negative.");
-        }
-
-        if (options.BaseRetryDelay < TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(options), "BaseRetryDelay must not be negative.");
-        }
-
-        if (options.MaxRetryDelay < TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(options), "MaxRetryDelay must not be negative.");
-        }
-
-        if (options.MaxRetryDelay < options.BaseRetryDelay)
-        {
-            throw new ArgumentOutOfRangeException(nameof(options), "MaxRetryDelay must be greater than or equal to BaseRetryDelay.");
+            throw;
         }
     }
 
