@@ -71,4 +71,33 @@ public static class ScopeConnectionExtensions
             await tenantCmd.ExecuteNonQueryAsync(ct);
         }
     }
+
+    /// <summary>
+    /// Sets <c>app.current_scope = 'All'</c> as a PostgreSQL <c>SET LOCAL</c> session variable
+    /// on the connection for the duration of the active transaction.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This overload is used by background workers that process all scopes
+    /// (i.e. <see cref="ScopeFilter.IsAll"/> is <c>true</c>). Setting the scope to
+    /// <c>'All'</c> satisfies the RLS policy's third condition, which allows unrestricted
+    /// cross-scope reads without requiring a <c>BYPASSRLS</c> database role.
+    /// </para>
+    /// <para>
+    /// <b>Invariant:</b> This method must always be called <em>after</em>
+    /// <c>BeginTransactionAsync</c> and <em>before</em> any data-access statement.
+    /// </para>
+    /// </remarks>
+    /// <param name="connection">The open PostgreSQL connection.</param>
+    /// <param name="ct">A cancellation token.</param>
+    public static async Task SetAllScopesAsync(
+        this NpgsqlConnection connection,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SET LOCAL app.current_scope = 'All'";
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
 }

@@ -32,4 +32,10 @@ public class ScopeConnectionExtensionsTests
         await Assert.ThrowsAsync<ArgumentNullException>(
             () => conn.SetScopeAsync(null!));
     }
+    [Fact]
+    public async Task SetAllScopesAsync_ThrowsForNullConnection()
+    {
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            () => ScopeConnectionExtensions.SetAllScopesAsync(null!));
+    }
 }

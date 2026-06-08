@@ -36,10 +36,10 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        if (!_scopeFilter.IsAll)
-        {
+        if (_scopeFilter.IsAll)
+            await conn.SetAllScopesAsync(ct);
+        else
             await conn.SetScopeAsync(_scopeFilter.Scope!, ct);
-        }
 
         var checkpoint = await LoadCheckpointAsync(conn, ct);
         var latestSequenceId = await LoadLatestRelevantSequenceIdAsync(conn, ct);
@@ -119,10 +119,10 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var loadTx = await conn.BeginTransactionAsync(ct);
-        if (!_scopeFilter.IsAll)
-        {
+        if (_scopeFilter.IsAll)
+            await conn.SetAllScopesAsync(ct);
+        else
             await conn.SetScopeAsync(_scopeFilter.Scope!, ct);
-        }
 
         var checkpoint = await LoadCheckpointAsync(conn, ct);
         var changes = await LoadChangesAsync(conn, checkpoint, ct);

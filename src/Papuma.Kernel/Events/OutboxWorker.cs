@@ -86,10 +86,10 @@ public sealed class OutboxWorker : BackgroundService
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var loadTx = await conn.BeginTransactionAsync(ct);
-        if (!_scopeFilter.IsAll)
-        {
+        if (_scopeFilter.IsAll)
+            await conn.SetAllScopesAsync(ct);
+        else
             await conn.SetScopeAsync(_scopeFilter.Scope!, ct);
-        }
 
         var entries = await LoadEntriesAsync(conn, loadTx, ct);
         await loadTx.CommitAsync(ct);
