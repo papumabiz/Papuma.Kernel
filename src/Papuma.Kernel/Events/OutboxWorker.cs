@@ -135,6 +135,13 @@ public sealed class OutboxWorker : BackgroundService
                     continue;
                 }
 
+                _logger.LogWarning(
+                    ex,
+                    "Outbox entry {OutboxId} failed (attempt {Attempts}/{MaxAttempts}). Will retry.",
+                    entry.OutboxId,
+                    entry.Attempts + 1,
+                    _options.MaxAttemptsPerMessage);
+
                 throw;
             }
         }
