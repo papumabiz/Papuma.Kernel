@@ -225,28 +225,8 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
         cmd.Parameters.AddWithValue("eventTypes", _handler.EventTypes.ToArray());
         cmd.Parameters.AddWithValue("batchSize", _options.BatchSize);
 
-        var records = new List<ChangeRecord>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            records.Add(new ChangeRecord(
-                SequenceId: reader.GetInt64(0),
-                Kind: reader.GetString(1),
-                EventId: reader.IsDBNull(2) ? null : reader.GetGuid(2),
-                Entity: reader.IsDBNull(4) ? null : reader.GetString(4),
-                EntityId: reader.IsDBNull(5) ? null : reader.GetString(5),
-                EventType: reader.GetString(6),
-                Version: reader.IsDBNull(7) ? null : reader.GetInt32(7),
-                CorrelationId: reader.IsDBNull(8) ? null : reader.GetString(8),
-                CausationId: reader.IsDBNull(9) ? null : reader.GetString(9),
-                ActorId: reader.GetString(10),
-                PayloadJson: reader.GetString(11),
-                OccurredAt: reader.GetFieldValue<DateTimeOffset>(12),
-                Scope: Enum.Parse<ScopeType>(reader.GetString(3), ignoreCase: false),
-                TenantId: reader.IsDBNull(4) ? null : reader.GetString(4)));
-        }
-
-        return records;
+        return await ChangeRecordMapper.ReadAllAsync(reader, ct);
     }
 
     /// <summary>
