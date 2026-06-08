@@ -26,18 +26,26 @@ public sealed class ChangeFeedReader
     }
 
     /// <summary>
-    /// Returns all event feed records for a specific entity, ordered by sequence.
+    /// Returns a page of event feed records for a specific entity, ordered by sequence.
     /// </summary>
     /// <param name="scope">The scope context.</param>
     /// <param name="entity">The logical entity name.</param>
     /// <param name="entityId">The entity identifier.</param>
-    /// <param name="limit">The maximum number of records to return.</param>
+    /// <param name="afterSequenceId">
+    /// Cursor for keyset pagination. Pass <c>0</c> (default) to start from the beginning,
+    /// or the <see cref="ChangeRecordPage.NextCursorSequenceId"/> from the previous page to continue.
+    /// </param>
+    /// <param name="limit">The maximum number of records per page.</param>
     /// <param name="ct">A cancellation token.</param>
-    /// <returns>The matching event feed records.</returns>
-    public async Task<IReadOnlyList<ChangeRecord>> GetByEntityAsync(
+    /// <returns>
+    /// A page of matching records. Check <see cref="ChangeRecordPage.HasMore"/> to determine
+    /// whether additional pages are available.
+    /// </returns>
+    public async Task<ChangeRecordPage> GetByEntityAsync(
         ScopeContext scope,
         string entity,
         string entityId,
+        long afterSequenceId = 0,
         int limit = 1000,
         CancellationToken ct = default)
     {
@@ -45,6 +53,11 @@ public sealed class ChangeFeedReader
         InputValidator.ValidateEntity(entity);
         InputValidator.ValidateEntityId(entityId);
         ValidateLimit(limit);
+
+        if (afterSequenceId < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(afterSequenceId), "afterSequenceId must be greater than or equal to 0.");
+        }
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
@@ -58,6 +71,7 @@ public sealed class ChangeFeedReader
             FROM papuma_event_feed
             WHERE entity = @entity
               AND entity_id = @entityId
+              AND sequence_id > @afterSequenceId
               AND (@scope IS NULL OR scope = @scope)
               AND (
                   @scope IS NULL
@@ -72,13 +86,20 @@ public sealed class ChangeFeedReader
 
         cmd.Parameters.AddWithValue("entity", entity);
         cmd.Parameters.AddWithValue("entityId", entityId);
+        cmd.Parameters.AddWithValue("afterSequenceId", afterSequenceId);
         cmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
         cmd.Parameters.AddWithValue("tenantId", (object?)scope.TenantId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("limit", limit);
+        // Request one extra record to detect whether more pages exist.
+        cmd.Parameters.AddWithValue("limit", limit + 1);
 
-        var result = await ReadRecordsAsync(cmd, ct);
+        var all = await ReadRecordsAsync(cmd, ct);
         await tx.CommitAsync(ct);
-        return result;
+
+        var hasMore = all.Count > limit;
+        var records = hasMore ? all.Take(limit).ToList() : (IReadOnlyList<ChangeRecord>)all;
+        var nextCursor = hasMore ? records[^1].SequenceId : (long?)null;
+
+        return new ChangeRecordPage(records, hasMore, nextCursor);
     }
 
     /// <summary>
