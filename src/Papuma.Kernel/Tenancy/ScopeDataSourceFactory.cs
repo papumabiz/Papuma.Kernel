@@ -11,6 +11,13 @@ namespace Papuma.Kernel.Tenancy;
 /// Caches one <see cref="NpgsqlDataSource"/> per tenant for database-per-tenant setups.
 /// Uses an LRU eviction strategy to bound memory usage.
 /// </summary>
+/// <remarks>
+/// <para>
+/// Cache hits (tenant already known) are served lock-free via <see cref="ConcurrentDictionary{TKey,TValue}"/>.
+/// Cache misses and eviction share a single lock so that the factory delegate is called at most once
+/// per tenant and eviction never disposes a data source that is about to be returned to a caller.
+/// </para>
+/// </remarks>
 public sealed class ScopeDataSourceFactory : IScopeDataSourceFactory, IDisposable
 {
     /// <summary>
@@ -21,7 +28,10 @@ public sealed class ScopeDataSourceFactory : IScopeDataSourceFactory, IDisposabl
     private readonly ConcurrentDictionary<string, CacheEntry> _dataSources = new();
     private readonly Func<string, string> _connectionStringResolver;
     private readonly int _maxCacheSize;
-    private readonly Lock _evictionLock = new();
+    // Protects both cache-miss insertion and LRU eviction so that:
+    //   1. The factory delegate is called exactly once per tenant.
+    //   2. Eviction never removes an entry that is being returned to a caller.
+    private readonly Lock _writeLock = new();
     private long _accessCounter;
 
     /// <summary>
@@ -54,22 +64,32 @@ public sealed class ScopeDataSourceFactory : IScopeDataSourceFactory, IDisposabl
                 nameof(scope));
         }
 
+        // Fast path: tenant already cached — no lock needed.
         if (_dataSources.TryGetValue(scope.TenantId, out var existing))
         {
             Interlocked.Exchange(ref existing.LastAccessOrder, Interlocked.Increment(ref _accessCounter));
             return existing.DataSource;
         }
 
-        var entry = _dataSources.GetOrAdd(scope.TenantId, tenantId =>
+        // Slow path: create and insert under lock so the factory is called exactly once
+        // and eviction cannot remove the new entry before it is returned.
+        lock (_writeLock)
         {
-            var connectionString = _connectionStringResolver(tenantId);
-            return new CacheEntry(NpgsqlDataSource.Create(connectionString), Interlocked.Increment(ref _accessCounter));
-        });
+            // Re-check: another thread may have inserted while we waited for the lock.
+            if (_dataSources.TryGetValue(scope.TenantId, out var raceWinner))
+            {
+                Interlocked.Exchange(ref raceWinner.LastAccessOrder, Interlocked.Increment(ref _accessCounter));
+                return raceWinner.DataSource;
+            }
 
-        Interlocked.Exchange(ref entry.LastAccessOrder, Interlocked.Increment(ref _accessCounter));
-        EvictIfNeeded();
+            var connectionString = _connectionStringResolver(scope.TenantId);
+            var entry = new CacheEntry(NpgsqlDataSource.Create(connectionString), Interlocked.Increment(ref _accessCounter));
+            _dataSources[scope.TenantId] = entry;
 
-        return entry.DataSource;
+            EvictIfNeeded();
+
+            return entry.DataSource;
+        }
     }
 
     /// <inheritdoc />
@@ -83,26 +103,18 @@ public sealed class ScopeDataSourceFactory : IScopeDataSourceFactory, IDisposabl
         _dataSources.Clear();
     }
 
+    // Must be called while _writeLock is held.
     private void EvictIfNeeded()
     {
-        if (_dataSources.Count <= _maxCacheSize)
+        while (_dataSources.Count > _maxCacheSize)
         {
-            return;
-        }
+            var oldest = _dataSources
+                .OrderBy(kvp => kvp.Value.LastAccessOrder)
+                .First();
 
-        lock (_evictionLock)
-        {
-            // Re-check inside lock to avoid redundant eviction.
-            while (_dataSources.Count > _maxCacheSize)
+            if (_dataSources.TryRemove(oldest.Key, out var removed))
             {
-                var oldest = _dataSources
-                    .OrderBy(kvp => kvp.Value.LastAccessOrder)
-                    .First();
-
-                if (_dataSources.TryRemove(oldest.Key, out var removed))
-                {
-                    removed.DataSource.Dispose();
-                }
+                removed.DataSource.Dispose();
             }
         }
     }
