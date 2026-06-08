@@ -361,7 +361,7 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
         cmd.Parameters.AddWithValue("name", _projectionName);
         cmd.Parameters.AddWithValue("sequenceId", change.SequenceId);
         cmd.Parameters.AddWithValue("eventType", change.EventType);
-        cmd.Parameters.AddWithValue("error", ex.ToString());
+        cmd.Parameters.AddWithValue("error", $"{ex.GetType().Name}: {ex.Message}");
         cmd.Parameters.AddWithValue("baseDelay", _options.BaseRetryDelay.TotalSeconds);
         cmd.Parameters.AddWithValue("maxDelay", _options.MaxRetryDelay.TotalSeconds);
 
@@ -375,11 +375,11 @@ public sealed class ProjectionWorker : BackgroundService, IProjectionLagProvider
     private async Task ResetProjectionStateAsync(CancellationToken ct)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
         if (!_scopeFilter.IsAll)
         {
             await conn.SetScopeAsync(_scopeFilter.Scope!, ct);
         }
-        await using var tx = await conn.BeginTransactionAsync(ct);
 
         await using (var checkpointCmd = conn.CreateCommand())
         {

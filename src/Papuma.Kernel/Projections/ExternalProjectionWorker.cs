@@ -341,7 +341,7 @@ public sealed class ExternalProjectionWorker : BackgroundService, IProjectionLag
         cmd.Parameters.AddWithValue("name", _projectionName);
         cmd.Parameters.AddWithValue("sequenceId", change.SequenceId);
         cmd.Parameters.AddWithValue("eventType", change.EventType);
-        cmd.Parameters.AddWithValue("error", ex.ToString());
+        cmd.Parameters.AddWithValue("error", $"{ex.GetType().Name}: {ex.Message}");
         cmd.Parameters.AddWithValue("baseDelay", _options.BaseRetryDelay.TotalSeconds);
         cmd.Parameters.AddWithValue("maxDelay", _options.MaxRetryDelay.TotalSeconds);
 

@@ -231,7 +231,7 @@ public sealed class OutboxWorker : BackgroundService
             WHERE outbox_id = @outboxId
             RETURNING attempts
             """;
-        cmd.Parameters.AddWithValue("error", ex.ToString());
+        cmd.Parameters.AddWithValue("error", $"{ex.GetType().Name}: {ex.Message}");
         cmd.Parameters.AddWithValue("baseDelay", _options.BaseRetryDelay.TotalSeconds);
         cmd.Parameters.AddWithValue("maxDelay", _options.MaxRetryDelay.TotalSeconds);
         cmd.Parameters.AddWithValue("outboxId", entry.OutboxId);
