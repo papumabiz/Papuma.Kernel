@@ -48,13 +48,11 @@ public static class ServiceCollectionExtensions
             MaxPayloadSizeBytes = options.MaxPayloadSizeBytes,
         });
 
-        services.AddSingleton<ChangeWriter>(sp =>
-            new ChangeWriter(sp.GetRequiredService<ChangeWriterOptions>()));
+        services.AddSingleton<ChangeWriter>();
 
         services.AddSingleton<ChangeFeedReader>();
 
-        services.AddSingleton<OutboxWriter>(sp =>
-            new OutboxWriter(sp.GetRequiredService<OutboxWriterOptions>()));
+        services.AddSingleton<OutboxWriter>();
 
         services.AddSingleton<SchemaVersionChecker>();
 
