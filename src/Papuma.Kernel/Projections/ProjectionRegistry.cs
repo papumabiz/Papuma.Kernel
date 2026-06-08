@@ -3,6 +3,9 @@
 
 using System.Text.Json;
 
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 using Papuma.Kernel.ChangeFeed;
 
 namespace Papuma.Kernel.Projections;
@@ -10,9 +13,27 @@ namespace Papuma.Kernel.Projections;
 /// <summary>
 /// Routes versioned event payloads to registered projection handlers.
 /// </summary>
+/// <remarks>
+/// Unknown event types or versions are silently skipped with a warning log entry.
+/// This allows rolling deployments where new event types are introduced before all
+/// projections are updated.
+/// </remarks>
 public sealed class ProjectionRegistry
 {
     private readonly Dictionary<(string EventType, int Version), Func<ChangeRecord, CancellationToken, Task>> _handlers = new();
+    private readonly ILogger<ProjectionRegistry> _logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ProjectionRegistry"/> class.
+    /// </summary>
+    /// <param name="logger">
+    /// Optional logger for unknown-event warnings. When <see langword="null"/>,
+    /// a no-op logger is used.
+    /// </param>
+    public ProjectionRegistry(ILogger<ProjectionRegistry>? logger = null)
+    {
+        _logger = logger ?? NullLogger<ProjectionRegistry>.Instance;
+    }
 
     /// <summary>
     /// Registers a versioned handler for an event type.
@@ -37,9 +58,13 @@ public sealed class ProjectionRegistry
 
     /// <summary>
     /// Dispatches a change record to its matching versioned handler.
+    /// Unknown event types or versions are skipped with a warning log entry.
     /// </summary>
     /// <param name="record">The record to dispatch.</param>
     /// <param name="ct">A cancellation token.</param>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when <paramref name="record"/> has no version set (i.e. it is not a Change record).
+    /// </exception>
     public async Task DispatchAsync(ChangeRecord record, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -55,7 +80,13 @@ public sealed class ProjectionRegistry
             return;
         }
 
-        throw new InvalidOperationException(
-            $"No handler registered for event '{record.EventType}' version {version}.");
+        // No handler registered — skip silently and log a warning.
+        // This is expected during rolling deployments when a new event type is introduced
+        // before all projections are updated.
+        _logger.LogWarning(
+            "No handler registered for event '{EventType}' version {Version} (sequence {SequenceId}). Skipping.",
+            record.EventType,
+            version,
+            record.SequenceId);
     }
 }

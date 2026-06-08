@@ -1,6 +1,8 @@
 // Copyright (c) 2026- by Harald Lapp.
 // Licensed under the MIT License. See LICENSE in the repository root for details.
 
+using Microsoft.Extensions.Logging.Abstractions;
+
 using Papuma.Kernel.ChangeFeed;
 using Papuma.Kernel.Projections;
 using Papuma.Kernel.Tenancy;
@@ -39,9 +41,10 @@ public class ProjectionRegistryTests
     }
 
     [Fact]
-    public async Task DispatchAsync_ThrowsWhenNoHandlerIsRegistered()
+    public async Task DispatchAsync_IgnoresUnknownEventType()
     {
-        var registry = new ProjectionRegistry();
+        // Unknown event types are silently skipped to support rolling deployments.
+        var registry = new ProjectionRegistry(NullLogger<ProjectionRegistry>.Instance);
         var record = new ChangeRecord(
             SequenceId: 1,
             Kind: "Change",
@@ -58,9 +61,8 @@ public class ProjectionRegistryTests
             Scope: ScopeType.Tenant,
             TenantId: "acme");
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => registry.DispatchAsync(record));
-
-        Assert.Contains("UserEmailUpdated", exception.Message, StringComparison.Ordinal);
+        // Should complete without throwing.
+        await registry.DispatchAsync(record);
     }
 
     [Fact]
