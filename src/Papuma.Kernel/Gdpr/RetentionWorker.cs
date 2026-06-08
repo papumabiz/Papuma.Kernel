@@ -88,6 +88,10 @@ public sealed class RetentionWorker : BackgroundService
         {
             await conn.SetScopeAsync(_scopeFilter.Scope!, ct);
         }
+        else
+        {
+            await conn.SetAllScopesAsync(ct);
+        }
 
         var deleted = await DeleteRedactedRecordsAsync(conn, tx, cutoff, ct);
 

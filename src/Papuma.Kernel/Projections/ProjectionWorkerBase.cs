@@ -305,6 +305,51 @@ public abstract class ProjectionWorkerBase : BackgroundService, IProjectionLagPr
     }
 
     /// <summary>
+    /// Records or increments a failure for the given event within a transaction, with exponential backoff.
+    /// Returns <c>true</c> when the maximum retry count has been exceeded.
+    /// </summary>
+    protected async Task<bool> RegisterFailureAsync(
+        NpgsqlConnection conn,
+        NpgsqlTransaction tx,
+        ChangeRecord change,
+        Exception ex,
+        CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            INSERT INTO papuma_projection_failures
+                (projection_name, sequence_id, event_type, attempts, last_error, next_retry_at)
+            VALUES
+                (@name, @sequenceId, @eventType, 1, @error,
+                 NOW() + LEAST(
+                     @baseDelay * POWER(2, 0),
+                     @maxDelay
+                 ) * INTERVAL '1 second')
+            ON CONFLICT (projection_name, sequence_id)
+            DO UPDATE SET
+                attempts = papuma_projection_failures.attempts + 1,
+                last_error = EXCLUDED.last_error,
+                next_retry_at = NOW() + LEAST(
+                    @baseDelay * POWER(2, papuma_projection_failures.attempts),
+                    @maxDelay
+                ) * INTERVAL '1 second',
+                updated_at = NOW()
+            RETURNING attempts
+            """;
+
+        cmd.Parameters.AddWithValue("name", ProjectionName);
+        cmd.Parameters.AddWithValue("sequenceId", change.SequenceId);
+        cmd.Parameters.AddWithValue("eventType", change.EventType);
+        cmd.Parameters.AddWithValue("error", $"{ex.GetType().Name}: {ex.Message}");
+        cmd.Parameters.AddWithValue("baseDelay", _options.BaseRetryDelay.TotalSeconds);
+        cmd.Parameters.AddWithValue("maxDelay", _options.MaxRetryDelay.TotalSeconds);
+
+        var attempts = (int)(await cmd.ExecuteScalarAsync(ct) ?? 1);
+        return attempts >= _options.MaxAttemptsPerEvent;
+    }
+
+    /// <summary>
     /// Records or increments a failure for the given event with exponential backoff.
     /// Returns <c>true</c> when the maximum retry count has been exceeded.
     /// </summary>

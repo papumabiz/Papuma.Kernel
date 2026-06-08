@@ -90,12 +90,16 @@ public sealed class ProjectionWorker : ProjectionWorkerBase
         {
             await tx.RollbackAsync(ct);
 
-            var movedToDeadLetter = await RegisterFailureAsync(conn, change, ex, ct);
+            await using var failTx = await conn.BeginTransactionAsync(ct);
+            var movedToDeadLetter = await RegisterFailureAsync(conn, failTx, change, ex, ct);
             if (movedToDeadLetter)
             {
-                await using var skipTx = await conn.BeginTransactionAsync(ct);
-                await SaveCheckpointAsync(conn, skipTx, change.SequenceId, ct);
-                await skipTx.CommitAsync(ct);
+                await SaveCheckpointAsync(conn, failTx, change.SequenceId, ct);
+            }
+            await failTx.CommitAsync(ct);
+
+            if (movedToDeadLetter)
+            {
                 return;
             }
 

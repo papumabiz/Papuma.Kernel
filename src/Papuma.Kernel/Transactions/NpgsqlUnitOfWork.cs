@@ -75,10 +75,9 @@ public sealed class NpgsqlUnitOfWork : IUnitOfWork
 
                 return; // Success
             }
-            catch (NpgsqlException ex) when (
+            catch (Exception ex) when (
                 attempt < _options.MaxRetries &&
-                ex.SqlState is not null &&
-                TransientSqlStates.Contains(ex.SqlState))
+                IsTransient(ex))
             {
                 try { await tx.RollbackAsync(ct); }
                 catch (Exception rollbackEx)
@@ -91,8 +90,8 @@ public sealed class NpgsqlUnitOfWork : IUnitOfWork
                 var jitter = TimeSpan.FromMilliseconds(Random.Shared.Next(0, 50));
 
                 _logger?.LogWarning(
-                    "Transient DB error (SqlState={SqlState}, attempt {Attempt}/{Max}), retrying in {Delay}ms.",
-                    ex.SqlState, attempt, _options.MaxRetries, (delay + jitter).TotalMilliseconds);
+                    "Transient DB error (attempt {Attempt}/{Max}), retrying in {Delay}ms.",
+                    attempt, _options.MaxRetries, (delay + jitter).TotalMilliseconds);
 
                 await Task.Delay(delay + jitter, ct);
             }
@@ -107,5 +106,25 @@ public sealed class NpgsqlUnitOfWork : IUnitOfWork
                 throw;
             }
         }
+    }
+
+    private static bool IsTransient(Exception ex)
+    {
+        if (ex is NpgsqlException npgsqlEx && npgsqlEx.SqlState is not null)
+        {
+            return TransientSqlStates.Contains(npgsqlEx.SqlState);
+        }
+
+        if (ex is TimeoutException)
+        {
+            return true;
+        }
+
+        if (ex is IOException)
+        {
+            return true;
+        }
+
+        return false;
     }
 }

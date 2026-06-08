@@ -122,25 +122,35 @@ public sealed class OutboxWorker : BackgroundService
             }
             catch (Exception ex)
             {
-                await using var tx = await conn.BeginTransactionAsync(ct);
-                var deadLettered = await RegisterFailureAsync(conn, tx, entry, ex, ct);
-                await tx.CommitAsync(ct);
-
-                if (deadLettered)
+                try
                 {
+                    await using var tx = await conn.BeginTransactionAsync(ct);
+                    var deadLettered = await RegisterFailureAsync(conn, tx, entry, ex, ct);
+                    await tx.CommitAsync(ct);
+
+                    if (deadLettered)
+                    {
+                        _logger.LogWarning(
+                            ex,
+                            "Outbox entry {OutboxId} reached the maximum retry count and was dead-lettered.",
+                            entry.OutboxId);
+                        continue;
+                    }
+
                     _logger.LogWarning(
                         ex,
-                        "Outbox entry {OutboxId} reached the maximum retry count and was dead-lettered.",
-                        entry.OutboxId);
-                    continue;
+                        "Outbox entry {OutboxId} failed (attempt {Attempts}/{MaxAttempts}). Will retry.",
+                        entry.OutboxId,
+                        entry.Attempts + 1,
+                        _options.MaxAttemptsPerMessage);
                 }
-
-                _logger.LogWarning(
-                    ex,
-                    "Outbox entry {OutboxId} failed (attempt {Attempts}/{MaxAttempts}). Will retry.",
-                    entry.OutboxId,
-                    entry.Attempts + 1,
-                    _options.MaxAttemptsPerMessage);
+                catch (Exception innerEx)
+                {
+                    _logger.LogError(
+                        innerEx,
+                        "Failed to track failure for outbox entry {OutboxId}. Connection may be broken.",
+                        entry.OutboxId);
+                }
 
                 throw;
             }

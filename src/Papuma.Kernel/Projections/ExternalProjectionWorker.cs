@@ -64,17 +64,21 @@ public sealed class ExternalProjectionWorker : ProjectionWorkerBase
         }
         catch (Exception ex)
         {
-            var movedToDeadLetter = await RegisterFailureAsync(conn, change, ex, ct);
+            await using var failTx = await conn.BeginTransactionAsync(ct);
+            var movedToDeadLetter = await RegisterFailureAsync(conn, failTx, change, ex, ct);
             if (movedToDeadLetter)
             {
-                await using var tx = await conn.BeginTransactionAsync(ct);
-                await SaveCheckpointAsync(conn, tx, change.SequenceId, ct);
-                await tx.CommitAsync(ct);
+                await SaveCheckpointAsync(conn, failTx, change.SequenceId, ct);
 
                 Logger.LogWarning(
                     ex,
                     "External projection entry {SequenceId} reached the maximum retry count and was dead-lettered.",
                     change.SequenceId);
+            }
+            await failTx.CommitAsync(ct);
+
+            if (movedToDeadLetter)
+            {
                 return;
             }
 
