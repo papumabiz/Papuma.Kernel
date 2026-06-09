@@ -188,18 +188,28 @@ public sealed class OutboxWorker : BackgroundService
 
         var entries = new List<OutboxEntry>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        // Resolve ordinals once — avoids a dictionary lookup on every GetXxx call inside the loop.
+        var colOutboxId   = reader.GetOrdinal("outbox_id");
+        var colScope      = reader.GetOrdinal("scope");
+        var colTenantId   = reader.GetOrdinal("tenant_id");
+        var colEventId    = reader.GetOrdinal("event_id");
+        var colEventType  = reader.GetOrdinal("event_type");
+        var colPayload    = reader.GetOrdinal("payload");
+        var colAttempts   = reader.GetOrdinal("attempts");
+
         while (await reader.ReadAsync(ct))
         {
-            var scope = Enum.Parse<ScopeType>(reader.GetString(1), ignoreCase: false);
-            var tenantId = reader.IsDBNull(2) ? null : reader.GetString(2);
+            var scopeType = Enum.Parse<ScopeType>(reader.GetString(colScope), ignoreCase: false);
+            var tenantId  = reader.IsDBNull(colTenantId) ? null : reader.GetString(colTenantId);
 
             entries.Add(new OutboxEntry(
-                OutboxId: reader.GetInt64(0),
-                Scope: scope == ScopeType.Platform ? ScopeContext.Platform() : ScopeContext.Tenant(tenantId!),
-                EventId: reader.GetGuid(3),
-                EventType: reader.GetString(4),
-                PayloadJson: reader.GetString(5),
-                Attempts: reader.GetInt32(6)));
+                OutboxId:    reader.GetInt64(colOutboxId),
+                Scope:       scopeType == ScopeType.Platform ? ScopeContext.Platform() : ScopeContext.Tenant(tenantId!),
+                EventId:     reader.GetGuid(colEventId),
+                EventType:   reader.GetString(colEventType),
+                PayloadJson: reader.GetString(colPayload),
+                Attempts:    reader.GetInt32(colAttempts)));
         }
 
         return entries;

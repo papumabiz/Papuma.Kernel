@@ -332,16 +332,27 @@ public sealed class NpgsqlSensitiveDataStore : ISensitiveDataStore, ISensitiveDa
             return null;
         }
 
+        // Resolve ordinals once — avoids a dictionary lookup on every GetXxx call.
+        var colVersion       = reader.GetOrdinal("version");
+        var colSchemaVersion = reader.GetOrdinal("schema_version");
+        var colPayload       = reader.GetOrdinal("payload");
+        var colRedacted      = reader.GetOrdinal("redacted");
+        var colDeleted       = reader.GetOrdinal("deleted");
+        var colLegalHold     = reader.GetOrdinal("legal_hold");
+        var colActorId       = reader.GetOrdinal("actor_id");
+        var colCreatedAt     = reader.GetOrdinal("created_at");
+        var colReason        = reader.GetOrdinal("reason");
+
         return new LatestRow(
-            Version: reader.GetInt32(0),
-            SchemaVersion: reader.GetInt32(1),
-            PayloadJson: reader.GetString(2),
-            Redacted: reader.GetBoolean(3),
-            Deleted: reader.GetBoolean(4),
-            LegalHold: reader.GetBoolean(5),
-            ActorId: reader.GetString(6),
-            CreatedAt: reader.GetFieldValue<DateTimeOffset>(7),
-            Reason: reader.IsDBNull(8) ? null : reader.GetString(8));
+            Version:       reader.GetInt32(colVersion),
+            SchemaVersion: reader.GetInt32(colSchemaVersion),
+            PayloadJson:   reader.GetString(colPayload),
+            Redacted:      reader.GetBoolean(colRedacted),
+            Deleted:       reader.GetBoolean(colDeleted),
+            LegalHold:     reader.GetBoolean(colLegalHold),
+            ActorId:       reader.GetString(colActorId),
+            CreatedAt:     reader.GetFieldValue<DateTimeOffset>(colCreatedAt),
+            Reason:        reader.IsDBNull(colReason) ? null : reader.GetString(colReason));
     }
 
     private static async Task<LatestRow> RequireLatestRowForMutationAsync(
