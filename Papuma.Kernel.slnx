@@ -7,4 +7,9 @@
     <Project Path="tests/Papuma.Kernel.Tests/Papuma.Kernel.Tests.csproj" />
     <Project Path="tests/Papuma.Kernel.AspNetCore.Tests/Papuma.Kernel.AspNetCore.Tests.csproj" />
   </Folder>
+  <Folder Name="/vnext/">
+    <Project Path="src/Papuma.Kernel.Next/Papuma.Kernel.Next.csproj" />
+    <Project Path="src/Papuma.Kernel.Next.AspNetCore/Papuma.Kernel.Next.AspNetCore.csproj" />
+    <Project Path="tests/Papuma.Kernel.Next.Tests/Papuma.Kernel.Next.Tests.csproj" />
+  </Folder>
 </Solution>

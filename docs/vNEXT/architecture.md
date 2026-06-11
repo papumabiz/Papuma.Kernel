@@ -98,7 +98,8 @@ das wäre verfrühte Abstraktion.
 ```sql
 CREATE TABLE papuma.document
 (
-    tenant_id       text        NOT NULL,
+    scope           text        NOT NULL,   -- 'Platform' | 'Tenant' (Scope-Modell aus v1)
+    tenant_id       text        NOT NULL DEFAULT '',  -- leer bei Platform-Scope
     document_type   text        NOT NULL,   -- logischer Aggregatname aus dem Metamodell
     id              text        NOT NULL,
     version         bigint      NOT NULL,   -- optimistische Concurrency, startet bei 1
@@ -107,13 +108,14 @@ CREATE TABLE papuma.document
     created_at      timestamptz NOT NULL DEFAULT now(),
     updated_at      timestamptz NOT NULL DEFAULT now(),
 
-    PRIMARY KEY (tenant_id, document_type, id)
+    PRIMARY KEY (scope, tenant_id, document_type, id)
 );
 
 CREATE TABLE papuma.change
 (
     seq             bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    tenant_id       text        NOT NULL,
+    scope           text        NOT NULL,
+    tenant_id       text        NOT NULL DEFAULT '',
     document_type   text        NOT NULL,
     document_id     text        NOT NULL,
     version         bigint      NOT NULL,   -- Dokumentversion NACH der Änderung
@@ -126,8 +128,11 @@ CREATE TABLE papuma.change
 );
 
 CREATE UNIQUE INDEX ux_change_document_version
-    ON papuma.change (tenant_id, document_type, document_id, version);
+    ON papuma.change (scope, tenant_id, document_type, document_id, version);
 ```
+
+Beide Tabellen tragen Row-Level-Security-Policies (inkl. `'All'`-Scope für Worker und
+`FORCE ROW LEVEL SECURITY`); die verbindliche DDL liegt in `SchemaDdl.cs`.
 
 Unique-Keys und Lookup-Spalten pro Dokumenttyp entstehen als Expression-Indizes aus dem
 Metamodell, z. B.:

@@ -20,35 +20,44 @@ Definition of Done. **Eine Phase ist erst fertig, wenn auch die Querschnitts-Che
 
 ---
 
-## Phase 0 — Projektgerüst
+## Phase 0 — Projektgerüst ✅ (2026-06-11)
 
-- [ ] Neue Projektstruktur: `Papuma.Kernel` (Namespaces `Store` / `Changes` /
-      `Processing` / `Model`) + `Papuma.Kernel.AspNetCore` + Testprojekt
-      (Architektur §3); v1-Projekte parallel im Solution-File belassen
-- [ ] `Directory.Build.props` prüfen (net10.0, Nullable, Analyzer)
-- [ ] CI: Build + Tests mit PostgreSQL-18-Testcontainer
-- [ ] Testcontainers-Setup einmalig als Fixture (Datenbank pro Testklasse oder
-      Respawn-Strategie festlegen)
+- [x] Neue Projektstruktur: `Papuma.Kernel.Next` (+ `.AspNetCore`, + Tests) mit
+      `RootNamespace Papuma.Kernel`; Umbenennung auf `Papuma.Kernel` erfolgt in
+      Phase 10 beim v1-Rückbau. v1-Projekte unverändert in der Solution.
+- [x] `Directory.Build.props` geprüft (net10.0, Nullable — unverändert tauglich)
+- [x] CI: `vnext`-Branch in Trigger aufgenommen; Testcontainers nutzt das native
+      Docker der ubuntu-Runner, keine Service-Container nötig
+- [x] Testcontainers-Fixture: ein geteilter `postgres:18-alpine`-Container pro
+      Test-Collection (`PostgresFixture`), inkl. Non-Superuser-Rolle für RLS-Tests.
+      Lokal läuft Podman (`~/.testcontainers.properties`:
+      `docker.host=npipe://./pipe/podman-machine-default`, `ryuk.disabled=true`)
 
-**DoD:** Leere Projekte bauen, ein Dummy-Integrationstest gegen PG-18-Container läuft in CI.
+**DoD erfüllt:** Build grün, Integrationstests laufen lokal gegen PG-18-Container (Podman).
 
-## Phase 1 — Fundament: Tenancy-Ernte + Schema
+## Phase 1 — Fundament: Tenancy-Ernte + Schema ✅ (2026-06-11)
 
 ADRs: [001](adr/adr-001-postgresql-18-only.md) · Ernte: `Tenancy/ScopeContext`,
 `ScopeType`, `ScopeFilter`, `ScopeConnectionExtensions`, `IScopeDataSourceFactory`,
 `ScopeDataSourceFactory`, `Validation/InputValidator`, AspNetCore `ScopeMiddleware` + Extensions
 
-- [ ] Tenancy-Dateien kopieren und anpassen (Namespaces, ggf. Naming `tenant_id`)
-- [ ] Zwei-Schichten-Sicherheitsmodell beibehalten: explizite WHERE-Prädikate +
-      RLS via `SET LOCAL` (Doku-Invarianten aus `ScopeConnectionExtensions` übernehmen)
-- [ ] `EnsureSchemaAsync`: idempotentes DDL für `papuma.document`, `papuma.change`,
-      Checkpoint-/Failure-Tabellen (Definition aus Architektur §4)
-- [ ] RLS-Policies für alle neuen Tabellen (inkl. `'All'`-Scope für Worker)
-- [ ] PG-Versionscheck beim Start: `server_version_num >= 180000`, sonst typisierte
-      Exception (ADR-001)
+- [x] Tenancy-Dateien kopiert (`ScopeContext`, `ScopeType`, `ScopeFilter`,
+      `ScopeConnectionExtensions`, `IScopeDataSourceFactory`, `ScopeDataSourceFactory`,
+      AspNetCore-Middleware; `InputValidator` dokumentenorientiert neu geschrieben).
+      **Ernte-Fix:** v1s `SET LOCAL ... = @param` ist im Extended Protocol ungültig
+      (konnte nie gegen echtes PG gelaufen sein) → ersetzt durch
+      `set_config(..., is_local: true)`.
+- [x] Zwei-Schichten-Sicherheitsmodell beibehalten (explizite Prädikate + RLS);
+      zusätzlich `FORCE ROW LEVEL SECURITY`, damit auch der Table Owner RLS unterliegt
+- [x] `EnsureSchemaAsync`: idempotentes DDL für `papuma.document`, `papuma.change`
+      (inkl. `txid xid8`), `papuma.checkpoint`, `papuma.failure`
+- [x] RLS-Policies für document/change inkl. `'All'`-Scope; checkpoint/failure bewusst
+      ohne RLS (Handler-Infrastruktur ohne Tenant-Daten)
+- [x] PG-Versionscheck in `EnsureSchemaAsync`: `server_version_num >= 180000`, sonst
+      `PostgresVersionNotSupportedException` (ADR-001)
 
-**DoD:** `EnsureSchemaAsync` zweimal hintereinander fehlerfrei; RLS-Test: Tenant A
-sieht Tenant-B-Zeilen nicht, auch ohne WHERE-Prädikat; Versionscheck-Test.
+**DoD erfüllt:** Idempotenz-Test (2× EnsureSchema), 5 RLS-Isolationstests gegen
+Non-Superuser-Rolle (Tenant/Platform/All/ohne Scope/WITH CHECK), Versionscheck-Tests.
 
 ## Phase 2 — Write-Pfad-Spike: Save / Load / Delete + Diff-Engine
 
