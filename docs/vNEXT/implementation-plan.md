@@ -261,6 +261,8 @@ Ernte: `ScopeMiddleware`, `IScopeResolver`, Health-Check-Extensions
       gegen die echte API verifizieren, Typnamen fixieren, Disclaimer entfernen
 - [ ] README + Getting-Started für vNEXT; architecture.md gegen Implementierung
       abgleichen (Drift korrigieren)
+- [ ] [concepts.md](concepts.md) ("Konzepte erklärt") als Tutorial-Rohstoff nutzen
+      und um Erklärstücke aus Phase 8–10 ergänzen
 - [ ] XML-Doku-Durchgang über die öffentliche API (AGENTS.md-Regeln)
 
 **DoD:** Beispiel-App (Registrierungs-Szenario + Notifier) läuft end-to-end gegen
