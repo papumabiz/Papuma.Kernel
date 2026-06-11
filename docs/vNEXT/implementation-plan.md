@@ -302,7 +302,45 @@ grün unter den finalen Projektnamen; Paket packt.
 Alle 11 Phasen umgesetzt, alle 14 ADRs implementiert und durch Integrationstests
 gegen echtes PostgreSQL 18 abgedeckt. Der Reboot ist vollständig.
 
-## Post-1.0-Kandidaten (bei Bedarf, getrieben durch Lag-Metriken)
+## Phase 11 — Observability & Diagnostics (post-1.0, geplant)
+
+Prinzip: **Instrumentierung mit BCL-Primitives im Kernel, kein Vendor-Lock** —
+`System.Diagnostics.Metrics.Meter` + `ActivitySource` + vorhandenes `ILogger`.
+OpenTelemetry, Prometheus, `dotnet-counters` oder App Insights sind *Konsumenten*
+dieser Quellen und werden von der Anwendung verdrahtet
+(`AddMeter("Papuma.Kernel")` / `AddSource("Papuma.Kernel")`); ein eigenes
+OTel-Convenience-Paket nur, falls die Verdrahtung sich als Reibung erweist
+(Doku zuerst, Paket später — AGENTS.md: keine Pakete ohne Not).
+
+- [ ] **Metriken** (Meter `Papuma.Kernel`) — die §14-Grenzen messbar machen:
+      `papuma.feed.lag` als Observable Gauge pro Handler (Change- + Event-Feed,
+      Tag `handler`/`feed`); Counter für verarbeitete Changes/Events, Failures,
+      Poison-Skips, Session-Commits, Writes pro Operation, Konflikte
+      (`ConcurrencyException`, `UniqueKeyViolation`); Histogramme für
+      Handler-Dauer (entlarvt Grenze 1), Zyklus-Dauer, Commit-Dauer
+- [ ] **Tracing** (ActivitySource `Papuma.Kernel`): Spans für Save/Patch/Delete/
+      Append/Rollback (Tags: `document_type`, `operation`, `tenant`, Version) und
+      pro Handler-Invocation (`handler`, `seq`)
+- [ ] **Trace-Kontext-Propagation durch den Feed**: aktiver `traceparent` wird in
+      die Change-/Event-Metadata geschrieben; Handler-Spans verlinken auf den
+      auslösenden Request ("welcher Request hat diese Projektion ausgelöst?")
+- [ ] **Historie-Lese-API** (schließt die ADR-003-Lücke: "zwischenzeitliche Diffs
+      laden" hat noch keine öffentliche API): `session.GetHistoryAsync<T>(id,
+      fromVersion?, toVersion?)` → ChangeRecords pro Dokument (Keyset-Pagination,
+      Ernte: v1 `ChangeFeedReader`-Muster); Grundlage für Konflikt-UIs und Audit
+- [ ] **Failure-Inspektion**: `GetFailuresAsync()` auf beiden Prozessoren
+      (Handler, seq, attempts, last_error, next_retry_at) — die Poison-Liste als
+      API statt nur als Tabelle; optional `RetryFailureAsync(handler, seq)`
+      (Failure-Eintrag löschen → nächster Zyklus versucht erneut)
+- [ ] Doku: Observability-Guide (OTel-Verdrahtung, Dashboards-Empfehlung:
+      Lag pro Handler, Poison-Alarm, Konfliktrate) + concepts.md-Abschnitt
+
+**DoD:** Metriken via `MeterListener` im Test verifiziert (Lag-Gauge, Poison-Counter);
+Trace-Test: Write-Span und Handler-Span teilen Trace-Id über die
+Metadata-Propagation; `GetHistoryAsync` liefert die Diffs eines Konfliktfensters
+(ADR-003-Szenario); Failure-Inspektion + Retry getestet.
+
+## Weitere Post-1.0-Kandidaten (bei Bedarf, getrieben durch Lag-Metriken)
 
 Skalierungsmodell und Begründung: [concepts.md §14](concepts.md).
 
