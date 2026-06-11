@@ -210,6 +210,13 @@ PG-18-Container.
 - [ ] v1-Quellverzeichnisse und -Tests entfernen (`Events/`, `Gdpr/` alt,
       `ChangeFeed/` alt, `Projections/` alt, `Schema/` alt — Tenancy-Originale erst
       jetzt, da vNEXT-Kopien etabliert)
+- [ ] **Rename `.Next` → final**: Ordner/csproj `Papuma.Kernel.Next` →
+      `Papuma.Kernel` (analog AspNetCore + Tests) per `git mv`; Pfade in `slnx` und
+      CI anpassen. Kein Quellcode ändert sich — `RootNamespace` ist seit Phase 0
+      `Papuma.Kernel`.
+- [ ] Packaging reaktivieren: `IsPackable=true`, `PackageId Papuma.Kernel` /
+      `Papuma.Kernel.AspNetCore`, Beschreibung/Tags auf vNEXT aktualisieren —
+      das NuGet-Paket heißt unverändert `Papuma.Kernel`
 - [ ] Solution/CI bereinigen; alte Tutorials unter `docs/tutorial/` als v1 archivieren
       oder entfernen
 - [ ] Version bump, CHANGELOG/Release-Notes ("vNEXT-Reboot, keine Migration")
