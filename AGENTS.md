@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This repository contains `Papuma.Kernel`, a small .NET 10 library for a PostgreSQL-based, event-informed architecture.
+This repository contains `Papuma.Kernel`, a small .NET 10 library for a PostgreSQL-based, document-sourced application kernel (documents as the source of truth, derived change feed, privacy policies — see `docs/vNEXT/architecture.md`). Requires PostgreSQL ≥ 18; integration tests run against a real PostgreSQL 18 container (Testcontainers).
 
 This document defines the working rules for GitHub Copilot and other agents in this workspace.
 

@@ -57,19 +57,16 @@ public static class ScopeConnectionExtensions
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(scope);
 
-        await using (var scopeCmd = connection.CreateCommand())
-        {
-            scopeCmd.CommandText = "SET LOCAL app.current_scope = @scope";
-            scopeCmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
-            await scopeCmd.ExecuteNonQueryAsync(ct);
-        }
-
-        await using (var tenantCmd = connection.CreateCommand())
-        {
-            tenantCmd.CommandText = "SET LOCAL app.current_tenant = @tenantId";
-            tenantCmd.Parameters.AddWithValue("tenantId", scope.TenantId ?? string.Empty);
-            await tenantCmd.ExecuteNonQueryAsync(ct);
-        }
+        // set_config(..., is_local: true) is the parameterizable equivalent of SET LOCAL;
+        // plain SET LOCAL does not accept bind parameters in the extended protocol.
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT set_config('app.current_scope', @scope, true),
+                   set_config('app.current_tenant', @tenantId, true)
+            """;
+        cmd.Parameters.AddWithValue("scope", scope.Scope.ToString());
+        cmd.Parameters.AddWithValue("tenantId", scope.TenantId ?? string.Empty);
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     /// <summary>

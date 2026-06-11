@@ -275,23 +275,32 @@ Registrierungs-Szenario (User + Address + `UserRegistered`-Event) fließt
 NOTIFY-getrieben zu gehosteten Change- und Event-Handlern, gemeinsame
 correlationId über beide Feeds; Options-Validierungstests. 125 Tests grün.
 
-## Phase 10 — v1-Rückbau
+## Phase 10 — v1-Rückbau ✅ (2026-06-12)
 
-- [ ] v1-Quellverzeichnisse und -Tests entfernen (`Events/`, `Gdpr/` alt,
-      `ChangeFeed/` alt, `Projections/` alt, `Schema/` alt — Tenancy-Originale erst
-      jetzt, da vNEXT-Kopien etabliert)
-- [ ] **Rename `.Next` → final**: Ordner/csproj `Papuma.Kernel.Next` →
-      `Papuma.Kernel` (analog AspNetCore + Tests) per `git mv`; Pfade in `slnx` und
-      CI anpassen. Kein Quellcode ändert sich — `RootNamespace` ist seit Phase 0
-      `Papuma.Kernel`.
-- [ ] Packaging reaktivieren: `IsPackable=true`, `PackageId Papuma.Kernel` /
-      `Papuma.Kernel.AspNetCore`, Beschreibung/Tags auf vNEXT aktualisieren —
-      das NuGet-Paket heißt unverändert `Papuma.Kernel`
-- [ ] Solution/CI bereinigen; alte Tutorials unter `docs/tutorial/` als v1 archivieren
-      oder entfernen
-- [ ] Version bump, CHANGELOG/Release-Notes ("vNEXT-Reboot, keine Migration")
+- [x] v1-Quellverzeichnisse und -Tests vollständig entfernt (`src/Papuma.Kernel` alt,
+      `src/Papuma.Kernel.AspNetCore` alt, beide v1-Testprojekte)
+- [x] **Rename `.Next` → final**: Ordner + csproj auf `Papuma.Kernel` /
+      `Papuma.Kernel.AspNetCore` / `Papuma.Kernel.Tests`; `slnx`, CI,
+      `ProjectReference`s und `InternalsVisibleTo` angepasst. Kein Quellcode geändert —
+      `RootNamespace` stimmte seit Phase 0.
+- [x] Packaging reaktiviert: `IsPackable=true`, `PackageId Papuma.Kernel` /
+      `Papuma.Kernel.AspNetCore`, Beschreibung/Tags auf Document-Sourced CQRS;
+      Pack-Smoke-Test erfolgreich (`Papuma.Kernel.1.0.0-preview.1.nupkg`);
+      CI packt jetzt beide Pakete
+- [x] v1-Doku archiviert: `docs/tutorial` + `docs/implementation` → `docs/v1/`;
+      README + AGENTS.md auf vNEXT umgestellt
+- [x] Version 1.0.0-preview.1 + [CHANGELOG.md](../../CHANGELOG.md)
+      ("vNEXT-Reboot, keine Migration")
 
-**DoD:** Repo enthält nur noch vNEXT-Code; Build, Tests, CI grün.
+**DoD erfüllt:** Repo enthält nur noch vNEXT-Code; Build warnungsfrei, alle 125 Tests
+grün unter den finalen Projektnamen; Paket packt.
+
+---
+
+# 🏁 Plan abgeschlossen (2026-06-12)
+
+Alle 11 Phasen umgesetzt, alle 14 ADRs implementiert und durch Integrationstests
+gegen echtes PostgreSQL 18 abgedeckt. Der Reboot ist vollständig.
 
 ---
 

@@ -3,8 +3,8 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>Papuma.Kernel.AspNetCore</PackageId>
-    <Description>Optional ASP.NET Core integration package for Papuma.Kernel — scope resolution middleware, projection lag health checks.</Description>
-    <PackageTags>aspnetcore;multi-tenancy;health-checks;projections</PackageTags>
+    <Description>Optional ASP.NET Core integration for Papuma.Kernel — tenant scope resolution middleware and change feed lag health checks.</Description>
+    <PackageTags>aspnetcore;multi-tenancy;health-checks;change-feed</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

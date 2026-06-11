@@ -3,13 +3,17 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>Papuma.Kernel</PackageId>
-    <Description>PostgreSQL-based event-informed application kernel for .NET 10 — change feed, multi-tenancy, projections, outbox, and GDPR-sensitive data handling.</Description>
-    <PackageTags>postgresql;events;projections;outbox;multi-tenancy;gdpr;change-feed;rls</PackageTags>
+    <Description>PostgreSQL-based document-sourced application kernel for .NET 10 — documents as the source of truth, automatically derived change feed with reversible diffs, privacy policies, schema evolution, event log, and multi-tenancy. Requires PostgreSQL 18+.</Description>
+    <PackageTags>postgresql;documents;cqrs;change-feed;projections;multi-tenancy;gdpr;jsonb</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Papuma.Kernel.Tests" />
   </ItemGroup>
 
   <ItemGroup>
