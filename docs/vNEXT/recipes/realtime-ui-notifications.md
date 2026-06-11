@@ -1,11 +1,9 @@
 # Rezept: Echtzeit-UI-Benachrichtigungen über Dokumentänderungen
 
-Status: Entwurf für späteres Tutorial (2026-06-11)
-
-> ⚠️ vNEXT ist noch nicht implementiert — Typnamen und Signaturen folgen den ADRs
-> ([ADR-009](../adr/adr-009-projections-as-dumb-handlers.md),
-> [ADR-010](../adr/adr-010-feed-consumption.md)) und können sich während der
-> Implementierung noch ändern. Konzept und Schnitt sind verbindlich.
+Status: Verifiziert gegen die implementierte API (Phase 9, 2026-06-11) —
+Typnamen und Signaturen entsprechen `Papuma.Kernel.Processing` / `Papuma.Kernel.Changes`
+([ADR-009](../adr/adr-009-projections-as-dumb-handlers.md),
+[ADR-010](../adr/adr-010-feed-consumption.md)).
 
 ## Szenario
 
@@ -102,9 +100,20 @@ await connection.invoke("watch", "User", userId);
 ## Registrierung
 
 ```csharp
-services.AddPapumaKernel(o => { /* ... */ })
-        .AddChangeHandler<DocumentChangedNotifier>();
+builder.Services
+    .AddPapumaKernel(o =>
+    {
+        o.ConnectionString = builder.Configuration.GetConnectionString("papuma");
+        o.Model(m => m.Document<User>());
+    })
+    .AddChangeHandler<DocumentChangedNotifier>();
+
+builder.Services.AddSignalR();
+builder.Services.AddHealthChecks().AddPapumaChangeFeedLag(maxAllowedLag: 1000);
 ```
+
+Der Bootstrap hostet die Feed-Worker automatisch (NOTIFY-getrieben, Polling als
+Fallback) und legt das Schema beim Start an.
 
 ## Abgrenzung: "wird gerade bearbeitet" (Presence)
 

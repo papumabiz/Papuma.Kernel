@@ -80,12 +80,14 @@ die Schichten sind Namespaces, keine eigenen NuGet-Pakete:
 
 ```text
 Papuma.Kernel
-├── Papuma.Kernel.Store        Dokumente laden/speichern/löschen, Write-Pfad
-├── Papuma.Kernel.Changes      ChangeRecord, Diff-Engine, Policies, Feed-Tabellen
+├── Papuma.Kernel.Store        Dokumente laden/speichern/löschen, Write-Pfad, Session
+├── Papuma.Kernel.Changes      ChangeRecord, Diff-Engine, Policies
+├── Papuma.Kernel.Events       Event-Log: Append, EventFeedProcessor, Retention (ADR-013)
 ├── Papuma.Kernel.Processing   Change-Handler-Engine: Checkpoints, Retry, Rebuild
-└── Papuma.Kernel.Model        Metamodell: Typen, Keys, Policies, Schema-Versionen
+├── Papuma.Kernel.Model        Metamodell: Typen, Keys, Policies, Schema-Versionen
+└── Papuma.Kernel.Hosting      AddPapumaKernel-Bootstrap, gehostete Feed-Worker
 
-Papuma.Kernel.AspNetCore       Tenant-Resolution, Hosting der Processing-Worker
+Papuma.Kernel.AspNetCore       Tenant-Resolution, Change-Feed-Lag-Health-Check
 ```
 
 Die Aufteilung in `Store / Changes / Processing` folgt der Skizze aus chat-1.md
@@ -202,11 +204,14 @@ Operationskatalogs: [ADR-012](adr/adr-012-partial-updates.md).
 
 ### Session = Unit of Work
 
-Eine `DocumentSession` bündelt mehrere Writes in **einer** Postgres-Transaktion:
+Eine `DocumentSession` bündelt mehrere Writes in **einer** Postgres-Transaktion
+(lazy geöffnet; jeder Write läuft unter einem Savepoint, sodass ein typisierter
+Fehlschlag frühere Writes nicht verwirft; Dispose ohne Commit rollt zurück):
 
 ```csharp
-session.Save(user, expectedVersion: 0);      // Registrierung: zwei Aggregate,
-session.Save(address, expectedVersion: 0);   // ein atomarer Commit
+await using var session = store.OpenSession(tenant);
+await session.SaveAsync(user, expectedVersion: 0);      // Registrierung: zwei Aggregate,
+await session.SaveAsync(address, expectedVersion: 0);   // ein atomarer Commit
 await session.CommitAsync();
 ```
 
@@ -331,7 +336,7 @@ eigene Abstraktionsschicht.
 | Fall | Beispiel | Modellierung |
 |------|----------|--------------|
 | Zustandsübergang | `OrderPlaced`, `OrderPaid` | Translator-Handler leitet aus dem Diff ab ([ADR-011](adr/adr-011-no-business-events-in-storage.md)) |
-| Faktum ohne Zustand | `UserLoggedIn`, `EmailSent` | `session.Append(...)` ins append-only **Event-Log** ([ADR-013](adr/adr-013-business-event-log.md)) |
+| Faktum ohne Zustand | `UserLoggedIn`, `EmailSent` | `session.AppendAsync(...)` ins append-only **Event-Log** ([ADR-013](adr/adr-013-business-event-log.md)) |
 | Trigger ("danach X auslösen") | Bestätigungsmail | Handler-Subscription — kein gespeichertes Event |
 
 Das Event-Log (`papuma.event`) teilt Session-Transaktion, Policies, Metamodell und

@@ -57,11 +57,6 @@ public sealed class EventFeedProcessor
         _options.Validate();
         _logger = logger ?? NullLogger<EventFeedProcessor>.Instance;
 
-        if (_handlers.Count == 0)
-        {
-            throw new ArgumentException("At least one event handler is required.", nameof(handlers));
-        }
-
         var duplicate = _handlers.GroupBy(h => h.Name, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1);
         if (duplicate is not null)
         {
@@ -75,6 +70,12 @@ public sealed class EventFeedProcessor
     /// <param name="ct">The cancellation token stopping the loop.</param>
     public async Task RunAsync(CancellationToken ct)
     {
+        if (_handlers.Count == 0)
+        {
+            _logger.LogInformation("Event feed processor idle — no handlers registered.");
+            return;
+        }
+
         await using var listenConn = await _dataSource.OpenConnectionAsync(ct);
         await using (var listenCmd = listenConn.CreateCommand())
         {

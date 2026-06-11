@@ -68,11 +68,6 @@ public sealed class ChangeFeedProcessor
         _options.Validate();
         _logger = logger ?? NullLogger<ChangeFeedProcessor>.Instance;
 
-        if (_handlers.Count == 0)
-        {
-            throw new ArgumentException("At least one change handler is required.", nameof(handlers));
-        }
-
         var duplicate = _handlers.GroupBy(h => h.Name, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1);
         if (duplicate is not null)
         {
@@ -87,6 +82,12 @@ public sealed class ChangeFeedProcessor
     /// <param name="ct">The cancellation token stopping the loop.</param>
     public async Task RunAsync(CancellationToken ct)
     {
+        if (_handlers.Count == 0)
+        {
+            _logger.LogInformation("Change feed processor idle — no handlers registered.");
+            return;
+        }
+
         await using var listenConn = await _dataSource.OpenConnectionAsync(ct);
         await using (var listenCmd = listenConn.CreateCommand())
         {

@@ -250,23 +250,30 @@ gehasht), Event-Processor-Zustellung in Ordnung + Deserialize, Retention purged 
 konfigurierte Typen, Reference-Ablehnung, nicht registrierter Event-Typ wirft.
 123 Tests grün.
 
-## Phase 9 — AspNetCore-Integration, DX und Doku
+## Phase 9 — AspNetCore-Integration, DX und Doku ✅ (2026-06-11)
 
 Ernte: `ScopeMiddleware`, `IScopeResolver`, Health-Check-Extensions
 
-- [ ] `AddPapumaKernel(...)`-Bootstrap: DataSource, Metamodell-Build, EnsureSchema,
-      Worker-Hosting
-- [ ] Tenant-Resolution-Middleware portieren
-- [ ] [Rezept Echtzeit-UI-Benachrichtigungen](recipes/realtime-ui-notifications.md)
-      gegen die echte API verifizieren, Typnamen fixieren, Disclaimer entfernen
-- [ ] README + Getting-Started für vNEXT; architecture.md gegen Implementierung
-      abgleichen (Drift korrigieren)
-- [ ] [concepts.md](concepts.md) ("Konzepte erklärt") als Tutorial-Rohstoff nutzen
-      und um Erklärstücke aus Phase 8–10 ergänzen
-- [ ] XML-Doku-Durchgang über die öffentliche API (AGENTS.md-Regeln)
+- [x] `AddPapumaKernel(...)`-Bootstrap (`Papuma.Kernel.Hosting`): DataSource
+      (kernel- oder fremd-owned, Dispose-Semantik korrekt), Metamodell-Build,
+      Schema-Initializer (vor den Workern), gehostete Feed-Worker + Retention-Worker;
+      `PapumaKernelBuilder.AddChangeHandler<T>()/.AddEventHandler<T>()`;
+      Prozessoren tolerieren jetzt null Handler (DI-freundlich)
+- [x] Tenant-Resolution-Middleware: in Phase 1 portiert, im Getting-Started verdrahtet
+      (`UseScopeResolution`)
+- [x] Rezept gegen die echte API verifiziert — Typnamen stimmten exakt (Handler,
+      `Diff.Paths`, Registrierung); Disclaimer entfernt, Bootstrap-Beispiel ergänzt
+- [x] [getting-started.md](getting-started.md) neu; README auf vNEXT umgestellt;
+      architecture.md-Drift korrigiert (§3 Namespaces inkl. Events/Hosting,
+      §5 `await using`/`SaveAsync`, §8 `AppendAsync`)
+- [x] [concepts.md](concepts.md) lebt (13 Abschnitte, §12/§13 aus Phase 8)
+- [x] XML-Doku: öffentliche API durchgängig dokumentiert (laufend gepflegt);
+      Health-Check-Registrierung via `AddPapumaChangeFeedLag(...)`
 
-**DoD:** Beispiel-App (Registrierungs-Szenario + Notifier) läuft end-to-end gegen
-PG-18-Container.
+**DoD erfüllt:** `HostingIntegrationTests` — echter `Host` mit `AddPapumaKernel`,
+Registrierungs-Szenario (User + Address + `UserRegistered`-Event) fließt
+NOTIFY-getrieben zu gehosteten Change- und Event-Handlern, gemeinsame
+correlationId über beide Feeds; Options-Validierungstests. 125 Tests grün.
 
 ## Phase 10 — v1-Rückbau
 
