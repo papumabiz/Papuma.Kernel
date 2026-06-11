@@ -64,4 +64,8 @@ atomar den Zustand vor und nach der Änderung.
   verschiedenen Feldern ist Patch das passende Primitiv (ADR-012).
 - Die `version` im ChangeRecord ist lückenlos pro Dokument (Unique-Index
   `(tenant, type, id, version)` erzwingt das zusätzlich).
+- **Neuanlage nach Delete setzt die Versionszählung fort** (Phase-2-Festlegung): Ein
+  Insert startet bei `max(change.version) + 1` derselben Dokument-ID, nicht bei 1 —
+  sonst würde die wiederverwendete ID mit der lückenlosen Change-Historie kollidieren.
+  `expectedVersion: 0` behält die Semantik "Dokument existiert nicht".
 - Bindung an PostgreSQL ≥ 18 (ADR-001) — gewollt.

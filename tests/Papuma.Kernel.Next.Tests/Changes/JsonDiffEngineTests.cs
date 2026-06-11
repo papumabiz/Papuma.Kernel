@@ -94,6 +94,22 @@ public sealed class JsonDiffEngineTests
         Assert.All(diff.Entries.Values, e => Assert.False(e.HasNew));
     }
 
+    [Fact]
+    public void Diff_TypeChangeAtPath_ProducesAtomicEntry_NotRecursion()
+    {
+        // Object → scalar must yield ONE entry carrying the whole old object;
+        // recursing here would break reversibility.
+        var before = Parse("""{"address": {"city": "Bonn", "zip": "53111"}}""");
+        var after = Parse("""{"address": "Bonn, 53111"}""");
+
+        var diff = JsonDiffEngine.Diff(before, after);
+
+        var entry = Assert.Single(diff.Entries);
+        Assert.Equal("address", entry.Key);
+        Assert.True(JsonNode.DeepEquals(Node("""{"city": "Bonn", "zip": "53111"}"""), entry.Value.Old));
+        Assert.Equal("Bonn, 53111", (string?)entry.Value.New);
+    }
+
     [Theory]
     [InlineData(
         """{"name": "Harry", "email": null, "address": {"city": "Bonn", "zip": "53111"}, "roles": ["user"]}""",
@@ -102,6 +118,17 @@ public sealed class JsonDiffEngineTests
     [InlineData("""{"a": {"b": {"c": 1}}}""", """{}""")]
     [InlineData("""{"v": 1}""", """{"v": 1}""")]
     [InlineData("""{"n": null}""", """{"n": 0}""")]
+    // Typwechsel auf Pfaden — Objekt ↔ Skalar / Objekt ↔ null / Skalar ↔ Objekt
+    [InlineData("""{"a": {"b": 1}}""", """{"a": "flat"}""")]
+    [InlineData("""{"a": {"b": 1}}""", """{"a": null}""")]
+    [InlineData("""{"a": 42}""", """{"a": {"b": {"c": true}}}""")]
+    [InlineData("""{"a": {"b": 1}}""", """{"a": [1, 2]}""")]
+    // Tiefe Teiländerung: nur ein Blatt in tiefer Struktur ändert sich
+    [InlineData(
+        """{"l1": {"l2": {"l3": {"keep": "x", "change": 1}}}}""",
+        """{"l1": {"l2": {"l3": {"keep": "x", "change": 2}}}}""")]
+    // Objekt mit leeren Objekten und null-Werten gemischt
+    [InlineData("""{"a": {}, "b": {"c": null}}""", """{"a": {"x": 1}, "b": null}""")]
     public void Diff_RoundTrips_ForwardAndBackward(string beforeJson, string afterJson)
     {
         var before = Parse(beforeJson);
@@ -132,6 +159,18 @@ public sealed class JsonDiffEngineTests
             Assert.True(JsonNode.DeepEquals(entry.Old, restored.Entries[path].Old));
             Assert.True(JsonNode.DeepEquals(entry.New, restored.Entries[path].New));
         }
+    }
+
+    [Fact]
+    public void Diff_RejectsKeysContainingDots_InsteadOfCorruptingPaths()
+    {
+        // E.g. a serialized Dictionary<string, T> with dotted keys would produce
+        // ambiguous diff paths — must fail loudly.
+        var before = Parse("""{"settings": {}}""");
+        var after = Parse("""{"settings": {"feature.enabled": true}}""");
+
+        var ex = Assert.Throws<NotSupportedException>(() => JsonDiffEngine.Diff(before, after));
+        Assert.Contains("feature.enabled", ex.Message, StringComparison.Ordinal);
     }
 
     private static JsonObject Parse(string json) => (JsonObject)JsonNode.Parse(json)!;

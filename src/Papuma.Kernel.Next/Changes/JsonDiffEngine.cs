@@ -64,6 +64,15 @@ public static class JsonDiffEngine
 
         foreach (var key in keys)
         {
+            if (key.Contains('.'))
+            {
+                // Dot-separated paths would become ambiguous (e.g. serialized
+                // Dictionary<string, T> keys). Fail loudly instead of corrupting the diff.
+                throw new NotSupportedException(
+                    $"Object key '{key}' contains '.' and cannot be represented as a diff path. " +
+                    "Keys containing dots (e.g. dictionary keys) are not supported in diffed documents.");
+            }
+
             var path = prefix.Length == 0 ? key : $"{prefix}.{key}";
             var hasOld = before?.ContainsKey(key) ?? false;
             var hasNew = after?.ContainsKey(key) ?? false;
