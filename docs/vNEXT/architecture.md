@@ -405,6 +405,7 @@ Tenant gebunden, und `Papuma.Kernel.AspNetCore` liefert weiterhin die Tenant-Res
 | [012](adr/adr-012-partial-updates.md) | Partielle Updates als Patch-Primitiv (ohne Load, atomar via jsonb_set + RETURNING) | Accepted |
 | [013](adr/adr-013-business-event-log.md) | Fachliche Events: Translator, append-only Event-Log und Trigger-Handler | Accepted |
 | [014](adr/adr-014-bulk-operations.md) | Bulk-Operationen als set-basierter Patch (Key-Prädikate oder ID-Listen, ein ChangeRecord pro Dokument) | Accepted |
+| [015](adr/adr-015-gdpr-tooling.md) | DSGVO-Werkzeuge: Export/Inventar/Redaction im Kernel, Rechtsentscheidungen pro Tenant in der Anwendung | Accepted (Umsetzung: Phase 12) |
 
 ## 13. Rezepte (Tutorial-Vorstufen)
 

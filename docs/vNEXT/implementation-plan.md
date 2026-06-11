@@ -340,6 +340,33 @@ Trace-Test: Write-Span und Handler-Span teilen Trace-Id über die
 Metadata-Propagation; `GetHistoryAsync` liefert die Diffs eines Konfliktfensters
 (ADR-003-Szenario); Failure-Inspektion + Retry getestet.
 
+## Phase 12 — DSGVO-Werkzeuge (post-1.0, geplant)
+
+ADRs: [015](adr/adr-015-gdpr-tooling.md) · Prinzip: Mechanismen im Kernel,
+Rechtsentscheidungen (Löschen vs. Einschränken vs. Aufbewahren pro Tenant) in der
+Anwendung. Ernte: konzeptionell v1 `redacted`-Flag + Sensitive-Data-ADR.
+
+- [ ] **Export-Assembly** (Art. 15/20): `GdprExport.ExportAsync(scope, documentRefs,
+      eventSelectors)` → strukturiertes JSON (Zustand + Historie + Events);
+      Event-Selektion generisch über Payload-Pfad = Wert; Policy-Minimierung wirkt
+      automatisch (redactete Felder nur als Änderungsmarker)
+- [ ] **Daten-Inventar** (Art.-30-Unterstützung): Report aus dem Metamodell
+      (Typen, Felder, Policies, Event-Retentions) — auch als Review-Werkzeug
+      "welche Felder sind ungeschützt?"
+- [ ] **`RedactHistoryAsync(documentRef, paths?)`**: historische Diffs +
+      Event-Payload-Felder nachträglich auf Redacted-Marker umschreiben (schließt
+      die Lücke getrackter PII-Felder nach Dokument-Löschung); Audit-Metadaten
+      verpflichtend; irreversibel
+- [ ] Doku: DSGVO-Guide mit dem Tenant-Muster (Löschen in Scope A, Art.-18-
+      Einschränkung + Fristvormerkung in Scope B) und der PII-Policy-Disziplin
+      als erster Verteidigungslinie
+
+**DoD:** Export-Test (Dokument + Historie + Events eines Subjekts, redactete Felder
+ohne Werte); Inventar-Test; Redaction-Test (getracktes PII-Feld nach Delete →
+RedactHistory → Klartext nachweislich aus Diff und Event-Payload entfernt, Audit-
+Metadaten gesetzt, Rollback darüber scheitert typisiert); Scope-Isolationstest
+(Erasure in Tenant A lässt Tenant B byte-identisch).
+
 ## Weitere Post-1.0-Kandidaten (bei Bedarf, getrieben durch Lag-Metriken)
 
 Skalierungsmodell und Begründung: [concepts.md §14](concepts.md).
