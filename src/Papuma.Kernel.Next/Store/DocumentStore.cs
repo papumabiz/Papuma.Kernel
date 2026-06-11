@@ -34,12 +34,14 @@ public sealed class DocumentStore
     }
 
     /// <summary>
-    /// Opens a session bound to the given scope.
+    /// Opens a unit-of-work session bound to the given scope. Dispose the session;
+    /// uncommitted writes roll back (architecture §5).
     /// </summary>
     /// <param name="scope">The scope context all session operations run under.</param>
-    public DocumentSession OpenSession(ScopeContext scope)
+    /// <param name="options">Optional session metadata (correlation/causation/actor).</param>
+    public DocumentSession OpenSession(ScopeContext scope, SessionOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(scope);
-        return new DocumentSession(_dataSource, Model, scope);
+        return new DocumentSession(_dataSource, Model, scope, options);
     }
 }

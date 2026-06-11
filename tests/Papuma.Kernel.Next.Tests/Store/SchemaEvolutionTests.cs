@@ -70,7 +70,8 @@ public sealed class SchemaEvolutionTests : IAsyncLifetime
         // Seed a v1 document: "mail" instead of "email", flat "city".
         await SeedRawDocumentAsync(scope, id, """{"id": "ID", "mail": "h@x.de", "city": "Bonn"}""", schemaVersion: 1);
 
-        var loaded = await _store.OpenSession(scope).LoadAsync<EvolvedDoc>(id);
+        await using var session = _store.OpenSession(scope);
+        var loaded = await session.LoadAsync<EvolvedDoc>(id);
 
         Assert.NotNull(loaded);
         Assert.Equal("h@x.de", loaded.Document.Email);
@@ -84,7 +85,8 @@ public sealed class SchemaEvolutionTests : IAsyncLifetime
         var id = NewId();
         await SeedRawDocumentAsync(scope, id, """{"id": "ID", "mail": "h@x.de"}""", schemaVersion: 1);
 
-        _ = await _store.OpenSession(scope).LoadAsync<EvolvedDoc>(id);
+        await using var session = _store.OpenSession(scope);
+        _ = await session.LoadAsync<EvolvedDoc>(id);
 
         Assert.Equal(1, await StoredSchemaVersionAsync(scope, id));
     }
@@ -93,12 +95,13 @@ public sealed class SchemaEvolutionTests : IAsyncLifetime
     public async Task Save_PersistsTheLiftedState_WithCurrentSchemaVersion()
     {
         var scope = NewTenant();
-        var session = _store.OpenSession(scope);
+        await using var session = _store.OpenSession(scope);
         var id = NewId();
         await SeedRawDocumentAsync(scope, id, """{"id": "ID", "mail": "h@x.de"}""", schemaVersion: 1);
 
         var loaded = await session.LoadAsync<EvolvedDoc>(id);
         await session.SaveAsync(loaded!.Document, loaded.Version);
+        await session.CommitAsync();
 
         Assert.Equal(3, await StoredSchemaVersionAsync(scope, id));
         var reloaded = await session.LoadAsync<EvolvedDoc>(id);
@@ -112,8 +115,9 @@ public sealed class SchemaEvolutionTests : IAsyncLifetime
         var id = NewId();
         await SeedRawDocumentAsync(scope, id, """{"id": "ID", "email": "h@x.de"}""", schemaVersion: 99);
 
+        await using var session = _store.OpenSession(scope);
         var ex = await Assert.ThrowsAsync<SchemaVersionConflictException>(
-            () => _store.OpenSession(scope).LoadAsync<EvolvedDoc>(id));
+            () => session.LoadAsync<EvolvedDoc>(id));
 
         Assert.Equal(99, ex.StoredSchemaVersion);
         Assert.Equal(3, ex.ModelSchemaVersion);
@@ -123,7 +127,7 @@ public sealed class SchemaEvolutionTests : IAsyncLifetime
     public async Task Save_Throws_AndRollsBack_WhenStoredSchemaIsNewerThanModel()
     {
         var scope = NewTenant();
-        var session = _store.OpenSession(scope);
+        await using var session = _store.OpenSession(scope);
         var id = NewId();
         await SeedRawDocumentAsync(scope, id, """{"id": "ID", "email": "keep@x.de"}""", schemaVersion: 99);
 
@@ -141,8 +145,9 @@ public sealed class SchemaEvolutionTests : IAsyncLifetime
         var id = NewId();
         await SeedRawDocumentAsync(scope, id, """{"id": "ID", "email": "h@x.de"}""", schemaVersion: 99);
 
+        await using var session = _store.OpenSession(scope);
         await Assert.ThrowsAsync<SchemaVersionConflictException>(
-            () => _store.OpenSession(scope).DeleteAsync<EvolvedDoc>(id, expectedVersion: 1));
+            () => session.DeleteAsync<EvolvedDoc>(id, expectedVersion: 1));
 
         Assert.Equal(99, await StoredSchemaVersionAsync(scope, id));
     }

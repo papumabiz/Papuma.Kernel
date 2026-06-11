@@ -40,7 +40,7 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     [Fact]
     public async Task Save_Insert_ReturnsVersion1_AndInsertOnlyDiff()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
         var id = NewId();
 
         var result = await session.SaveAsync(new UserDoc(id, "Harry"), expectedVersion: 0);
@@ -54,7 +54,7 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     [Fact]
     public async Task Load_ReturnsDocumentAndVersion()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
         var id = NewId();
         await session.SaveAsync(new UserDoc(id, "Harry", "h@x.de"), 0);
 
@@ -69,7 +69,7 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     [Fact]
     public async Task Load_ReturnsNull_WhenMissing()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
 
         Assert.Null(await session.LoadAsync<UserDoc>(NewId()));
     }
@@ -77,7 +77,7 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     [Fact]
     public async Task Save_Update_ComputesDiffFromReturnedOldState()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
         var id = NewId();
         await session.SaveAsync(new UserDoc(id, "Harry"), 0);
 
@@ -93,7 +93,7 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     [Fact]
     public async Task Save_WithStaleVersion_ThrowsConcurrencyException_WithActualVersion()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
         var id = NewId();
         await session.SaveAsync(new UserDoc(id, "Harry"), 0);
         await session.SaveAsync(new UserDoc(id, "Harald"), 1);
@@ -109,7 +109,7 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     [Fact]
     public async Task Save_InsertOnExistingDocument_ThrowsConcurrencyException()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
         var id = NewId();
         await session.SaveAsync(new UserDoc(id, "Harry"), 0);
 
@@ -123,7 +123,7 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     [Fact]
     public async Task Save_UpdateOnMissingDocument_ThrowsDocumentNotFound()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
 
         await Assert.ThrowsAsync<DocumentNotFoundException>(
             () => session.SaveAsync(new UserDoc(NewId(), "Ghost"), expectedVersion: 3));
@@ -132,7 +132,7 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     [Fact]
     public async Task Delete_RemovesDocument_AndRecordsDeleteOnlyDiff()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
         var id = NewId();
         await session.SaveAsync(new UserDoc(id, "Gone", "g@x.de"), 0);
 
@@ -148,7 +148,7 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     [Fact]
     public async Task Delete_WithStaleVersion_ThrowsConcurrencyException()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
         var id = NewId();
         await session.SaveAsync(new UserDoc(id, "Harry"), 0);
 
@@ -161,7 +161,7 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     [Fact]
     public async Task Insert_AfterDelete_ContinuesVersionNumbering()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
         var id = NewId();
         await session.SaveAsync(new UserDoc(id, "First"), 0);      // version 1
         await session.DeleteAsync<UserDoc>(id, 1);                 // version 2 (delete)
@@ -179,11 +179,12 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     public async Task ChangeFeed_RecordsEveryWrite_GaplessPerDocument()
     {
         var scope = NewTenant();
-        var session = _store.OpenSession(scope);
+        await using var session = _store.OpenSession(scope);
         var id = NewId();
         await session.SaveAsync(new UserDoc(id, "Harry"), 0);
         await session.SaveAsync(new UserDoc(id, "Harald"), 1);
         await session.DeleteAsync<UserDoc>(id, 2);
+        await session.CommitAsync();
 
         var records = await LoadChangeRecordsAsync(scope, id);
 
@@ -195,7 +196,7 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     public async Task DocumentAndChangeRecord_AreAtomic_FailedChangeInsertRollsBackDocument()
     {
         var scope = NewTenant();
-        var session = _store.OpenSession(scope);
+        await using var session = _store.OpenSession(scope);
         var id = NewId();
         await session.SaveAsync(new UserDoc(id, "Harry"), 0);
 
@@ -215,9 +216,10 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     public async Task Session_IsTenantIsolated_ViaExplicitPredicates()
     {
         var id = NewId();
-        var sessionA = _store.OpenSession(NewTenant());
-        var sessionB = _store.OpenSession(NewTenant());
+        await using var sessionA = _store.OpenSession(NewTenant());
+        await using var sessionB = _store.OpenSession(NewTenant());
         await sessionA.SaveAsync(new UserDoc(id, "OnlyA"), 0);
+        await sessionA.CommitAsync();
 
         Assert.Null(await sessionB.LoadAsync<UserDoc>(id));
         await Assert.ThrowsAsync<DocumentNotFoundException>(

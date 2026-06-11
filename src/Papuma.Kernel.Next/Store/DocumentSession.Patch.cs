@@ -11,7 +11,6 @@ using NpgsqlTypes;
 
 using Papuma.Kernel.Changes;
 using Papuma.Kernel.Model;
-using Papuma.Kernel.Tenancy;
 using Papuma.Kernel.Validation;
 
 namespace Papuma.Kernel.Store;
@@ -47,77 +46,69 @@ public sealed partial class DocumentSession
         ArgumentNullException.ThrowIfNull(patch);
         var metadata = _model.GetRequired<T>();
         InputValidator.ValidateDocumentId(id);
+        var operations = CollectOperations(patch);
 
-        var builder = new PatchBuilder<T>();
-        patch(builder);
-        if (builder.Operations.Count == 0)
+        return await ExecuteWriteAsync(async (conn, tx) =>
         {
-            throw new ArgumentException("Patch must contain at least one operation.", nameof(patch));
-        }
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await conn.SetScopeAsync(Scope, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-
-        var dataExpression = BuildPatchExpression(cmd, builder.Operations);
-        var versionPredicate = expectedVersion is null ? string.Empty : "AND version = @expectedVersion";
-        cmd.CommandText = $"""
-            UPDATE papuma.document
-            SET data = {dataExpression},
-                version = version + 1,
-                updated_at = now()
-            WHERE scope = @scope AND tenant_id = @tenantId
-              AND document_type = @type AND id = @id
-              {versionPredicate}
-            RETURNING old.data::text, new.data::text, new.version, old.schema_version
-            """;
-        AddIdentityParameters(cmd, metadata.Name, id);
-        if (expectedVersion is not null)
-        {
-            cmd.Parameters.AddWithValue("expectedVersion", expectedVersion.Value);
-        }
-
-        var row = await ExecuteMappingKeyViolationsAsync(
-            async () =>
+            var dataExpression = BuildPatchExpression(cmd, operations);
+            var versionPredicate = expectedVersion is null ? string.Empty : "AND version = @expectedVersion";
+            cmd.CommandText = $"""
+                UPDATE papuma.document
+                SET data = {dataExpression},
+                    version = version + 1,
+                    updated_at = now()
+                WHERE scope = @scope AND tenant_id = @tenantId
+                  AND document_type = @type AND id = @id
+                  {versionPredicate}
+                RETURNING old.data::text, new.data::text, new.version, old.schema_version
+                """;
+            AddIdentityParameters(cmd, metadata.Name, id);
+            if (expectedVersion is not null)
             {
-                await using var reader = await cmd.ExecuteReaderAsync(ct);
-                if (!await reader.ReadAsync(ct))
+                cmd.Parameters.AddWithValue("expectedVersion", expectedVersion.Value);
+            }
+
+            var row = await ExecuteMappingKeyViolationsAsync(
+                async () =>
                 {
-                    return ((string, string, long, int)?)null;
-                }
+                    await using var reader = await cmd.ExecuteReaderAsync(ct);
+                    if (!await reader.ReadAsync(ct))
+                    {
+                        return ((string, string, long, int)?)null;
+                    }
 
-                return (reader.GetString(0), reader.GetString(1), reader.GetInt64(2), reader.GetInt32(3));
-            },
-            metadata.Name);
+                    return (reader.GetString(0), reader.GetString(1), reader.GetInt64(2), reader.GetInt32(3));
+                },
+                metadata.Name);
 
-        if (row is null)
-        {
-            throw await VersionConflictAsync(conn, tx, metadata.Name, id, expectedVersion ?? 0, ct);
-        }
+            if (row is null)
+            {
+                throw await VersionConflictAsync(conn, tx, metadata.Name, id, expectedVersion ?? 0, ct);
+            }
 
-        var (oldJsonText, newJsonText, newVersion, oldSchemaVersion) = row.Value;
-        EnsurePatchableSchema(metadata, id, oldSchemaVersion);
+            var (oldJsonText, newJsonText, newVersion, oldSchemaVersion) = row.Value;
+            EnsurePatchableSchema(metadata, id, oldSchemaVersion);
 
-        var storedNewJson = (JsonObject)JsonNode.Parse(newJsonText)!;
-        RunValidator(metadata, storedNewJson);
+            var storedNewJson = (JsonObject)JsonNode.Parse(newJsonText)!;
+            RunValidator(metadata, storedNewJson);
 
-        var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
-        var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, storedNewJson), metadata, id);
+            var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
+            var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, storedNewJson), metadata, id);
 
-        await InsertChangeRecordAsync(
-            conn, tx, metadata, id, newVersion, ChangeOperation.Update, diff, metadata.SchemaVersion, ct);
-        await tx.CommitAsync(ct);
+            await InsertChangeRecordAsync(
+                conn, tx, metadata, id, newVersion, ChangeOperation.Update, diff, metadata.SchemaVersion, ct);
 
-        return new SaveResult(newVersion, ChangeOperation.Update, diff);
+            return new SaveResult(newVersion, ChangeOperation.Update, diff);
+        }, ct);
     }
 
     /// <summary>
     /// Applies the same patch to an explicit list of documents — one atomic statement,
-    /// one change record per affected document, shared correlation id (ADR-014).
-    /// No <c>expectedVersion</c>: bulk operates on current state by definition.
+    /// one change record per affected document, all carrying the session's correlation
+    /// id (ADR-014). No <c>expectedVersion</c>: bulk operates on current state by definition.
     /// </summary>
     /// <typeparam name="T">The document CLR type.</typeparam>
     /// <param name="ids">The document identifiers.</param>
@@ -173,7 +164,7 @@ public sealed partial class DocumentSession
 
     /// <summary>
     /// Deletes an explicit list of documents — one atomic statement, one delete change
-    /// record per document, shared correlation id (ADR-014).
+    /// record per document (ADR-014).
     /// </summary>
     /// <typeparam name="T">The document CLR type.</typeparam>
     /// <param name="ids">The document identifiers.</param>
@@ -226,68 +217,58 @@ public sealed partial class DocumentSession
     {
         ArgumentNullException.ThrowIfNull(patch);
         var metadata = _model.GetRequired<T>();
+        var operations = CollectOperations(patch);
 
-        var builder = new PatchBuilder<T>();
-        patch(builder);
-        if (builder.Operations.Count == 0)
+        return await ExecuteWriteAsync(async (conn, tx) =>
         {
-            throw new ArgumentException("Patch must contain at least one operation.", nameof(patch));
-        }
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            var dataExpression = BuildPatchExpression(cmd, operations);
+            cmd.CommandText = $"""
+                UPDATE papuma.document
+                SET data = {dataExpression},
+                    version = version + 1,
+                    updated_at = now()
+                WHERE scope = @scope AND tenant_id = @tenantId
+                  AND document_type = @type
+                  {predicate}
+                RETURNING id, old.data::text, new.data::text, new.version, old.schema_version
+                """;
+            AddScopeParameters(cmd, metadata.Name);
+            addPredicateParameters(cmd);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await conn.SetScopeAsync(Scope, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        var dataExpression = BuildPatchExpression(cmd, builder.Operations);
-        cmd.CommandText = $"""
-            UPDATE papuma.document
-            SET data = {dataExpression},
-                version = version + 1,
-                updated_at = now()
-            WHERE scope = @scope AND tenant_id = @tenantId
-              AND document_type = @type
-              {predicate}
-            RETURNING id, old.data::text, new.data::text, new.version, old.schema_version
-            """;
-        AddScopeParameters(cmd, metadata.Name);
-        addPredicateParameters(cmd);
-
-        var rows = await ExecuteMappingKeyViolationsAsync(
-            async () =>
-            {
-                var collected = new List<(string Id, string OldJson, string NewJson, long Version, int SchemaVersion)>();
-                await using var reader = await cmd.ExecuteReaderAsync(ct);
-                while (await reader.ReadAsync(ct))
+            var rows = await ExecuteMappingKeyViolationsAsync(
+                async () =>
                 {
-                    collected.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2),
-                        reader.GetInt64(3), reader.GetInt32(4)));
-                }
+                    var collected = new List<(string Id, string OldJson, string NewJson, long Version, int SchemaVersion)>();
+                    await using var reader = await cmd.ExecuteReaderAsync(ct);
+                    while (await reader.ReadAsync(ct))
+                    {
+                        collected.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2),
+                            reader.GetInt64(3), reader.GetInt32(4)));
+                    }
 
-                return collected;
-            },
-            metadata.Name);
+                    return collected;
+                },
+                metadata.Name);
 
-        var correlationId = Guid.NewGuid();
-        var metadataJson = BulkMetadata(correlationId);
-        foreach (var (id, oldJsonText, newJsonText, newVersion, oldSchemaVersion) in rows)
-        {
-            // Any violation rolls the entire statement back — bulk is atomic (ADR-014).
-            EnsurePatchableSchema(metadata, id, oldSchemaVersion);
+            foreach (var (id, oldJsonText, newJsonText, newVersion, oldSchemaVersion) in rows)
+            {
+                // Any violation rolls the entire statement back — bulk is atomic (ADR-014).
+                EnsurePatchableSchema(metadata, id, oldSchemaVersion);
 
-            var storedNewJson = (JsonObject)JsonNode.Parse(newJsonText)!;
-            RunValidator(metadata, storedNewJson);
+                var storedNewJson = (JsonObject)JsonNode.Parse(newJsonText)!;
+                RunValidator(metadata, storedNewJson);
 
-            var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
-            var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, storedNewJson), metadata, id);
-            await InsertChangeRecordAsync(
-                conn, tx, metadata, id, newVersion, ChangeOperation.Update, diff,
-                metadata.SchemaVersion, ct, metadataJson);
-        }
+                var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
+                var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, storedNewJson), metadata, id);
+                await InsertChangeRecordAsync(
+                    conn, tx, metadata, id, newVersion, ChangeOperation.Update, diff,
+                    metadata.SchemaVersion, ct);
+            }
 
-        await tx.CommitAsync(ct);
-        return new BulkResult(rows.Count, correlationId);
+            return new BulkResult(rows.Count, CorrelationId);
+        }, ct);
     }
 
     private async Task<BulkResult> BulkDeleteAsync<T>(
@@ -298,46 +279,55 @@ public sealed partial class DocumentSession
     {
         var metadata = _model.GetRequired<T>();
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await conn.SetScopeAsync(Scope, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = $"""
-            DELETE FROM papuma.document
-            WHERE scope = @scope AND tenant_id = @tenantId
-              AND document_type = @type
-              {predicate}
-            RETURNING id, old.data::text, old.version, old.schema_version
-            """;
-        AddScopeParameters(cmd, metadata.Name);
-        addPredicateParameters(cmd);
-
-        var rows = new List<(string Id, string OldJson, long Version, int SchemaVersion)>();
-        await using (var reader = await cmd.ExecuteReaderAsync(ct))
+        return await ExecuteWriteAsync(async (conn, tx) =>
         {
-            while (await reader.ReadAsync(ct))
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = $"""
+                DELETE FROM papuma.document
+                WHERE scope = @scope AND tenant_id = @tenantId
+                  AND document_type = @type
+                  {predicate}
+                RETURNING id, old.data::text, old.version, old.schema_version
+                """;
+            AddScopeParameters(cmd, metadata.Name);
+            addPredicateParameters(cmd);
+
+            var rows = new List<(string Id, string OldJson, long Version, int SchemaVersion)>();
+            await using (var reader = await cmd.ExecuteReaderAsync(ct))
             {
-                rows.Add((reader.GetString(0), reader.GetString(1), reader.GetInt64(2), reader.GetInt32(3)));
+                while (await reader.ReadAsync(ct))
+                {
+                    rows.Add((reader.GetString(0), reader.GetString(1), reader.GetInt64(2), reader.GetInt32(3)));
+                }
             }
-        }
 
-        var correlationId = Guid.NewGuid();
-        var metadataJson = BulkMetadata(correlationId);
-        foreach (var (id, oldJsonText, version, oldSchemaVersion) in rows)
+            foreach (var (id, oldJsonText, version, oldSchemaVersion) in rows)
+            {
+                EnsureSchemaNotNewer(metadata, id, oldSchemaVersion);
+
+                var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
+                var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, after: null), metadata, id);
+                await InsertChangeRecordAsync(
+                    conn, tx, metadata, id, version + 1, ChangeOperation.Delete, diff,
+                    oldSchemaVersion, ct);
+            }
+
+            return new BulkResult(rows.Count, CorrelationId);
+        }, ct);
+    }
+
+    private static List<PatchOperation> CollectOperations<T>(Action<PatchBuilder<T>> patch)
+        where T : class
+    {
+        var builder = new PatchBuilder<T>();
+        patch(builder);
+        if (builder.Operations.Count == 0)
         {
-            EnsureSchemaNotNewer(metadata, id, oldSchemaVersion);
-
-            var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
-            var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, after: null), metadata, id);
-            await InsertChangeRecordAsync(
-                conn, tx, metadata, id, version + 1, ChangeOperation.Delete, diff,
-                oldSchemaVersion, ct, metadataJson);
+            throw new ArgumentException("Patch must contain at least one operation.", nameof(patch));
         }
 
-        await tx.CommitAsync(ct);
-        return new BulkResult(rows.Count, correlationId);
+        return builder.Operations;
     }
 
     /// <summary>
@@ -416,16 +406,6 @@ public sealed partial class DocumentSession
 
         var document = storedNewJson.Deserialize(metadata.ClrType, KernelJson.Options)
             ?? throw new InvalidOperationException($"Document of type {metadata.Name} deserialized to null.");
-        metadata.Validator(document); // throws to reject — transaction rolls back
-    }
-
-    private static JsonObject BulkMetadata(Guid correlationId) =>
-        new() { ["correlationId"] = correlationId.ToString("N") };
-
-    private void AddScopeParameters(NpgsqlCommand cmd, string documentType)
-    {
-        cmd.Parameters.AddWithValue("scope", Scope.Scope.ToString());
-        cmd.Parameters.AddWithValue("tenantId", Scope.TenantId ?? string.Empty);
-        cmd.Parameters.AddWithValue("type", documentType);
+        metadata.Validator(document); // throws to reject — the savepoint rolls back
     }
 }

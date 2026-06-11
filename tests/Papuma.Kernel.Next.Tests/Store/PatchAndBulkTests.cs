@@ -68,7 +68,7 @@ public sealed class PatchAndBulkTests : IAsyncLifetime
     [Fact]
     public async Task Patch_SetRemoveIncrement_WithoutLoadingTheDocument()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
         var id = NewId();
         await session.SaveAsync(new PatchDoc(id, "Harry", "active", LoginCount: 5, Nickname: "H"), 0);
 
@@ -92,7 +92,7 @@ public sealed class PatchAndBulkTests : IAsyncLifetime
     [Fact]
     public async Task Patch_OnDifferentFields_DoesNotConflict_VersionsStayLinear()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
         var id = NewId();
         await session.SaveAsync(new PatchDoc(id, "Harry", "active"), 0);
 
@@ -110,7 +110,7 @@ public sealed class PatchAndBulkTests : IAsyncLifetime
     [Fact]
     public async Task Patch_WithStaleExpectedVersion_ThrowsConcurrencyException()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
         var id = NewId();
         await session.SaveAsync(new PatchDoc(id, "Harry", "active"), 0);
         await session.PatchAsync<PatchDoc>(id, p => p.Set(x => x.Name, "Harald"));
@@ -124,7 +124,7 @@ public sealed class PatchAndBulkTests : IAsyncLifetime
     [Fact]
     public async Task Patch_OnMissingDocument_ThrowsDocumentNotFound()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
 
         await Assert.ThrowsAsync<DocumentNotFoundException>(
             () => session.PatchAsync<PatchDoc>(NewId(), p => p.Set(x => x.Name, "Ghost")));
@@ -133,7 +133,7 @@ public sealed class PatchAndBulkTests : IAsyncLifetime
     [Fact]
     public async Task Patch_RunsPolicies_HashedFieldNeverInClearText()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
         var id = NewId();
         await session.SaveAsync(new PatchDoc(id, "Harry", "active"), 0);
 
@@ -148,7 +148,7 @@ public sealed class PatchAndBulkTests : IAsyncLifetime
     [Fact]
     public async Task Patch_ValidatorRejection_RollsBackTheWholeWrite()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
         var id = NewId();
         await session.SaveAsync(new ValidatedDoc(id, Quantity: 3), 0);
 
@@ -164,7 +164,7 @@ public sealed class PatchAndBulkTests : IAsyncLifetime
     public async Task Patch_OnOutdatedSchema_ThrowsUpcastRequired_AndRollsBack()
     {
         var scope = NewTenant();
-        var session = _store.OpenSession(scope);
+        await using var session = _store.OpenSession(scope);
         var id = NewId();
         await SeedRawV1DocumentAsync(scope, id);
 
@@ -183,7 +183,7 @@ public sealed class PatchAndBulkTests : IAsyncLifetime
     public async Task PatchMany_PatchesAllIds_OneChangeRecordEach_SharedCorrelationId()
     {
         var scope = NewTenant();
-        var session = _store.OpenSession(scope);
+        await using var session = _store.OpenSession(scope);
         var ids = new[] { NewId(), NewId(), NewId() };
         foreach (var id in ids)
         {
@@ -200,6 +200,7 @@ public sealed class PatchAndBulkTests : IAsyncLifetime
             Assert.Equal(2, loaded.Version);
         }
 
+        await session.CommitAsync();
         var correlationIds = await LoadCorrelationIdsAsync(scope, version: 2);
         Assert.Equal(3, correlationIds.Count);
         Assert.Single(correlationIds.Distinct());
@@ -209,7 +210,7 @@ public sealed class PatchAndBulkTests : IAsyncLifetime
     [Fact]
     public async Task PatchWhere_PatchesOnlyMatchingDocuments()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
         var inactive1 = NewId();
         var inactive2 = NewId();
         var active = NewId();
@@ -229,7 +230,7 @@ public sealed class PatchAndBulkTests : IAsyncLifetime
     [Fact]
     public async Task PatchWhere_RejectsUndeclaredKeys()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
 
         await Assert.ThrowsAsync<ArgumentException>(
             () => session.PatchWhereAsync<PatchDoc>(x => x.Name, "x", p => p.Set(x => x.Status, "y")));
@@ -238,7 +239,7 @@ public sealed class PatchAndBulkTests : IAsyncLifetime
     [Fact]
     public async Task Bulk_ConflictsCorrectly_WithParallelOptimisticWriters()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
         var id = NewId();
         await session.SaveAsync(new PatchDoc(id, "Harry", "active"), 0);  // version 1
 
@@ -254,7 +255,7 @@ public sealed class PatchAndBulkTests : IAsyncLifetime
     public async Task Bulk_IsAtomic_OneBadDocumentRollsBackEverything()
     {
         var scope = NewTenant();
-        var session = _store.OpenSession(scope);
+        await using var session = _store.OpenSession(scope);
         var goodId = NewId();
         var oldSchemaId = NewId();
         await session.SaveAsync(new EvoPatchDoc(goodId, "good@x.de"), 0);
@@ -274,7 +275,7 @@ public sealed class PatchAndBulkTests : IAsyncLifetime
     public async Task DeleteWhere_DeletesMatches_WithDeleteChangeRecords()
     {
         var scope = NewTenant();
-        var session = _store.OpenSession(scope);
+        await using var session = _store.OpenSession(scope);
         var id1 = NewId();
         var id2 = NewId();
         await session.SaveAsync(new PatchDoc(id1, "A", "obsolete"), 0);
@@ -286,6 +287,7 @@ public sealed class PatchAndBulkTests : IAsyncLifetime
         Assert.Null(await session.LoadAsync<PatchDoc>(id1));
         Assert.Null(await session.LoadAsync<PatchDoc>(id2));
 
+        await session.CommitAsync();
         var operations = await LoadOperationsAsync(scope, version: 2);
         Assert.Equal([3, 3], operations); // two delete records
     }
@@ -293,7 +295,7 @@ public sealed class PatchAndBulkTests : IAsyncLifetime
     [Fact]
     public async Task DeleteMany_WithEmptyIdList_AffectsNothing()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
 
         var result = await session.DeleteManyAsync<PatchDoc>([]);
 

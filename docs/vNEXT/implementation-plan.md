@@ -167,23 +167,34 @@ correlationId, PatchWhere nur auf Treffer, Bulk-Atomizität (ein v1-Dokument rol
 alles zurück), Bulk-Konflikt gegen optimistischen Writer, DeleteWhere mit
 Delete-Records, leere ID-Liste. 99 Tests grün.
 
-## Phase 6 — Session als Unit of Work + Rollback
+## Phase 6 — Session als Unit of Work + Rollback ✅ (2026-06-11)
 
 ADRs: [008](adr/adr-008-rollback-is-update.md) · Architektur §5 ("Session = Unit of Work") · Ernte: `Transactions/NpgsqlUnitOfWork` (Muster)
 
-- [ ] Mehrere Saves/Patches/Appends pro Session in **einer** Transaktion;
-      `CommitAsync` / implizites Rollback bei Dispose ohne Commit
-- [ ] `correlationId` in `metadata` aller ChangeRecords einer Session (auto-generiert,
-      überschreibbar); `causationId`/`actorId` als optionale Metadaten übernehmen
-- [ ] `RollbackAsync(id, toVersion, expectedVersion)`: Diffs rückwärts anwenden,
-      als Update mit `isRollback`/`restoredVersion` speichern
-- [ ] Rollback über Schema-Versionen → durch Upcaster-Pipeline (ADR-008)
-- [ ] Rollback policy-redacteter Felder: Wiederherstellung über Referenzquelle oder
-      typisierter Fehler — nie stillschweigend falsche Werte
+- [x] Session = eine Transaktion (lazy geöffnet, `SET LOCAL`-Scope pro Transaktion
+      neu gesetzt); `CommitAsync` explizit, Dispose ohne Commit rollt zurück;
+      Session ist `IAsyncDisposable`
+- [x] **Savepoint pro Write**: Ein fehlgeschlagener Write (Konflikt, Unique-Verletzung,
+      abgelehnter Validator) rollt nur sich selbst zurück — frühere Session-Writes
+      bleiben intakt, die Session bleibt nutzbar (Test beweist es)
+- [x] `correlationId` (auto/überschreibbar) + optional `actorId`/`causationId` via
+      `SessionOptions` in den Metadaten **aller** ChangeRecords der Session;
+      Bulk nutzt jetzt die Session-CorrelationId (ADR-014 vereinheitlicht)
+- [x] `RollbackAsync(id, toVersion, expectedVersion)`: Diffs rückwärts anwenden
+      (funktioniert auch über Delete/Recreate-Ketten), als Update mit
+      `isRollback`/`restoredVersion`; Ziel-Version = Delete wird abgelehnt
+- [x] Rollback über Schema-Versionen: rekonstruierter Zustand läuft durch die
+      Upcaster-Pipeline, gespeichert wird im aktuellen Schema
+- [x] Redacted/Reference/Hash-Einträge in der Historie →
+      `RollbackNotPossibleException` (Pfad + Kind) — nie stillschweigend falsche Werte.
+      Beachtenswert: Auch Insert-/Delete-Diffs sensibler Felder sind redacted und
+      blockieren Rollback über solche Ketten — by design
 
-**DoD:** Registrierungs-Szenario (User + Address atomar, gemeinsame correlationId);
-Rollback-Test inkl. append-only-Nachweis (Version 8 == Inhalt Version 3);
-Redacted-Field-Rollback-Fehlertest.
+**DoD erfüllt:** Registrierungs-Szenario (User + Address atomar, geteilte
+correlationId), Dispose-Rollback-Test, Savepoint-Test, Metadata-Test
+(actor/causation/correlation), Rollback append-only (v4 == Inhalt v1) mit Metadata,
+Rollback über Delete-Kette, Delete-Ziel abgelehnt, Redacted-Fehlertest, stale
+expectedVersion. 108 Tests grün.
 
 ## Phase 7 — Feed-Konsum + Processing-Engine
 

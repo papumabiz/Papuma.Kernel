@@ -16,38 +16,98 @@ using Papuma.Kernel.Validation;
 namespace Papuma.Kernel.Store;
 
 /// <summary>
-/// Scope-bound session for loading and writing documents (ADR-002/003).
+/// Scope-bound unit of work for loading and writing documents (ADR-002/003, architecture §5).
 /// </summary>
 /// <remarks>
 /// <para>
 /// Every write is a single atomic statement using PostgreSQL 18 <c>RETURNING OLD/NEW</c>:
 /// the previous state is captured in the same statement that changes the row — no prior
-/// read, no race window. Document write and change record commit in one transaction,
-/// and every diff passes policy application (ADR-007) before reaching the feed.
+/// read, no race window. Every diff passes policy application (ADR-007) before reaching
+/// the feed.
 /// </para>
 /// <para>
-/// Phase-3 scope: each call commits its own transaction; multi-write unit-of-work
-/// semantics arrive in phase 6. The schema version is fixed per type until upcasting
-/// lands in phase 4.
+/// <b>Session = Unit of Work:</b> all operations share one transaction, opened lazily on
+/// first use. Nothing is visible to other sessions until <see cref="CommitAsync"/>;
+/// disposing without commit rolls everything back. Each write runs under a savepoint, so
+/// a failed write (concurrency conflict, unique violation, rejected validator) leaves
+/// the session usable and earlier writes intact. All change records of a session share
+/// the <see cref="CorrelationId"/>.
 /// </para>
 /// </remarks>
-public sealed partial class DocumentSession
+public sealed partial class DocumentSession : IAsyncDisposable
 {
+    private const string WriteSavepoint = "papuma_write";
+
     private readonly NpgsqlDataSource _dataSource;
     private readonly KernelModel _model;
+    private readonly SessionOptions _options;
+
+    private NpgsqlConnection? _connection;
+    private NpgsqlTransaction? _transaction;
+    private bool _disposed;
 
     /// <summary>Gets the scope this session is bound to.</summary>
     public ScopeContext Scope { get; }
 
-    internal DocumentSession(NpgsqlDataSource dataSource, KernelModel model, ScopeContext scope)
+    /// <summary>Gets the correlation id carried by all change records of this session.</summary>
+    public Guid CorrelationId { get; }
+
+    internal DocumentSession(NpgsqlDataSource dataSource, KernelModel model, ScopeContext scope, SessionOptions? options)
     {
         _dataSource = dataSource;
         _model = model;
         Scope = scope;
+        _options = options ?? new SessionOptions();
+        CorrelationId = _options.CorrelationId ?? Guid.NewGuid();
     }
 
     /// <summary>
-    /// Loads a document by id, or returns <c>null</c> when it does not exist in this scope.
+    /// Commits all writes performed since the session was opened (or since the last
+    /// commit). The next operation starts a fresh transaction.
+    /// </summary>
+    /// <param name="ct">A cancellation token.</param>
+    public async Task CommitAsync(CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (_transaction is null)
+        {
+            return; // nothing pending
+        }
+
+        await _transaction.CommitAsync(ct);
+        await _transaction.DisposeAsync();
+        _transaction = null;
+    }
+
+    /// <summary>
+    /// Disposes the session. Uncommitted writes are rolled back.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+
+        if (_transaction is not null)
+        {
+            await _transaction.DisposeAsync(); // implicit rollback
+            _transaction = null;
+        }
+
+        if (_connection is not null)
+        {
+            await _connection.DisposeAsync();
+            _connection = null;
+        }
+    }
+
+    /// <summary>
+    /// Loads a document by id, or returns <c>null</c> when it does not exist in this
+    /// scope. Sees the session's own uncommitted writes.
     /// </summary>
     /// <typeparam name="T">The document CLR type.</typeparam>
     /// <param name="id">The document identifier.</param>
@@ -58,9 +118,7 @@ public sealed partial class DocumentSession
         var metadata = _model.GetRequired<T>();
         InputValidator.ValidateDocumentId(id);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await conn.SetScopeAsync(Scope, ct);
+        var (conn, tx) = await EnsureTransactionAsync(ct);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -90,20 +148,12 @@ public sealed partial class DocumentSession
         CancellationToken ct = default)
         where T : class
     {
-        ArgumentNullException.ThrowIfNull(key);
         ArgumentNullException.ThrowIfNull(value);
 
         var metadata = _model.GetRequired<T>();
-        var path = JsonPathResolver.Resolve(key);
-        var keyMetadata = metadata.Keys.FirstOrDefault(k => k.Path == path)
-            ?? throw new ArgumentException(
-                $"'{path}' is not a declared key on {metadata.Name}. " +
-                "Declare it via [UniqueKey]/[LookupKey] or UniqueKey()/LookupKey() (ADR-006).",
-                nameof(key));
+        var keyMetadata = ResolveDeclaredKey(key);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await conn.SetScopeAsync(Scope, ct);
+        var (conn, tx) = await EnsureTransactionAsync(ct);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -115,9 +165,7 @@ public sealed partial class DocumentSession
               AND data #>> @path = @value
             LIMIT 2
             """;
-        cmd.Parameters.AddWithValue("scope", Scope.Scope.ToString());
-        cmd.Parameters.AddWithValue("tenantId", Scope.TenantId ?? string.Empty);
-        cmd.Parameters.AddWithValue("type", metadata.Name);
+        AddScopeParameters(cmd, metadata.Name);
         cmd.Parameters.AddWithValue("path", keyMetadata.PathSegments);
         cmd.Parameters.AddWithValue("value", ToKeyText(value));
 
@@ -137,7 +185,7 @@ public sealed partial class DocumentSession
             0 => null,
             1 => results[0],
             _ => throw new InvalidOperationException(
-                $"Key {metadata.Name}.{path} matched multiple documents. " +
+                $"Key {metadata.Name}.{keyMetadata.Path} matched multiple documents. " +
                 "Use a unique key for single-match lookups."),
         };
     }
@@ -168,13 +216,11 @@ public sealed partial class DocumentSession
             ?? throw new ArgumentException(
                 $"Document of type {typeof(T).Name} must serialize to a JSON object.", nameof(document));
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await conn.SetScopeAsync(Scope, ct);
-
-        return expectedVersion == 0
-            ? await InsertAsync(conn, tx, metadata, id, newJson, ct)
-            : await UpdateAsync(conn, tx, metadata, id, newJson, expectedVersion, ct);
+        return await ExecuteWriteAsync(
+            (conn, tx) => expectedVersion == 0
+                ? InsertAsync(conn, tx, metadata, id, newJson, ct)
+                : UpdateAsync(conn, tx, metadata, id, newJson, expectedVersion, ct, extraMetadata: null),
+            ct);
     }
 
     /// <summary>
@@ -193,51 +239,130 @@ public sealed partial class DocumentSession
         var metadata = _model.GetRequired<T>();
         InputValidator.ValidateDocumentId(id);
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await conn.SetScopeAsync(Scope, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = """
-            DELETE FROM papuma.document
-            WHERE scope = @scope AND tenant_id = @tenantId
-              AND document_type = @type AND id = @id
-              AND version = @expectedVersion
-            RETURNING old.data::text, old.schema_version
-            """;
-        AddIdentityParameters(cmd, metadata.Name, id);
-        cmd.Parameters.AddWithValue("expectedVersion", expectedVersion);
-
-        string? oldJsonText = null;
-        var oldSchemaVersion = 0;
-        await using (var reader = await cmd.ExecuteReaderAsync(ct))
+        return await ExecuteWriteAsync(async (conn, tx) =>
         {
-            if (await reader.ReadAsync(ct))
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = """
+                DELETE FROM papuma.document
+                WHERE scope = @scope AND tenant_id = @tenantId
+                  AND document_type = @type AND id = @id
+                  AND version = @expectedVersion
+                RETURNING old.data::text, old.schema_version
+                """;
+            AddIdentityParameters(cmd, metadata.Name, id);
+            cmd.Parameters.AddWithValue("expectedVersion", expectedVersion);
+
+            string? oldJsonText = null;
+            var oldSchemaVersion = 0;
+            await using (var reader = await cmd.ExecuteReaderAsync(ct))
             {
-                oldJsonText = reader.GetString(0);
-                oldSchemaVersion = reader.GetInt32(1);
+                if (await reader.ReadAsync(ct))
+                {
+                    oldJsonText = reader.GetString(0);
+                    oldSchemaVersion = reader.GetInt32(1);
+                }
             }
-        }
 
-        if (oldJsonText is null)
-        {
-            throw await VersionConflictAsync(conn, tx, metadata.Name, id, expectedVersion, ct);
-        }
+            if (oldJsonText is null)
+            {
+                throw await VersionConflictAsync(conn, tx, metadata.Name, id, expectedVersion, ct);
+            }
 
-        EnsureSchemaNotNewer(metadata, id, oldSchemaVersion);
+            EnsureSchemaNotNewer(metadata, id, oldSchemaVersion);
 
-        var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
-        var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, after: null), metadata, id);
-        var deletedVersion = expectedVersion + 1;
+            var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
+            var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, after: null), metadata, id);
+            var deletedVersion = expectedVersion + 1;
 
-        // The delete diff carries the old state — record its schema version, not the model's (ADR-005).
-        await InsertChangeRecordAsync(
-            conn, tx, metadata, id, deletedVersion, ChangeOperation.Delete, diff, oldSchemaVersion, ct);
-        await tx.CommitAsync(ct);
+            // The delete diff carries the old state — record its schema version, not the model's (ADR-005).
+            await InsertChangeRecordAsync(
+                conn, tx, metadata, id, deletedVersion, ChangeOperation.Delete, diff, oldSchemaVersion, ct);
 
-        return new SaveResult(deletedVersion, ChangeOperation.Delete, diff);
+            return new SaveResult(deletedVersion, ChangeOperation.Delete, diff);
+        }, ct);
     }
+
+    /// <summary>
+    /// Rolls a document back to the state of <paramref name="toVersion"/> — recorded as
+    /// a normal update with <c>isRollback</c>/<c>restoredVersion</c> metadata, never as
+    /// a fourth operation; the history stays append-only (ADR-008).
+    /// </summary>
+    /// <typeparam name="T">The document CLR type.</typeparam>
+    /// <param name="id">The document identifier.</param>
+    /// <param name="toVersion">The version whose state is restored.</param>
+    /// <param name="expectedVersion">The expected current version (optimistic concurrency).</param>
+    /// <param name="ct">A cancellation token.</param>
+    /// <exception cref="RollbackNotPossibleException">
+    /// A diff on the way back contains policy entries without values (ADR-007).
+    /// </exception>
+    public async Task<SaveResult> RollbackAsync<T>(
+        string id,
+        long toVersion,
+        long expectedVersion,
+        CancellationToken ct = default)
+        where T : class
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(toVersion);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(expectedVersion, toVersion);
+        var metadata = _model.GetRequired<T>();
+        InputValidator.ValidateDocumentId(id);
+
+        return await ExecuteWriteAsync(async (conn, tx) =>
+        {
+            // 1. Current state (the concurrency guarantee comes from the final UPDATE's
+            //    version predicate; this read only provides the reconstruction base).
+            var current = await LoadRawAsync(conn, tx, metadata, id, ct)
+                ?? throw new DocumentNotFoundException(metadata.Name, id);
+            if (current.Version != expectedVersion)
+            {
+                throw new ConcurrencyException(metadata.Name, id, expectedVersion, current.Version);
+            }
+
+            EnsureSchemaNotNewer(metadata, id, current.SchemaVersion);
+
+            // 2. Target record: must exist and must not be a delete.
+            var target = await LoadChangeAsync(conn, tx, metadata, id, toVersion, ct)
+                ?? throw new ArgumentException(
+                    $"No change record at version {toVersion} for {metadata.Name}/{id}.", nameof(toVersion));
+            if (target.Operation == ChangeOperation.Delete)
+            {
+                throw new ArgumentException(
+                    $"Version {toVersion} of {metadata.Name}/{id} is a delete — " +
+                    "a rollback cannot restore non-existence.", nameof(toVersion));
+            }
+
+            // 3. Reconstruct: apply the diffs back from current down to toVersion (ADR-004).
+            var state = current.Data;
+            foreach (var change in await LoadChangesDescendingAsync(conn, tx, metadata, id, toVersion, current.Version, ct))
+            {
+                var diff = DocumentDiff.FromJson(change);
+                foreach (var (path, entry) in diff.Entries)
+                {
+                    if (entry.Kind != DiffEntryKind.Tracked)
+                    {
+                        throw new RollbackNotPossibleException(metadata.Name, id, path, entry.Kind);
+                    }
+                }
+
+                state = JsonDiffEngine.ApplyReverse(state, diff);
+            }
+
+            // 4. Lift the reconstructed state through the upcaster chain (ADR-008) and validate.
+            metadata.Upcast(state, target.SchemaVersion);
+            RunValidator(metadata, state);
+
+            // 5. Persist as a normal update with rollback metadata.
+            var rollbackMetadata = new JsonObject
+            {
+                ["isRollback"] = true,
+                ["restoredVersion"] = toVersion,
+            };
+            return await UpdateAsync(conn, tx, metadata, id, state, expectedVersion, ct, rollbackMetadata);
+        }, ct);
+    }
+
+    // ── Write internals ────────────────────────────────────────────────────────
 
     private async Task<SaveResult> InsertAsync(
         NpgsqlConnection conn,
@@ -276,7 +401,6 @@ public sealed partial class DocumentSession
         var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(before: null, newJson), metadata, id);
         await InsertChangeRecordAsync(
             conn, tx, metadata, id, insertedVersion, ChangeOperation.Insert, diff, metadata.SchemaVersion, ct);
-        await tx.CommitAsync(ct);
 
         return new SaveResult(insertedVersion, ChangeOperation.Insert, diff);
     }
@@ -288,7 +412,8 @@ public sealed partial class DocumentSession
         string id,
         JsonObject newJson,
         long expectedVersion,
-        CancellationToken ct)
+        CancellationToken ct,
+        JsonObject? extraMetadata)
     {
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -339,8 +464,8 @@ public sealed partial class DocumentSession
         var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, storedNewJson), metadata, id);
 
         await InsertChangeRecordAsync(
-            conn, tx, metadata, id, newVersion, ChangeOperation.Update, diff, metadata.SchemaVersion, ct);
-        await tx.CommitAsync(ct);
+            conn, tx, metadata, id, newVersion, ChangeOperation.Update, diff,
+            metadata.SchemaVersion, ct, extraMetadata);
 
         return new SaveResult(newVersion, ChangeOperation.Update, diff);
     }
@@ -355,7 +480,7 @@ public sealed partial class DocumentSession
         DocumentDiff diff,
         int schemaVersion,
         CancellationToken ct,
-        JsonObject? changeMetadata = null)
+        JsonObject? extraMetadata = null)
     {
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -370,10 +495,168 @@ public sealed partial class DocumentSession
         cmd.Parameters.AddWithValue("schemaVersion", schemaVersion);
         cmd.Parameters.AddWithValue("operation", (short)operation);
         AddJsonbParameter(cmd, "diff", diff.ToJson());
-        AddJsonbParameter(cmd, "metadata", changeMetadata ?? new JsonObject());
+        AddJsonbParameter(cmd, "metadata", BuildChangeMetadata(extraMetadata));
 
         await cmd.ExecuteNonQueryAsync(ct);
     }
+
+    /// <summary>
+    /// Builds the change metadata for this session: correlation id always, actor and
+    /// causation when configured, plus operation-specific extras (e.g. rollback markers).
+    /// </summary>
+    private JsonObject BuildChangeMetadata(JsonObject? extra)
+    {
+        var json = new JsonObject { ["correlationId"] = CorrelationId.ToString("N") };
+        if (_options.ActorId is not null)
+        {
+            json["actorId"] = _options.ActorId;
+        }
+
+        if (_options.CausationId is not null)
+        {
+            json["causationId"] = _options.CausationId;
+        }
+
+        if (extra is not null)
+        {
+            foreach (var (key, node) in extra)
+            {
+                json[key] = node?.DeepClone();
+            }
+        }
+
+        return json;
+    }
+
+    // ── Transaction plumbing ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Opens the session transaction lazily (and re-applies the scope, since
+    /// <c>SET LOCAL</c> is transaction-scoped).
+    /// </summary>
+    private async Task<(NpgsqlConnection Connection, NpgsqlTransaction Transaction)> EnsureTransactionAsync(
+        CancellationToken ct)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (_transaction is null)
+        {
+            _connection ??= await _dataSource.OpenConnectionAsync(ct);
+            _transaction = await _connection.BeginTransactionAsync(ct);
+            await _connection.SetScopeAsync(Scope, ct);
+        }
+
+        return (_connection!, _transaction);
+    }
+
+    /// <summary>
+    /// Runs a write under a savepoint: a failing write (typed conflict, unique violation,
+    /// rejected validator) rolls back only itself — earlier session writes stay intact
+    /// and the session remains usable.
+    /// </summary>
+    private async Task<TResult> ExecuteWriteAsync<TResult>(
+        Func<NpgsqlConnection, NpgsqlTransaction, Task<TResult>> write,
+        CancellationToken ct)
+    {
+        var (conn, tx) = await EnsureTransactionAsync(ct);
+        await tx.SaveAsync(WriteSavepoint, ct);
+        try
+        {
+            var result = await write(conn, tx);
+            await tx.ReleaseAsync(WriteSavepoint, ct);
+            return result;
+        }
+        catch
+        {
+            await tx.RollbackAsync(WriteSavepoint, ct);
+            throw;
+        }
+    }
+
+    // ── Rollback internals ─────────────────────────────────────────────────────
+
+    private sealed record RawDocument(JsonObject Data, long Version, int SchemaVersion);
+
+    private sealed record ChangeHead(ChangeOperation Operation, int SchemaVersion);
+
+    private async Task<RawDocument?> LoadRawAsync(
+        NpgsqlConnection conn, NpgsqlTransaction tx, DocumentTypeMetadata metadata, string id, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            SELECT data::text, version, schema_version
+            FROM papuma.document
+            WHERE scope = @scope AND tenant_id = @tenantId
+              AND document_type = @type AND id = @id
+            """;
+        AddIdentityParameters(cmd, metadata.Name, id);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+        {
+            return null;
+        }
+
+        return new RawDocument(
+            (JsonObject)JsonNode.Parse(reader.GetString(0))!,
+            reader.GetInt64(1),
+            reader.GetInt32(2));
+    }
+
+    private async Task<ChangeHead?> LoadChangeAsync(
+        NpgsqlConnection conn, NpgsqlTransaction tx, DocumentTypeMetadata metadata, string id,
+        long version, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            SELECT operation, schema_version
+            FROM papuma.change
+            WHERE scope = @scope AND tenant_id = @tenantId
+              AND document_type = @type AND document_id = @id AND version = @version
+            """;
+        AddIdentityParameters(cmd, metadata.Name, id);
+        cmd.Parameters.AddWithValue("version", version);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+        {
+            return null;
+        }
+
+        return new ChangeHead((ChangeOperation)reader.GetInt16(0), reader.GetInt32(1));
+    }
+
+    private async Task<IReadOnlyList<JsonObject>> LoadChangesDescendingAsync(
+        NpgsqlConnection conn, NpgsqlTransaction tx, DocumentTypeMetadata metadata, string id,
+        long toVersionExclusive, long fromVersionInclusive, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            SELECT diff::text
+            FROM papuma.change
+            WHERE scope = @scope AND tenant_id = @tenantId
+              AND document_type = @type AND document_id = @id
+              AND version > @toVersion AND version <= @fromVersion
+            ORDER BY version DESC
+            """;
+        AddIdentityParameters(cmd, metadata.Name, id);
+        cmd.Parameters.AddWithValue("toVersion", toVersionExclusive);
+        cmd.Parameters.AddWithValue("fromVersion", fromVersionInclusive);
+
+        var diffs = new List<JsonObject>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            diffs.Add((JsonObject)JsonNode.Parse(reader.GetString(0))!);
+        }
+
+        return diffs;
+    }
+
+    // ── Shared helpers ─────────────────────────────────────────────────────────
 
     /// <summary>
     /// Builds the precise failure for a zero-row write: not found vs. version conflict
@@ -485,10 +768,15 @@ public sealed partial class DocumentSession
 
     private void AddIdentityParameters(NpgsqlCommand cmd, string documentType, string id)
     {
+        AddScopeParameters(cmd, documentType);
+        cmd.Parameters.AddWithValue("id", id);
+    }
+
+    private void AddScopeParameters(NpgsqlCommand cmd, string documentType)
+    {
         cmd.Parameters.AddWithValue("scope", Scope.Scope.ToString());
         cmd.Parameters.AddWithValue("tenantId", Scope.TenantId ?? string.Empty);
         cmd.Parameters.AddWithValue("type", documentType);
-        cmd.Parameters.AddWithValue("id", id);
     }
 
     private static void AddJsonbParameter(NpgsqlCommand cmd, string name, JsonNode json)

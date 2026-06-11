@@ -60,7 +60,7 @@ public sealed class PolicyAndKeyTests : IAsyncLifetime
     [Fact]
     public async Task Save_AppliesEveryPolicy_BeforeTheDiffReachesTheFeed()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
         var id = NewId();
 
         var result = await session.SaveAsync(
@@ -92,9 +92,10 @@ public sealed class PolicyAndKeyTests : IAsyncLifetime
     public async Task PolicyDiff_RoundTripsThroughTheStoredChangeRecord()
     {
         var scope = NewTenant();
-        var session = _store.OpenSession(scope);
+        await using var session = _store.OpenSession(scope);
         var id = NewId();
         await session.SaveAsync(new PolicyDoc(id, "Harry", NewEmail(), "h1"), 0);
+        await session.CommitAsync();
 
         var storedDiff = DocumentDiff.FromJson(await LoadStoredDiffAsync(scope, id, version: 1));
 
@@ -107,7 +108,7 @@ public sealed class PolicyAndKeyTests : IAsyncLifetime
     [Fact]
     public async Task Delete_RedactsSensitiveFields_EvenInTheLastDiff()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
         var id = NewId();
         var email = NewEmail();
         await session.SaveAsync(new PolicyDoc(id, "Gone", email, "h1"), 0);
@@ -123,7 +124,7 @@ public sealed class PolicyAndKeyTests : IAsyncLifetime
     [Fact]
     public async Task UniqueKey_Violation_ThrowsTypedException_WithKeyPath()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
         var email = NewEmail();
         await session.SaveAsync(new PolicyDoc(NewId(), "First", email, "h1"), 0);
 
@@ -138,16 +139,21 @@ public sealed class PolicyAndKeyTests : IAsyncLifetime
     public async Task UniqueKey_IsScopedPerTenant()
     {
         var email = NewEmail();
-        await _store.OpenSession(NewTenant()).SaveAsync(new PolicyDoc(NewId(), "A", email, "h1"), 0);
+        await using (var sessionA = _store.OpenSession(NewTenant()))
+        {
+            await sessionA.SaveAsync(new PolicyDoc(NewId(), "A", email, "h1"), 0);
+            await sessionA.CommitAsync();
+        }
 
         // Same email in another tenant must not conflict.
-        await _store.OpenSession(NewTenant()).SaveAsync(new PolicyDoc(NewId(), "B", email, "h2"), 0);
+        await using var sessionB = _store.OpenSession(NewTenant());
+        await sessionB.SaveAsync(new PolicyDoc(NewId(), "B", email, "h2"), 0);
     }
 
     [Fact]
     public async Task LoadByKey_FindsDocument_ByDeclaredUniqueKey()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
         var id = NewId();
         var email = NewEmail();
         await session.SaveAsync(new PolicyDoc(id, "Harry", email, "h1"), 0);
@@ -161,7 +167,7 @@ public sealed class PolicyAndKeyTests : IAsyncLifetime
     [Fact]
     public async Task LoadByKey_ReturnsNull_WhenNoMatch()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
 
         Assert.Null(await session.LoadByKeyAsync<PolicyDoc>(x => x.Email, NewEmail()));
     }
@@ -169,7 +175,7 @@ public sealed class PolicyAndKeyTests : IAsyncLifetime
     [Fact]
     public async Task LoadByKey_RejectsUndeclaredKeys()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
 
         await Assert.ThrowsAsync<ArgumentException>(
             () => session.LoadByKeyAsync<PolicyDoc>(x => x.PasswordHash, "x"));
@@ -178,7 +184,7 @@ public sealed class PolicyAndKeyTests : IAsyncLifetime
     [Fact]
     public async Task UnregisteredDocumentType_FailsLoudly()
     {
-        var session = _store.OpenSession(NewTenant());
+        await using var session = _store.OpenSession(NewTenant());
 
         await Assert.ThrowsAsync<DocumentTypeNotRegisteredException>(
             () => session.SaveAsync(new PlainDoc(NewId(), "x"), 0));
