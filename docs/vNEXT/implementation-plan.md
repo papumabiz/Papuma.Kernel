@@ -59,28 +59,32 @@ ADRs: [001](adr/adr-001-postgresql-18-only.md) · Ernte: `Tenancy/ScopeContext`,
 **DoD erfüllt:** Idempotenz-Test (2× EnsureSchema), 5 RLS-Isolationstests gegen
 Non-Superuser-Rolle (Tenant/Platform/All/ohne Scope/WITH CHECK), Versionscheck-Tests.
 
-## Phase 2 — Write-Pfad-Spike: Save / Load / Delete + Diff-Engine
+## Phase 2 — Write-Pfad-Spike: Save / Load / Delete + Diff-Engine ✅ (2026-06-11)
 
 ADRs: [002](adr/adr-002-document-as-truth.md) · [003](adr/adr-003-write-path-concurrency.md) ·
 [004](adr/adr-004-changerecord-diff-only.md) · Ernte: — (alles neu)
 
-- [ ] `DocumentSession` (minimal): `LoadAsync`, `SaveAsync(doc, expectedVersion)`,
-      `DeleteAsync(id, expectedVersion)`
-- [ ] Write als Einzelstatement mit `RETURNING old.data, new.data, new.version`
-      (Insert/Update/Delete-Varianten); **Spike-Ziel: RETURNING OLD/NEW gegen echtes
-      PG 18 verifizieren** — das ist die riskanteste Annahme des Designs
-- [ ] `ConcurrencyException` (erwartete + aktuelle Version, ADR-003-Nachtrag) und
-      `DocumentNotFoundException`
-- [ ] Diff-Engine: reversibles Feld-Diff (`{path: {old, new}}`, Pfad-Syntax inkl.
-      Arrays, ADR-004); Property-Tests: `apply(diff, old) == new` und
-      `applyReverse(diff, new) == old`
-- [ ] ChangeRecord-Insert in derselben Transaktion (operation, version,
-      schema_version, diff, metadata, occurred_at, txid via `pg_current_xact_id()`)
-- [ ] Unique-Index `(tenant, type, id, version)` auf `papuma.change` greift
+- [x] **Spike bestanden**: `RETURNING old.data, new.data, new.version` gegen echtes
+      PG 18 verifiziert (`SqlReturningSpikeTests`) — die riskanteste Design-Annahme trägt
+- [x] `DocumentStore` / `DocumentSession` (minimal): `LoadAsync`, `SaveAsync(id, doc,
+      expectedVersion)`, `DeleteAsync(id, expectedVersion)`; Dokumenttyp vorerst
+      `typeof(T).Name` (Metamodell in Phase 3), `schema_version` fix 1 (Phase 4)
+- [x] Write als Einzelstatement; Insert via `ON CONFLICT DO NOTHING` + Versions-Probe;
+      **Neuanlage nach Delete setzt Versionszählung fort** (`max(change.version) + 1`,
+      ADR-003-Nachtrag)
+- [x] `ConcurrencyException` (Expected/Actual, Typ, Id) + `DocumentNotFoundException`;
+      0-Treffer-Writes unterscheiden präzise zwischen beiden
+- [x] `JsonDiffEngine`: reversibles Feld-Diff; **Arrays atomar**, Null ≠ Absent über
+      Schlüssel-Anwesenheit kodiert (ADR-004-Nachtrag); Roundtrip-Tests
+      `Apply`/`ApplyReverse` über Theorie-Fälle; Wire-Format `ToJson`/`FromJson`
+- [x] ChangeRecord-Insert in derselben Transaktion; Diff gegen die von PG
+      zurückgegebene (jsonb-normalisierte) Form gerechnet
+- [x] Unique-Index greift — nachgewiesen durch den Atomizitätstest (geseedete
+      Konflikt-Zeile → Save schlägt fehl → Dokument unverändert)
 
-**DoD:** Konflikttest (zwei Writer, einer verliert typisiert); Diff-Roundtrip-Tests;
-Dokument + ChangeRecord nie inkonsistent (Rollback-Test mit künstlichem Fehler nach
-UPDATE, vor Change-Insert).
+**DoD erfüllt:** Konflikttests (Update/Insert/Delete je typisiert, mit ActualVersion),
+Diff-Roundtrips, Atomizitätstest, lückenlose Change-Historie inkl. Insert-nach-Delete,
+Tenant-Isolation über Schicht-1-Prädikate. 48 Tests grün.
 
 ## Phase 3 — Metamodell + Policies + Keys
 
@@ -242,8 +246,8 @@ PG-18-Container.
 
 | # | Risiko | Behandlung |
 |---|--------|-----------|
-| 1 | `RETURNING OLD/NEW`-Verhalten (Syntax-Details, Interaktion mit `jsonb_set`) | Phase 2 ist bewusst der Spike dafür — frühestmöglich verifizieren |
-| 2 | PG-18-Image-Verfügbarkeit in CI (Testcontainers) | In Phase 0 klären |
-| 3 | Diff-Pfad-Syntax für Arrays (Index vs. Identität) | In Phase 2 entscheiden und in ADR-004 nachtragen |
+| 1 | ~~`RETURNING OLD/NEW`-Verhalten~~ | ✅ Phase 2: verifiziert für UPDATE/DELETE (Spike-Tests); Interaktion mit `jsonb_set` folgt in Phase 5 |
+| 2 | ~~PG-18-Image in CI~~ | ✅ Phase 0: `postgres:18-alpine` läuft lokal (Podman); CI-Lauf bestätigt sich beim ersten vnext-Push |
+| 3 | ~~Diff-Pfad-Syntax für Arrays~~ | ✅ Phase 2: Arrays atomar, in ADR-004 nachgetragen |
 | 4 | Performance der Diff-Engine bei großen Dokumenten | Benchmark in Phase 2; Limit-Empfehlung dokumentieren |
 | 5 | `Reference`-Policy: eigener Sensitive Store nötig? | Start ohne (Referenz aufs Dokument); Bedarf nach Phase 8 neu bewerten (ADR-007) |
