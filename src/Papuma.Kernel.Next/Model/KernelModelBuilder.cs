@@ -75,6 +75,7 @@ public sealed class KernelModelBuilder
         private readonly Dictionary<string, bool> _keyOverrides = new(StringComparer.Ordinal); // path → unique
         private readonly Dictionary<int, Action<System.Text.Json.Nodes.JsonObject>> _upcasters = [];
         private LambdaExpression? _idExpression;
+        private Action<object>? _validator;
 
         internal DocumentTypeBuilder()
         {
@@ -117,6 +118,18 @@ public sealed class KernelModelBuilder
         {
             ArgumentNullException.ThrowIfNull(property);
             _keyOverrides[JsonPathResolver.Resolve(property)] = false;
+            return this;
+        }
+
+        /// <summary>
+        /// Registers a validator that is run against the stored result of every patch
+        /// before commit — throw any exception to reject and roll back (ADR-012, point 5).
+        /// </summary>
+        /// <param name="validator">The validator; throws to reject the patched state.</param>
+        public DocumentTypeBuilder<T> Validate(Action<T> validator)
+        {
+            ArgumentNullException.ThrowIfNull(validator);
+            _validator = document => validator((T)document);
             return this;
         }
 
@@ -199,7 +212,8 @@ public sealed class KernelModelBuilder
                 orderedUpcasters.Add(upcaster);
             }
 
-            return new DocumentTypeMetadata(name, clrType, policies, keyMetadata, BuildIdGetter(clrType), orderedUpcasters);
+            return new DocumentTypeMetadata(
+                name, clrType, policies, keyMetadata, BuildIdGetter(clrType), orderedUpcasters, _validator);
         }
 
         internal void SetPolicy(string path, FieldPolicy policy) => _policyOverrides[path] = policy;

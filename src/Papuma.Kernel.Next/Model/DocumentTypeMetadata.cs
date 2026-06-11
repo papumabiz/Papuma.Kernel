@@ -14,6 +14,12 @@ public sealed class DocumentTypeMetadata
     private readonly Func<object, string?> _idGetter;
     private readonly IReadOnlyList<Action<JsonObject>> _upcasters;
 
+    /// <summary>
+    /// Gets the optional document validator (throws to reject). Patch paths deserialize
+    /// the stored result and run it before commit (ADR-012, point 5).
+    /// </summary>
+    public Action<object>? Validator { get; }
+
     /// <summary>Gets the logical document type name (table column <c>document_type</c>).</summary>
     public string Name { get; }
 
@@ -41,7 +47,8 @@ public sealed class DocumentTypeMetadata
         IReadOnlyDictionary<string, FieldPolicy> policies,
         IReadOnlyList<KeyMetadata> keys,
         Func<object, string?> idGetter,
-        IReadOnlyList<Action<JsonObject>> upcasters)
+        IReadOnlyList<Action<JsonObject>> upcasters,
+        Action<object>? validator)
     {
         Name = name;
         ClrType = clrType;
@@ -49,6 +56,7 @@ public sealed class DocumentTypeMetadata
         Keys = keys;
         _idGetter = idGetter;
         _upcasters = upcasters;
+        Validator = validator;
         SchemaVersion = upcasters.Count + 1;
     }
 

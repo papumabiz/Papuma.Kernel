@@ -137,26 +137,35 @@ ADRs: [005](adr/adr-005-schema-evolution.md) · Ernte: —
 Lazy-Test, Persist-Test, drei Guard-Tests (Load/Save/Delete) inkl. Rollback-Nachweis.
 85 Tests grün.
 
-## Phase 5 — Patch-Primitiv + Bulk-Operationen
+## Phase 5 — Patch-Primitiv + Bulk-Operationen ✅ (2026-06-11)
 
 ADRs: [012](adr/adr-012-partial-updates.md) · [014](adr/adr-014-bulk-operations.md) · Ernte: —
 
-- [ ] `PatchAsync` mit Katalog `Set` / `Remove` / `Increment` auf typisierten Pfaden
-- [ ] SQL-Generierung via `jsonb_set` & Co., ein Statement, `RETURNING old/new`
-- [ ] `expectedVersion` optional; ohne → Field-Level Last-Writer-Wins
-- [ ] Optionaler Validator pro Typ: `new.data` deserialisieren + prüfen vor Commit
-- [ ] Schema-Guard: Patch auf veraltete `schema_version` mit upcasting-betroffenem
-      Pfad → typisierter Fehler
-- [ ] Diff/Policies/ChangeRecord identisch zum Save-Pfad (gemeinsame Codebasis)
-- [ ] Bulk (ADR-014): `PatchWhereAsync` (Key-Prädikate aus dem Metamodell) +
-      `PatchManyAsync(ids)` + `DeleteWhereAsync`/`DeleteManyAsync`; set-basiertes
-      `RETURNING` → ein ChangeRecord pro Dokument, gemeinsame `correlationId`,
-      gebündelte Change-Inserts; Schema-Guard analog Einzel-Patch
+- [x] `PatchAsync(id, p => p.Set(...).Remove(...).Increment(...))` — typisierte Pfade,
+      bewusst minimaler Katalog (`PatchBuilder<T>`)
+- [x] SQL-Generierung: geschachtelte `jsonb_set`/`#-`-Ausdrücke, Pfade und Werte
+      ausschließlich als Parameter gebunden; `Increment` liest atomar im Statement
+      (`COALESCE((data #>> path)::numeric, 0) + n`); ein Statement, `RETURNING old/new`
+- [x] `expectedVersion` optional (Field-Level LWW); mit Version → `ConcurrencyException`,
+      0 Treffer ohne Version → `DocumentNotFoundException`
+- [x] Validator pro Typ (`d.Validate(doc => ...)`): `new.data` wird vor dem Commit
+      deserialisiert und geprüft — Wurf rollt das bereits angewendete UPDATE zurück
+- [x] Schema-Guard: Patch auf veraltete `schema_version` → `SchemaUpcastRequiredException`
+      (konservativ für alle Pfade — Upcaster sind opak; Load + Save hebt das Schema);
+      gespeicherte Version > Modell weiterhin `SchemaVersionConflictException`
+- [x] Diff/Policies/ChangeRecord teilen die Save-Codebasis (`PolicyApplier`,
+      `InsertChangeRecordAsync`) — `[TrackHash]` wirkt über den Patch-Pfad identisch
+- [x] Bulk: `PatchManyAsync(ids)` / `PatchWhereAsync(key, value)` (nur deklarierte
+      Keys) / `DeleteManyAsync` / `DeleteWhereAsync`; set-basiertes `RETURNING` →
+      ein ChangeRecord pro Dokument mit gemeinsamer `correlationId` in den Metadaten;
+      Schema-Guard pro Zeile, ein Verstoß rollt alles zurück (atomar)
 
-**DoD:** Paralleltest: zwei Patches auf verschiedene Felder konfligieren nicht,
-Versionen bleiben linear; Validator-Rollback-Test; Policy-Test über Patch-Pfad
-(`[TrackHash]`-Passwort); Bulk-Test: N Treffer → N ChangeRecords mit korrekten
-Einzel-Diffs, atomar; Bulk-Konflikttest gegen parallelen optimistischen Writer.
+**DoD erfüllt:** Paralleltest (verschiedene Felder, lineare Versionen),
+Validator-Rollback (kein Versions-Bump, kein ChangeRecord), `[TrackHash]` über Patch,
+Upcast-Guard mit Load+Save-Heilung, Bulk: 3 Treffer → 3 ChangeRecords mit geteilter
+correlationId, PatchWhere nur auf Treffer, Bulk-Atomizität (ein v1-Dokument rollt
+alles zurück), Bulk-Konflikt gegen optimistischen Writer, DeleteWhere mit
+Delete-Records, leere ID-Liste. 99 Tests grün.
 
 ## Phase 6 — Session als Unit of Work + Rollback
 

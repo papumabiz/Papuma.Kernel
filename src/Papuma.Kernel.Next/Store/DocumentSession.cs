@@ -31,7 +31,7 @@ namespace Papuma.Kernel.Store;
 /// lands in phase 4.
 /// </para>
 /// </remarks>
-public sealed class DocumentSession
+public sealed partial class DocumentSession
 {
     private readonly NpgsqlDataSource _dataSource;
     private readonly KernelModel _model;
@@ -354,7 +354,8 @@ public sealed class DocumentSession
         ChangeOperation operation,
         DocumentDiff diff,
         int schemaVersion,
-        CancellationToken ct)
+        CancellationToken ct,
+        JsonObject? changeMetadata = null)
     {
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -362,13 +363,14 @@ public sealed class DocumentSession
             INSERT INTO papuma.change
                 (scope, tenant_id, document_type, document_id, version, schema_version, operation, diff, metadata)
             VALUES
-                (@scope, @tenantId, @type, @id, @version, @schemaVersion, @operation, @diff, '{}'::jsonb)
+                (@scope, @tenantId, @type, @id, @version, @schemaVersion, @operation, @diff, @metadata)
             """;
         AddIdentityParameters(cmd, metadata.Name, id);
         cmd.Parameters.AddWithValue("version", version);
         cmd.Parameters.AddWithValue("schemaVersion", schemaVersion);
         cmd.Parameters.AddWithValue("operation", (short)operation);
         AddJsonbParameter(cmd, "diff", diff.ToJson());
+        AddJsonbParameter(cmd, "metadata", changeMetadata ?? new JsonObject());
 
         await cmd.ExecuteNonQueryAsync(ct);
     }
