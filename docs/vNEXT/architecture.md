@@ -225,6 +225,14 @@ Rollback ist bewusst **kein eigener Operationstyp**, sondern ein Update mit
 Beim Start (zunächst Reflection, später optional Source Generator) baut der Kernel pro
 registriertem Dokumenttyp ein vollständiges Metamodell:
 
+> **Source Generator — wann, nicht ob:** Der Reflection-Scan läuft einmal beim Start
+> (Millisekunden); Laufzeit-Performance ist kein SG-Argument. Die Fluent-Overrides
+> bleiben per ADR-007 ohnehin Runtime (Policies ohne Recompile änderbar) — ein SG kann
+> nur den Attribut-Teil vorberechnen. Trigger für den Umstieg: (a) NativeAOT/Trimming
+> als Ziel (dann zusammen mit STJ-`JsonSerializerContext`), (b) Compile-Zeit-Diagnostik
+> als DX-Politur. Da `KernelModel` eine immutable Datenstruktur ist, ist der Tausch der
+> Bauquelle für alle Konsumenten unsichtbar — die Entscheidung ist gefahrlos vertagt.
+
 ```csharp
 DocumentTypeMetadata
 {
