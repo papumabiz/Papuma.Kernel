@@ -225,21 +225,30 @@ deutlich), Rebuild-Replay, Poison (2 Versuche → Skip + Failure-Eintrag, nachfo
 Changes fließen), Lag 2→0, Leader-Lock-Test (gesperrter Checkpoint wird konfliktfrei
 übersprungen), Uncommitted-Invisibility. 116 Tests grün.
 
-## Phase 8 — Event-Log
+## Phase 8 — Event-Log ✅ (2026-06-11)
 
 ADRs: [013](adr/adr-013-business-event-log.md) · Ernte: Retention-Worker-Muster aus `Gdpr/RetentionWorker`
 
-- [ ] Tabelle `papuma.event` (inkl. txid, RLS) in `EnsureSchemaAsync`
-- [ ] `session.Append(...)` in der Session-Transaktion; Event-Typen im Metamodell
-      registriert, Policies wirken auf Payload
-- [ ] Konsum über dieselbe Engine: Handler abonnieren Change Feed, Event-Log oder
-      beides (eigene Checkpoints pro Feed)
-- [ ] Typ-spezifische Retention (Lösch-Worker, opt-in pro Event-Typ)
-- [ ] Guard dokumentieren/testen: kein Upcasting für Events (unveränderliche Fakten)
+- [x] Tabelle `papuma.event` (txid, RLS inkl. FORCE, Index auf `(event_type,
+      occurred_at)` für Retention) in `EnsureSchemaAsync`
+- [x] `session.AppendAsync(...)` in der Session-Transaktion (Savepoint, NOTIFY,
+      gemeinsame `correlationId`/`actorId`/`causationId`); Event-Typen im Metamodell
+      (`Event<T>()` + `EventTypeBuilder`: Policies, Retention)
+- [x] **Policies wirken auf den Payload in natürlicher Form**: Redact/DoNotTrack
+      entfernen das Feld, Hash ersetzt den Wert; **Reference wird beim Build
+      abgelehnt** (Events haben keinen Referenzort — concepts.md §12)
+- [x] `EventFeedProcessor`: gleiche Engine-Garantien (txid-Snapshot, Stop-the-line,
+      Poison, SKIP-LOCKED-Leader, NOTIFY-Wakeup, Lag); eigener Checkpoint-Raum via
+      `event:`-Präfix — keine globale Ordnung über beide Feeds (concepts.md §13)
+- [x] `EventRetention.PurgeExpiredAsync` (opt-in pro Typ via `.Retention(...)`)
+- [x] Kein Upcasting für Events: bewusst keine `Upcast`-API am `EventTypeBuilder`,
+      in XML-Docs begründet (unveränderliche Fakten, additive Regeln)
 
-**DoD:** Login-Szenario: `Append(UserLoggedIn)` + `Patch(lastLoginAt)` atomar mit
-gemeinsamer correlationId; Retention-Test; Policy-Test auf Event-Payload
-(`[SensitiveData]`-IP).
+**DoD erfüllt:** Login-Szenario (Append + Patch atomar, geteilte correlationId über
+beide Feeds), Uncommitted-Append-Rollback, Payload-Policy-Test (IP entfernt, Token
+gehasht), Event-Processor-Zustellung in Ordnung + Deserialize, Retention purged nur
+konfigurierte Typen, Reference-Ablehnung, nicht registrierter Event-Typ wirft.
+123 Tests grün.
 
 ## Phase 9 — AspNetCore-Integration, DX und Doku
 

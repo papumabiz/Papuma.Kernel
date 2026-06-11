@@ -19,6 +19,7 @@ namespace Papuma.Kernel.Model;
 public sealed class KernelModelBuilder
 {
     private readonly Dictionary<Type, IDocumentTypeBuilder> _builders = [];
+    private readonly Dictionary<Type, IEventTypeBuilder> _eventBuilders = [];
 
     /// <summary>
     /// Registers a document type using attribute defaults only.
@@ -47,6 +48,33 @@ public sealed class KernelModelBuilder
     }
 
     /// <summary>
+    /// Registers an event type (ADR-013) using attribute defaults only.
+    /// </summary>
+    /// <typeparam name="T">The event CLR type.</typeparam>
+    public KernelModelBuilder Event<T>() where T : class => Event<T>(_ => { });
+
+    /// <summary>
+    /// Registers an event type (ADR-013) with fluent overrides on top of the
+    /// attribute defaults.
+    /// </summary>
+    /// <typeparam name="T">The event CLR type.</typeparam>
+    /// <param name="configure">The fluent configuration.</param>
+    public KernelModelBuilder Event<T>(Action<EventTypeBuilder<T>> configure) where T : class
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+
+        if (_eventBuilders.ContainsKey(typeof(T)))
+        {
+            throw new InvalidOperationException($"Event type {typeof(T).Name} is already registered.");
+        }
+
+        var builder = new EventTypeBuilder<T>();
+        configure(builder);
+        _eventBuilders[typeof(T)] = builder;
+        return this;
+    }
+
+    /// <summary>
     /// Builds the immutable model. Throws when a registered type has no resolvable id.
     /// </summary>
     public KernelModel Build()
@@ -57,12 +85,133 @@ public sealed class KernelModelBuilder
             byType[clrType] = builder.Build();
         }
 
-        return new KernelModel(byType);
+        var eventsByType = new Dictionary<Type, EventTypeMetadata>();
+        foreach (var (clrType, builder) in _eventBuilders)
+        {
+            eventsByType[clrType] = builder.Build();
+        }
+
+        return new KernelModel(byType, eventsByType);
     }
 
     private interface IDocumentTypeBuilder
     {
         DocumentTypeMetadata Build();
+    }
+
+    private interface IEventTypeBuilder
+    {
+        EventTypeMetadata Build();
+    }
+
+    /// <summary>
+    /// Fluent configuration of one event type (ADR-013). Events are immutable facts —
+    /// there are deliberately no upcasters and no keys; transforming changes require a
+    /// new event type.
+    /// </summary>
+    /// <typeparam name="T">The event CLR type.</typeparam>
+    public sealed class EventTypeBuilder<T> : IEventTypeBuilder where T : class
+    {
+        private readonly Dictionary<string, FieldPolicy> _policyOverrides = new(StringComparer.Ordinal);
+        private TimeSpan? _retention;
+
+        internal EventTypeBuilder()
+        {
+        }
+
+        /// <summary>
+        /// Starts a policy override for a payload property (overrides any attribute default).
+        /// </summary>
+        public EventPropertyPolicyBuilder Property(Expression<Func<T, object?>> property)
+        {
+            ArgumentNullException.ThrowIfNull(property);
+            return new EventPropertyPolicyBuilder(this, JsonPathResolver.Resolve(property));
+        }
+
+        /// <summary>
+        /// Declares a retention period: events older than this may be purged by
+        /// <c>EventRetention</c> (opt-in, ADR-013).
+        /// </summary>
+        public EventTypeBuilder<T> Retention(TimeSpan retention)
+        {
+            if (retention < TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(nameof(retention), "Retention must not be negative.");
+            }
+
+            _retention = retention;
+            return this;
+        }
+
+        EventTypeMetadata IEventTypeBuilder.Build()
+        {
+            var clrType = typeof(T);
+            var name = clrType.Name;
+            InputValidator.ValidateDocumentType(name);
+
+            var policies = new Dictionary<string, FieldPolicy>(StringComparer.Ordinal);
+            var ignoredKeys = new Dictionary<string, bool>(StringComparer.Ordinal);
+            ScanType(clrType, prefix: string.Empty, policies, ignoredKeys, visited: []);
+
+            foreach (var (path, policy) in _policyOverrides)
+            {
+                if (policy == FieldPolicy.Track)
+                {
+                    policies.Remove(path);
+                }
+                else
+                {
+                    policies[path] = policy;
+                }
+            }
+
+            // Reference has no source location for events — the event IS the record (ADR-013).
+            var reference = policies.FirstOrDefault(p => p.Value == FieldPolicy.Reference);
+            if (reference.Key is not null)
+            {
+                throw new InvalidOperationException(
+                    $"Event type {name}: property '{reference.Key}' uses the Reference policy, " +
+                    "which is not applicable to events — there is no document the reference could " +
+                    "point to. Use Redact or Hash instead (ADR-013).");
+            }
+
+            return new EventTypeMetadata(name, clrType, policies, _retention);
+        }
+
+        internal void SetPolicy(string path, FieldPolicy policy) => _policyOverrides[path] = policy;
+
+        /// <summary>
+        /// Fluent policy selection for one event payload property.
+        /// </summary>
+        public sealed class EventPropertyPolicyBuilder
+        {
+            private readonly EventTypeBuilder<T> _parent;
+            private readonly string _path;
+
+            internal EventPropertyPolicyBuilder(EventTypeBuilder<T> parent, string path)
+            {
+                _parent = parent;
+                _path = path;
+            }
+
+            /// <summary>Stores the field verbatim (resets an attribute default).</summary>
+            public EventTypeBuilder<T> Track() => Set(FieldPolicy.Track);
+
+            /// <summary>Removes the field from the stored payload.</summary>
+            public EventTypeBuilder<T> Redact() => Set(FieldPolicy.Redact);
+
+            /// <summary>Replaces the field value with a SHA-256 hex hash.</summary>
+            public EventTypeBuilder<T> StoreAsHash() => Set(FieldPolicy.Hash);
+
+            /// <summary>Removes the field from the stored payload.</summary>
+            public EventTypeBuilder<T> DoNotTrack() => Set(FieldPolicy.DoNotTrack);
+
+            private EventTypeBuilder<T> Set(FieldPolicy policy)
+            {
+                _parent.SetPolicy(_path, policy);
+                return _parent;
+            }
+        }
     }
 
     /// <summary>

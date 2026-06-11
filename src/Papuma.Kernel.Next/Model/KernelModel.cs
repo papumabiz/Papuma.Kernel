@@ -10,11 +10,15 @@ namespace Papuma.Kernel.Model;
 public sealed class KernelModel
 {
     private readonly IReadOnlyDictionary<Type, DocumentTypeMetadata> _byType;
+    private readonly IReadOnlyDictionary<Type, EventTypeMetadata> _eventsByType;
     private readonly IReadOnlyDictionary<string, (DocumentTypeMetadata Metadata, KeyMetadata Key)> _byIndexName;
 
-    internal KernelModel(IReadOnlyDictionary<Type, DocumentTypeMetadata> byType)
+    internal KernelModel(
+        IReadOnlyDictionary<Type, DocumentTypeMetadata> byType,
+        IReadOnlyDictionary<Type, EventTypeMetadata> eventsByType)
     {
         _byType = byType;
+        _eventsByType = eventsByType;
 
         var byIndexName = new Dictionary<string, (DocumentTypeMetadata, KeyMetadata)>(StringComparer.Ordinal);
         foreach (var metadata in byType.Values)
@@ -30,6 +34,19 @@ public sealed class KernelModel
 
     /// <summary>Gets the metadata of all registered document types.</summary>
     public IReadOnlyCollection<DocumentTypeMetadata> DocumentTypes => (IReadOnlyCollection<DocumentTypeMetadata>)_byType.Values;
+
+    /// <summary>Gets the metadata of all registered event types (ADR-013).</summary>
+    public IReadOnlyCollection<EventTypeMetadata> EventTypes => (IReadOnlyCollection<EventTypeMetadata>)_eventsByType.Values;
+
+    /// <summary>
+    /// Returns the metadata for an event CLR type.
+    /// </summary>
+    /// <typeparam name="T">The event CLR type.</typeparam>
+    /// <exception cref="EventTypeNotRegisteredException">The type is not registered.</exception>
+    public EventTypeMetadata GetRequiredEvent<T>() where T : class =>
+        _eventsByType.TryGetValue(typeof(T), out var metadata)
+            ? metadata
+            : throw new EventTypeNotRegisteredException(typeof(T));
 
     /// <summary>
     /// Returns the metadata for a CLR type.

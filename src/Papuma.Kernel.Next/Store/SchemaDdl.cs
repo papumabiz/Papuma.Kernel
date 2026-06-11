@@ -70,6 +70,24 @@ internal static class SchemaDdl
         CREATE UNIQUE INDEX IF NOT EXISTS ux_papuma_change_document_version
             ON papuma.change (scope, tenant_id, document_type, document_id, version);
 
+        -- ── Event log: append-only facts (ADR-013), txid for gapless reads ────────
+        CREATE TABLE IF NOT EXISTS papuma.event
+        (
+            seq             bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            scope           text        NOT NULL,
+            tenant_id       text        NOT NULL DEFAULT '',
+            event_type      text        NOT NULL,
+            payload         jsonb       NOT NULL,
+            metadata        jsonb       NOT NULL DEFAULT '{}'::jsonb,
+            occurred_at     timestamptz NOT NULL DEFAULT now(),
+            txid            xid8        NOT NULL DEFAULT pg_current_xact_id(),
+
+            CONSTRAINT ck_event_scope CHECK (scope IN ('Platform', 'Tenant'))
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_papuma_event_type_occurred
+            ON papuma.event (event_type, occurred_at);
+
         -- ── Handler infrastructure (ADR-009): no tenant data, no RLS ──────────────
         CREATE TABLE IF NOT EXISTS papuma.checkpoint
         (
@@ -95,6 +113,37 @@ internal static class SchemaDdl
         ALTER TABLE papuma.document FORCE ROW LEVEL SECURITY;
         DROP POLICY IF EXISTS scope_isolation_document ON papuma.document;
         CREATE POLICY scope_isolation_document ON papuma.document
+            USING (
+                current_setting('app.current_scope', true) = 'All'
+                OR
+                (
+                    current_setting('app.current_scope', true) = 'Tenant'
+                    AND scope = 'Tenant'
+                    AND tenant_id = current_setting('app.current_tenant', true)
+                )
+                OR
+                (
+                    current_setting('app.current_scope', true) = 'Platform'
+                    AND scope = 'Platform'
+                )
+            )
+            WITH CHECK (
+                (
+                    current_setting('app.current_scope', true) = 'Tenant'
+                    AND scope = 'Tenant'
+                    AND tenant_id = current_setting('app.current_tenant', true)
+                )
+                OR
+                (
+                    current_setting('app.current_scope', true) = 'Platform'
+                    AND scope = 'Platform'
+                )
+            );
+
+        ALTER TABLE papuma.event ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE papuma.event FORCE ROW LEVEL SECURITY;
+        DROP POLICY IF EXISTS scope_isolation_event ON papuma.event;
+        CREATE POLICY scope_isolation_event ON papuma.event
             USING (
                 current_setting('app.current_scope', true) = 'All'
                 OR
