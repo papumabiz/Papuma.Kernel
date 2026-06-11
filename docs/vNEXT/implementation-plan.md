@@ -118,9 +118,9 @@ ADRs: [005](adr/adr-005-schema-evolution.md) · Ernte: —
 **DoD:** Test: Dokument v1 laden → Upcaster läuft → Save schreibt v2; Guard-Test;
 Upcaster-Ketten-Test über zwei Versionen.
 
-## Phase 5 — Patch-Primitiv
+## Phase 5 — Patch-Primitiv + Bulk-Operationen
 
-ADRs: [012](adr/adr-012-partial-updates.md) · Ernte: —
+ADRs: [012](adr/adr-012-partial-updates.md) · [014](adr/adr-014-bulk-operations.md) · Ernte: —
 
 - [ ] `PatchAsync` mit Katalog `Set` / `Remove` / `Increment` auf typisierten Pfaden
 - [ ] SQL-Generierung via `jsonb_set` & Co., ein Statement, `RETURNING old/new`
@@ -129,10 +129,15 @@ ADRs: [012](adr/adr-012-partial-updates.md) · Ernte: —
 - [ ] Schema-Guard: Patch auf veraltete `schema_version` mit upcasting-betroffenem
       Pfad → typisierter Fehler
 - [ ] Diff/Policies/ChangeRecord identisch zum Save-Pfad (gemeinsame Codebasis)
+- [ ] Bulk (ADR-014): `PatchWhereAsync` (Key-Prädikate aus dem Metamodell) +
+      `PatchManyAsync(ids)` + `DeleteWhereAsync`/`DeleteManyAsync`; set-basiertes
+      `RETURNING` → ein ChangeRecord pro Dokument, gemeinsame `correlationId`,
+      gebündelte Change-Inserts; Schema-Guard analog Einzel-Patch
 
 **DoD:** Paralleltest: zwei Patches auf verschiedene Felder konfligieren nicht,
 Versionen bleiben linear; Validator-Rollback-Test; Policy-Test über Patch-Pfad
-(`[TrackHash]`-Passwort).
+(`[TrackHash]`-Passwort); Bulk-Test: N Treffer → N ChangeRecords mit korrekten
+Einzel-Diffs, atomar; Bulk-Konflikttest gegen parallelen optimistischen Writer.
 
 ## Phase 6 — Session als Unit of Work + Rollback
 
