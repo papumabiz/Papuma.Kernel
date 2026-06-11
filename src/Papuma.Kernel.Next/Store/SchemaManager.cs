@@ -1,7 +1,12 @@
 // Copyright (c) 2026- by Harald Lapp.
 // Licensed under the MIT License. See LICENSE in the repository root for details.
 
+using System.Text;
+
 using Npgsql;
+
+using Papuma.Kernel.Model;
+using Papuma.Kernel.Validation;
 
 namespace Papuma.Kernel.Store;
 
@@ -17,14 +22,20 @@ public static class SchemaManager
 
     /// <summary>
     /// Verifies the server version and applies the idempotent kernel schema
-    /// (tables, indexes, RLS policies). Safe to call repeatedly, e.g. on every startup.
+    /// (tables, indexes, RLS policies). When a <paramref name="model"/> is supplied,
+    /// declared keys are materialized as partial expression indexes (ADR-006).
+    /// Safe to call repeatedly, e.g. on every startup.
     /// </summary>
     /// <param name="dataSource">The PostgreSQL data source.</param>
+    /// <param name="model">The kernel model whose declared keys are materialized (optional).</param>
     /// <param name="ct">A cancellation token.</param>
     /// <exception cref="PostgresVersionNotSupportedException">
     /// Thrown when the connected server is older than PostgreSQL 18.
     /// </exception>
-    public static async Task EnsureSchemaAsync(NpgsqlDataSource dataSource, CancellationToken ct = default)
+    public static async Task EnsureSchemaAsync(
+        NpgsqlDataSource dataSource,
+        KernelModel? model = null,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(dataSource);
 
@@ -37,9 +48,56 @@ public static class SchemaManager
             EnsureMinimumServerVersion(serverVersionNum);
         }
 
-        await using var schemaCmd = conn.CreateCommand();
-        schemaCmd.CommandText = SchemaDdl.Script;
-        await schemaCmd.ExecuteNonQueryAsync(ct);
+        await using (var schemaCmd = conn.CreateCommand())
+        {
+            schemaCmd.CommandText = SchemaDdl.Script;
+            await schemaCmd.ExecuteNonQueryAsync(ct);
+        }
+
+        if (model is not null)
+        {
+            var keyDdl = BuildKeyIndexDdl(model);
+            if (keyDdl.Length > 0)
+            {
+                await using var keyCmd = conn.CreateCommand();
+                keyCmd.CommandText = keyDdl;
+                await keyCmd.ExecuteNonQueryAsync(ct);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Convenience overload without a model.
+    /// </summary>
+    public static Task EnsureSchemaAsync(NpgsqlDataSource dataSource, CancellationToken ct) =>
+        EnsureSchemaAsync(dataSource, model: null, ct);
+
+    /// <summary>
+    /// Generates idempotent DDL for all declared key indexes. Identifiers are built
+    /// from validated document type names and property-derived path segments — no
+    /// user-supplied free text reaches the DDL.
+    /// </summary>
+    internal static string BuildKeyIndexDdl(KernelModel model)
+    {
+        var ddl = new StringBuilder();
+        foreach (var metadata in model.DocumentTypes.OrderBy(m => m.Name, StringComparer.Ordinal))
+        {
+            foreach (var key in metadata.Keys)
+            {
+                foreach (var segment in key.PathSegments)
+                {
+                    InputValidator.ValidateDocumentType(segment); // same identifier pattern as type names
+                }
+
+                var pathLiteral = string.Join(',', key.PathSegments);
+                var unique = key.Unique ? "UNIQUE " : string.Empty;
+                ddl.AppendLine($"CREATE {unique}INDEX IF NOT EXISTS {key.IndexName}");
+                ddl.AppendLine($"    ON papuma.document (scope, tenant_id, (data #>> '{{{pathLiteral}}}'))");
+                ddl.AppendLine($"    WHERE document_type = '{metadata.Name}';");
+            }
+        }
+
+        return ddl.ToString();
     }
 
     /// <summary>

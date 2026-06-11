@@ -108,6 +108,15 @@ public static class JsonDiffEngine
         var result = source?.DeepClone().AsObject() ?? new JsonObject();
         foreach (var (path, entry) in diff.Entries)
         {
+            if (entry.Kind != DiffEntryKind.Tracked)
+            {
+                // Redacted/Reference/Hashed entries carry no values (ADR-007) — state
+                // reconstruction must fail loudly, never produce silently wrong data (ADR-008).
+                throw new InvalidOperationException(
+                    $"Diff entry '{path}' is {entry.Kind} and carries no values; " +
+                    "the document state cannot be reconstructed from this diff.");
+            }
+
             var present = useNew ? entry.HasNew : entry.HasOld;
             var value = useNew ? entry.New : entry.Old;
             var segments = path.Split('.');

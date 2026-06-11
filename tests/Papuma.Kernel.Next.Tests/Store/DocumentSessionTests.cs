@@ -5,6 +5,7 @@ using Npgsql;
 using NpgsqlTypes;
 
 using Papuma.Kernel.Changes;
+using Papuma.Kernel.Model;
 using Papuma.Kernel.Store;
 using Papuma.Kernel.Tenancy;
 using Papuma.Kernel.Tests.Infrastructure;
@@ -25,12 +26,12 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await SchemaManager.EnsureSchemaAsync(_fixture.DataSource);
-        _store = new DocumentStore(_fixture.DataSource);
+        _store = new DocumentStore(_fixture.DataSource, new KernelModelBuilder().Document<UserDoc>().Build());
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
 
-    private sealed record UserDoc(string Name, string? Email = null, List<string>? Roles = null);
+    private sealed record UserDoc(string Id, string Name, string? Email = null, List<string>? Roles = null);
 
     private static string NewId() => Guid.NewGuid().ToString("N");
 
@@ -42,7 +43,7 @@ public sealed class DocumentSessionTests : IAsyncLifetime
         var session = _store.OpenSession(NewTenant());
         var id = NewId();
 
-        var result = await session.SaveAsync(id, new UserDoc("Harry"), expectedVersion: 0);
+        var result = await session.SaveAsync(new UserDoc(id, "Harry"), expectedVersion: 0);
 
         Assert.Equal(1, result.Version);
         Assert.Equal(ChangeOperation.Insert, result.Operation);
@@ -55,7 +56,7 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     {
         var session = _store.OpenSession(NewTenant());
         var id = NewId();
-        await session.SaveAsync(id, new UserDoc("Harry", "h@x.de"), 0);
+        await session.SaveAsync(new UserDoc(id, "Harry", "h@x.de"), 0);
 
         var loaded = await session.LoadAsync<UserDoc>(id);
 
@@ -78,9 +79,9 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     {
         var session = _store.OpenSession(NewTenant());
         var id = NewId();
-        await session.SaveAsync(id, new UserDoc("Harry"), 0);
+        await session.SaveAsync(new UserDoc(id, "Harry"), 0);
 
-        var result = await session.SaveAsync(id, new UserDoc("Harald", "h@x.de"), expectedVersion: 1);
+        var result = await session.SaveAsync(new UserDoc(id, "Harald", "h@x.de"), expectedVersion: 1);
 
         Assert.Equal(2, result.Version);
         Assert.Equal(ChangeOperation.Update, result.Operation);
@@ -94,11 +95,11 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     {
         var session = _store.OpenSession(NewTenant());
         var id = NewId();
-        await session.SaveAsync(id, new UserDoc("Harry"), 0);
-        await session.SaveAsync(id, new UserDoc("Harald"), 1);
+        await session.SaveAsync(new UserDoc(id, "Harry"), 0);
+        await session.SaveAsync(new UserDoc(id, "Harald"), 1);
 
         var ex = await Assert.ThrowsAsync<ConcurrencyException>(
-            () => session.SaveAsync(id, new UserDoc("Stale"), expectedVersion: 1));
+            () => session.SaveAsync(new UserDoc(id, "Stale"), expectedVersion: 1));
 
         Assert.Equal(1, ex.ExpectedVersion);
         Assert.Equal(2, ex.ActualVersion);
@@ -110,10 +111,10 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     {
         var session = _store.OpenSession(NewTenant());
         var id = NewId();
-        await session.SaveAsync(id, new UserDoc("Harry"), 0);
+        await session.SaveAsync(new UserDoc(id, "Harry"), 0);
 
         var ex = await Assert.ThrowsAsync<ConcurrencyException>(
-            () => session.SaveAsync(id, new UserDoc("Again"), expectedVersion: 0));
+            () => session.SaveAsync(new UserDoc(id, "Again"), expectedVersion: 0));
 
         Assert.Equal(0, ex.ExpectedVersion);
         Assert.Equal(1, ex.ActualVersion);
@@ -125,7 +126,7 @@ public sealed class DocumentSessionTests : IAsyncLifetime
         var session = _store.OpenSession(NewTenant());
 
         await Assert.ThrowsAsync<DocumentNotFoundException>(
-            () => session.SaveAsync(NewId(), new UserDoc("Ghost"), expectedVersion: 3));
+            () => session.SaveAsync(new UserDoc(NewId(), "Ghost"), expectedVersion: 3));
     }
 
     [Fact]
@@ -133,7 +134,7 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     {
         var session = _store.OpenSession(NewTenant());
         var id = NewId();
-        await session.SaveAsync(id, new UserDoc("Gone", "g@x.de"), 0);
+        await session.SaveAsync(new UserDoc(id, "Gone", "g@x.de"), 0);
 
         var result = await session.DeleteAsync<UserDoc>(id, expectedVersion: 1);
 
@@ -149,7 +150,7 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     {
         var session = _store.OpenSession(NewTenant());
         var id = NewId();
-        await session.SaveAsync(id, new UserDoc("Harry"), 0);
+        await session.SaveAsync(new UserDoc(id, "Harry"), 0);
 
         var ex = await Assert.ThrowsAsync<ConcurrencyException>(
             () => session.DeleteAsync<UserDoc>(id, expectedVersion: 9));
@@ -162,10 +163,10 @@ public sealed class DocumentSessionTests : IAsyncLifetime
     {
         var session = _store.OpenSession(NewTenant());
         var id = NewId();
-        await session.SaveAsync(id, new UserDoc("First"), 0);      // version 1
+        await session.SaveAsync(new UserDoc(id, "First"), 0);      // version 1
         await session.DeleteAsync<UserDoc>(id, 1);                 // version 2 (delete)
 
-        var result = await session.SaveAsync(id, new UserDoc("Reborn"), expectedVersion: 0);
+        var result = await session.SaveAsync(new UserDoc(id, "Reborn"), expectedVersion: 0);
 
         Assert.Equal(3, result.Version);
         Assert.Equal(ChangeOperation.Insert, result.Operation);
@@ -180,8 +181,8 @@ public sealed class DocumentSessionTests : IAsyncLifetime
         var scope = NewTenant();
         var session = _store.OpenSession(scope);
         var id = NewId();
-        await session.SaveAsync(id, new UserDoc("Harry"), 0);
-        await session.SaveAsync(id, new UserDoc("Harald"), 1);
+        await session.SaveAsync(new UserDoc(id, "Harry"), 0);
+        await session.SaveAsync(new UserDoc(id, "Harald"), 1);
         await session.DeleteAsync<UserDoc>(id, 2);
 
         var records = await LoadChangeRecordsAsync(scope, id);
@@ -196,14 +197,14 @@ public sealed class DocumentSessionTests : IAsyncLifetime
         var scope = NewTenant();
         var session = _store.OpenSession(scope);
         var id = NewId();
-        await session.SaveAsync(id, new UserDoc("Harry"), 0);
+        await session.SaveAsync(new UserDoc(id, "Harry"), 0);
 
         // Sabotage: pre-seed the change row the next update would write (version 2) so the
         // change insert violates the unique index — the document update must roll back too.
         await SeedChangeRowAsync(scope, id, version: 2);
 
         await Assert.ThrowsAsync<PostgresException>(
-            () => session.SaveAsync(id, new UserDoc("MustRollBack"), expectedVersion: 1));
+            () => session.SaveAsync(new UserDoc(id, "MustRollBack"), expectedVersion: 1));
 
         var loaded = await session.LoadAsync<UserDoc>(id);
         Assert.Equal(1, loaded!.Version);
@@ -216,11 +217,11 @@ public sealed class DocumentSessionTests : IAsyncLifetime
         var id = NewId();
         var sessionA = _store.OpenSession(NewTenant());
         var sessionB = _store.OpenSession(NewTenant());
-        await sessionA.SaveAsync(id, new UserDoc("OnlyA"), 0);
+        await sessionA.SaveAsync(new UserDoc(id, "OnlyA"), 0);
 
         Assert.Null(await sessionB.LoadAsync<UserDoc>(id));
         await Assert.ThrowsAsync<DocumentNotFoundException>(
-            () => sessionB.SaveAsync(id, new UserDoc("Hijack"), expectedVersion: 1));
+            () => sessionB.SaveAsync(new UserDoc(id, "Hijack"), expectedVersion: 1));
     }
 
     private async Task<IReadOnlyList<(long Version, short Operation)>> LoadChangeRecordsAsync(

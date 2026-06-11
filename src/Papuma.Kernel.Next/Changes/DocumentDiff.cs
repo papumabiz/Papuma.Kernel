@@ -36,9 +36,10 @@ public sealed class DocumentDiff
     public bool IsEmpty => _entries.Count == 0;
 
     /// <summary>
-    /// Serializes the diff to its JSONB wire format:
-    /// <c>{ "path": { "old": ..., "new": ... } }</c> with <c>old</c>/<c>new</c> keys
-    /// omitted when the field did not exist on that side.
+    /// Serializes the diff to its JSONB wire format (ADR-004/007):
+    /// tracked entries as <c>{ "old": ..., "new": ... }</c> (keys omitted when the field
+    /// did not exist on that side), policy entries as <c>{ "changed": true }</c>,
+    /// <c>{ "ref": "..." }</c> or <c>{ "changed": true, "hash": "..." }</c>.
     /// </summary>
     public JsonObject ToJson()
     {
@@ -46,14 +47,37 @@ public sealed class DocumentDiff
         foreach (var (path, entry) in _entries)
         {
             var entryJson = new JsonObject();
-            if (entry.HasOld)
+            switch (entry.Kind)
             {
-                entryJson["old"] = entry.Old?.DeepClone();
-            }
+                case DiffEntryKind.Tracked:
+                    if (entry.HasOld)
+                    {
+                        entryJson["old"] = entry.Old?.DeepClone();
+                    }
 
-            if (entry.HasNew)
-            {
-                entryJson["new"] = entry.New?.DeepClone();
+                    if (entry.HasNew)
+                    {
+                        entryJson["new"] = entry.New?.DeepClone();
+                    }
+
+                    break;
+
+                case DiffEntryKind.Redacted:
+                    entryJson["changed"] = true;
+                    break;
+
+                case DiffEntryKind.Reference:
+                    entryJson["ref"] = entry.Reference;
+                    break;
+
+                case DiffEntryKind.Hashed:
+                    entryJson["changed"] = true;
+                    if (entry.Hash is not null)
+                    {
+                        entryJson["hash"] = entry.Hash;
+                    }
+
+                    break;
             }
 
             json[path] = entryJson;
@@ -76,6 +100,24 @@ public sealed class DocumentDiff
             if (node is not JsonObject entryJson)
             {
                 throw new ArgumentException($"Diff entry at '{path}' is not an object.", nameof(json));
+            }
+
+            if (entryJson.ContainsKey("ref"))
+            {
+                entries[path] = DiffEntry.ReferenceEntry((string)entryJson["ref"]!);
+                continue;
+            }
+
+            if (entryJson.ContainsKey("hash"))
+            {
+                entries[path] = DiffEntry.HashedEntry((string?)entryJson["hash"]);
+                continue;
+            }
+
+            if (entryJson.ContainsKey("changed"))
+            {
+                entries[path] = DiffEntry.RedactedEntry();
+                continue;
             }
 
             var hasOld = entryJson.ContainsKey("old");

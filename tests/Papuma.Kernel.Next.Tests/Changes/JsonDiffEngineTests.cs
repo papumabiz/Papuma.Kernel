@@ -162,6 +162,18 @@ public sealed class JsonDiffEngineTests
     }
 
     [Fact]
+    public void Apply_ThrowsLoudly_OnPolicyEntriesWithoutValues()
+    {
+        // Redacted/Reference/Hashed entries carry no values — reconstruction must fail,
+        // never produce silently wrong state (ADR-007/008).
+        var diff = DocumentDiff.FromJson((JsonObject)JsonNode.Parse(
+            """{"email": {"changed": true}}""")!);
+
+        Assert.Throws<InvalidOperationException>(() => JsonDiffEngine.Apply(new JsonObject(), diff));
+        Assert.Throws<InvalidOperationException>(() => JsonDiffEngine.ApplyReverse(new JsonObject(), diff));
+    }
+
+    [Fact]
     public void Diff_RejectsKeysContainingDots_InsteadOfCorruptingPaths()
     {
         // E.g. a serialized Dictionary<string, T> with dotted keys would produce

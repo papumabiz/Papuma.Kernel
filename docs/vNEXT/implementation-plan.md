@@ -86,24 +86,33 @@ ADRs: [002](adr/adr-002-document-as-truth.md) · [003](adr/adr-003-write-path-co
 Diff-Roundtrips, Atomizitätstest, lückenlose Change-Historie inkl. Insert-nach-Delete,
 Tenant-Isolation über Schicht-1-Prädikate. 48 Tests grün.
 
-## Phase 3 — Metamodell + Policies + Keys
+## Phase 3 — Metamodell + Policies + Keys ✅ (2026-06-11)
 
 ADRs: [006](adr/adr-006-keys-and-constraints.md) · [007](adr/adr-007-privacy-policies.md) ·
 Ernte: konzeptionell `Gdpr/SensitiveRef`-Gedanke; Code neu
 
-- [ ] Metamodell-Registry beim Start (Reflection): Typname, CLR-Typ, Properties,
-      Policies, Keys, SchemaVersion (Architektur §6)
-- [ ] Attribute: `[SensitiveData]`, `[TrackReference]`, `[TrackHash]`, `[DoNotTrack]`,
-      `[UniqueKey]`
-- [ ] Fluent-Builder mit Vorrang vor Attributen (ADR-007)
-- [ ] Policy-Anwendung in der Diff-Engine: Track / Redact / Reference / Hash /
-      DoNotTrack — inkl. Delete-Diffs (letzter Zustand sensibler Felder nie im Klartext)
-- [ ] Unique-/Lookup-Keys als partielle Expression-Indizes in `EnsureSchemaAsync`;
-      `UniqueKeyViolationException` mit Key-Name (ADR-006)
-- [ ] `LoadByKeyAsync` entlang deklarierter Keys
+- [x] Metamodell-Registry (`KernelModelBuilder` → `KernelModel`): Reflection-Scan beim
+      Build, rekursiv in verschachtelte POCO-Typen (Zyklus-Guard; Collections bewusst
+      nicht — Arrays sind atomare Diff-Werte), Pfade über die Serializer-Naming-Policy
+- [x] Attribute: `[SensitiveData]`, `[TrackReference]`, `[TrackHash]`, `[DoNotTrack]`,
+      `[UniqueKey]`, `[LookupKey]`
+- [x] Fluent-Builder überschreibt Attribute; explizites `.Track()` setzt Defaults zurück;
+      Policy-Auflösung über nächstgelegenen Ancestor-Pfad (Policy auf `address` deckt
+      `address.city`)
+- [x] `PolicyApplier` in beiden Write-Pfaden (Save + Delete) vor dem Change-Insert;
+      Diff-Wire-Format erweitert: `{changed:true}` / `{ref}` / `{changed,hash}`;
+      `Apply`/`ApplyReverse` werfen laut auf wertlosen Policy-Einträgen (ADR-008)
+- [x] Keys als partielle Expression-Indizes in `EnsureSchemaAsync(ds, model)`
+      (Identifier validiert, 63-Zeichen-Limit mit Hash-Disambiguierung);
+      23505-Mapping über Constraint-Namen → `UniqueKeyViolationException` mit KeyPath
+- [x] `LoadByKeyAsync` (deklarierte Keys only, LIMIT-2-Mehrfachtreffer-Guard);
+      `SaveAsync(document, expectedVersion)` — Id kommt jetzt aus dem Metamodell
+      (Konvention `Id`-Property oder `HasId(...)`)
 
-**DoD:** Pro Policy ein Test, der den Diff-Eintrag prüft; Unique-Konflikt wirft
-typisiert; nicht registrierter Dokumenttyp schlägt beim Save laut fehl.
+**DoD erfüllt:** Pro Policy ein Diff-Eintrag-Test (inkl. Delete-Diff-Redaction und
+Wire-Roundtrip durch die DB), Unique-Konflikt typisiert mit KeyPath, Unique-Key pro
+Tenant gescoped, nicht registrierter Typ wirft `DocumentTypeNotRegisteredException`.
+75 Tests grün.
 
 ## Phase 4 — Schema-Evolution
 
