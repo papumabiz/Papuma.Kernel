@@ -65,14 +65,14 @@ public sealed class DocumentSession
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
-            SELECT data::text, version
+            SELECT data::text, version, schema_version
             FROM papuma.document
             WHERE scope = @scope AND tenant_id = @tenantId
               AND document_type = @type AND id = @id
             """;
         AddIdentityParameters(cmd, metadata.Name, id);
 
-        return await ReadSingleAsync<T>(cmd, metadata.Name, ct);
+        return await ReadSingleAsync<T>(cmd, metadata, id, ct);
     }
 
     /// <summary>
@@ -108,7 +108,7 @@ public sealed class DocumentSession
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
-            SELECT data::text, version
+            SELECT id, data::text, version, schema_version
             FROM papuma.document
             WHERE scope = @scope AND tenant_id = @tenantId
               AND document_type = @type
@@ -126,9 +126,9 @@ public sealed class DocumentSession
         {
             while (await reader.ReadAsync(ct))
             {
-                var document = JsonSerializer.Deserialize<T>(reader.GetString(0), KernelJson.Options)
-                    ?? throw new InvalidOperationException($"Document of type {metadata.Name} deserialized to null.");
-                results.Add(new DocumentResult<T>(document, reader.GetInt64(1)));
+                var document = DeserializeDocument<T>(
+                    metadata, reader.GetString(0), reader.GetString(1), reader.GetInt32(3));
+                results.Add(new DocumentResult<T>(document, reader.GetInt64(2)));
             }
         }
 
@@ -204,22 +204,36 @@ public sealed class DocumentSession
             WHERE scope = @scope AND tenant_id = @tenantId
               AND document_type = @type AND id = @id
               AND version = @expectedVersion
-            RETURNING old.data::text
+            RETURNING old.data::text, old.schema_version
             """;
         AddIdentityParameters(cmd, metadata.Name, id);
         cmd.Parameters.AddWithValue("expectedVersion", expectedVersion);
 
-        var oldJsonText = (string?)await cmd.ExecuteScalarAsync(ct);
+        string? oldJsonText = null;
+        var oldSchemaVersion = 0;
+        await using (var reader = await cmd.ExecuteReaderAsync(ct))
+        {
+            if (await reader.ReadAsync(ct))
+            {
+                oldJsonText = reader.GetString(0);
+                oldSchemaVersion = reader.GetInt32(1);
+            }
+        }
+
         if (oldJsonText is null)
         {
             throw await VersionConflictAsync(conn, tx, metadata.Name, id, expectedVersion, ct);
         }
 
+        EnsureSchemaNotNewer(metadata, id, oldSchemaVersion);
+
         var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
         var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, after: null), metadata, id);
         var deletedVersion = expectedVersion + 1;
 
-        await InsertChangeRecordAsync(conn, tx, metadata, id, deletedVersion, ChangeOperation.Delete, diff, ct);
+        // The delete diff carries the old state — record its schema version, not the model's (ADR-005).
+        await InsertChangeRecordAsync(
+            conn, tx, metadata, id, deletedVersion, ChangeOperation.Delete, diff, oldSchemaVersion, ct);
         await tx.CommitAsync(ct);
 
         return new SaveResult(deletedVersion, ChangeOperation.Delete, diff);
@@ -260,7 +274,8 @@ public sealed class DocumentSession
         }
 
         var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(before: null, newJson), metadata, id);
-        await InsertChangeRecordAsync(conn, tx, metadata, id, insertedVersion, ChangeOperation.Insert, diff, ct);
+        await InsertChangeRecordAsync(
+            conn, tx, metadata, id, insertedVersion, ChangeOperation.Insert, diff, metadata.SchemaVersion, ct);
         await tx.CommitAsync(ct);
 
         return new SaveResult(insertedVersion, ChangeOperation.Insert, diff);
@@ -288,26 +303,24 @@ public sealed class DocumentSession
             WHERE scope = @scope AND tenant_id = @tenantId
               AND document_type = @type AND id = @id
               AND version = @expectedVersion
-            RETURNING old.data::text AS old_data, new.data::text AS new_data, new.version AS new_version
+            RETURNING old.data::text AS old_data, new.data::text AS new_data,
+                      new.version AS new_version, old.schema_version AS old_schema_version
             """;
         AddIdentityParameters(cmd, metadata.Name, id);
         cmd.Parameters.AddWithValue("schemaVersion", metadata.SchemaVersion);
         cmd.Parameters.AddWithValue("expectedVersion", expectedVersion);
         AddJsonbParameter(cmd, "data", newJson);
 
-        string oldJsonText;
-        string newJsonText;
-        long newVersion;
         var row = await ExecuteMappingKeyViolationsAsync(
             async () =>
             {
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
                 if (!await reader.ReadAsync(ct))
                 {
-                    return ((string, string, long)?)null;
+                    return ((string, string, long, int)?)null;
                 }
 
-                return (reader.GetString(0), reader.GetString(1), reader.GetInt64(2));
+                return (reader.GetString(0), reader.GetString(1), reader.GetInt64(2), reader.GetInt32(3));
             },
             metadata.Name);
 
@@ -316,13 +329,17 @@ public sealed class DocumentSession
             throw await VersionConflictAsync(conn, tx, metadata.Name, id, expectedVersion, ct);
         }
 
-        (oldJsonText, newJsonText, newVersion) = row.Value;
+        var (oldJsonText, newJsonText, newVersion, oldSchemaVersion) = row.Value;
+
+        // Throwing here rolls the already-applied UPDATE back — no silent back-migration (ADR-005).
+        EnsureSchemaNotNewer(metadata, id, oldSchemaVersion);
 
         var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
         var storedNewJson = (JsonObject)JsonNode.Parse(newJsonText)!;
         var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, storedNewJson), metadata, id);
 
-        await InsertChangeRecordAsync(conn, tx, metadata, id, newVersion, ChangeOperation.Update, diff, ct);
+        await InsertChangeRecordAsync(
+            conn, tx, metadata, id, newVersion, ChangeOperation.Update, diff, metadata.SchemaVersion, ct);
         await tx.CommitAsync(ct);
 
         return new SaveResult(newVersion, ChangeOperation.Update, diff);
@@ -336,6 +353,7 @@ public sealed class DocumentSession
         long version,
         ChangeOperation operation,
         DocumentDiff diff,
+        int schemaVersion,
         CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
@@ -348,7 +366,7 @@ public sealed class DocumentSession
             """;
         AddIdentityParameters(cmd, metadata.Name, id);
         cmd.Parameters.AddWithValue("version", version);
-        cmd.Parameters.AddWithValue("schemaVersion", metadata.SchemaVersion);
+        cmd.Parameters.AddWithValue("schemaVersion", schemaVersion);
         cmd.Parameters.AddWithValue("operation", (short)operation);
         AddJsonbParameter(cmd, "diff", diff.ToJson());
 
@@ -411,7 +429,7 @@ public sealed class DocumentSession
     }
 
     private static async Task<DocumentResult<T>?> ReadSingleAsync<T>(
-        NpgsqlCommand cmd, string documentType, CancellationToken ct)
+        NpgsqlCommand cmd, DocumentTypeMetadata metadata, string id, CancellationToken ct)
         where T : class
     {
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -422,10 +440,45 @@ public sealed class DocumentSession
 
         var json = reader.GetString(0);
         var version = reader.GetInt64(1);
-        var document = JsonSerializer.Deserialize<T>(json, KernelJson.Options)
-            ?? throw new InvalidOperationException($"Document of type {documentType} deserialized to null.");
+        var schemaVersion = reader.GetInt32(2);
+        var document = DeserializeDocument<T>(metadata, id, json, schemaVersion);
 
         return new DocumentResult<T>(document, version);
+    }
+
+    /// <summary>
+    /// Deserializes a stored document, running the upcaster chain when the stored
+    /// schema version is older than the model's (lazy upcasting, ADR-005). The stored
+    /// row is not rewritten — persistence of the lifted state happens on the next save.
+    /// </summary>
+    private static T DeserializeDocument<T>(
+        DocumentTypeMetadata metadata, string id, string json, int storedSchemaVersion)
+        where T : class
+    {
+        EnsureSchemaNotNewer(metadata, id, storedSchemaVersion);
+
+        T? document;
+        if (storedSchemaVersion < metadata.SchemaVersion)
+        {
+            var raw = (JsonObject)JsonNode.Parse(json)!;
+            metadata.Upcast(raw, storedSchemaVersion);
+            document = raw.Deserialize<T>(KernelJson.Options);
+        }
+        else
+        {
+            document = JsonSerializer.Deserialize<T>(json, KernelJson.Options);
+        }
+
+        return document
+            ?? throw new InvalidOperationException($"Document of type {metadata.Name} deserialized to null.");
+    }
+
+    private static void EnsureSchemaNotNewer(DocumentTypeMetadata metadata, string id, int storedSchemaVersion)
+    {
+        if (storedSchemaVersion > metadata.SchemaVersion)
+        {
+            throw new SchemaVersionConflictException(metadata.Name, id, storedSchemaVersion, metadata.SchemaVersion);
+        }
     }
 
     private void AddIdentityParameters(NpgsqlCommand cmd, string documentType, string id)

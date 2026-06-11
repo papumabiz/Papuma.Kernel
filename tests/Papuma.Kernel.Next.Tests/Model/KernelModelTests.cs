@@ -114,6 +114,45 @@ public sealed class KernelModelTests
     }
 
     [Fact]
+    public void SchemaVersion_IsHighestUpcasterFromVersionPlusOne()
+    {
+        var model = new KernelModelBuilder()
+            .Document<AttributedDoc>(d => d
+                .Upcast(1, _ => { })
+                .Upcast(2, _ => { }))
+            .Build();
+
+        Assert.Equal(3, model.GetRequired<AttributedDoc>().SchemaVersion);
+    }
+
+    [Fact]
+    public void SchemaVersion_DefaultsTo1_WithoutUpcasters()
+    {
+        var model = new KernelModelBuilder().Document<AttributedDoc>().Build();
+
+        Assert.Equal(1, model.GetRequired<AttributedDoc>().SchemaVersion);
+    }
+
+    [Fact]
+    public void Build_Throws_OnUpcasterChainGap()
+    {
+        var builder = new KernelModelBuilder()
+            .Document<AttributedDoc>(d => d.Upcast(2, _ => { })); // missing fromVersion 1
+
+        var ex = Assert.Throws<InvalidOperationException>(() => builder.Build());
+        Assert.Contains("gap", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Upcast_RejectsDuplicateFromVersion()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            new KernelModelBuilder().Document<AttributedDoc>(d => d
+                .Upcast(1, _ => { })
+                .Upcast(1, _ => { })));
+    }
+
+    [Fact]
     public void IndexName_StaysWithinPostgresLimit_ForLongPaths()
     {
         var name = KernelModelBuilder.BuildIndexName(

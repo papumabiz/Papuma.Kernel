@@ -114,18 +114,28 @@ Wire-Roundtrip durch die DB), Unique-Konflikt typisiert mit KeyPath, Unique-Key 
 Tenant gescoped, nicht registrierter Typ wirft `DocumentTypeNotRegisteredException`.
 75 Tests grün.
 
-## Phase 4 — Schema-Evolution
+## Phase 4 — Schema-Evolution ✅ (2026-06-11)
 
 ADRs: [005](adr/adr-005-schema-evolution.md) · Ernte: —
 
-- [ ] `schema_version` durch den gesamten Pfad (document, change, Save-Statement)
-- [ ] Upcaster-Registrierung (Fluent), Kette n → n+1 → … beim Laden auf `JsonNode`
-- [ ] Persistenz des neuen Stands erst beim nächsten Save
-- [ ] Guard: Save mit niedrigerer `schema_version` als gespeichert → typisierter Fehler
-- [ ] Additiv-Regel dokumentationsseitig in XML-Docs verankern (kein Code nötig)
+- [x] `schema_version` semantisch korrekt durch alle Pfade: Load/LoadByKey lesen sie,
+      Save schreibt die Modell-Version, **Delete-ChangeRecords tragen die gespeicherte
+      (alte) Version** — der Diff-Inhalt hat altes Schema (ADR-005)
+- [x] Upcaster-Registrierung (`.Upcast(fromVersion, json => ...)`); Kette wird beim
+      Build auf Lückenlosigkeit ab Version 1 validiert; `SchemaVersion` = höchster
+      fromVersion + 1; Duplikat-Guard
+- [x] Lazy-Upcasting beim Laden auf dem rohen `JsonObject` vor der Deserialisierung;
+      gespeicherte Zeile bleibt unangetastet (Test beweist `schema_version` bleibt 1)
+- [x] Persistenz des gehobenen Stands beim nächsten Save (Test: v1 → Load → Save → v3)
+- [x] Guard `SchemaVersionConflictException` auf Load, Save **und** Delete: gespeicherte
+      Version > Modell-Version → typisierter Fehler; beim Save rollt das bereits
+      angewendete UPDATE zurück (Test beweist unveränderten Zustand)
+- [x] Additiv-Regel in den XML-Docs von `Upcast(...)` verankert (inkl. Verbot der
+      additiven Simulation und Niemals-Löschen-Regel für Upcaster)
 
-**DoD:** Test: Dokument v1 laden → Upcaster läuft → Save schreibt v2; Guard-Test;
-Upcaster-Ketten-Test über zwei Versionen.
+**DoD erfüllt:** Ketten-Test über zwei Versionen (v1: mail→email, v2: city→address.city),
+Lazy-Test, Persist-Test, drei Guard-Tests (Load/Save/Delete) inkl. Rollback-Nachweis.
+85 Tests grün.
 
 ## Phase 5 — Patch-Primitiv + Bulk-Operationen
 

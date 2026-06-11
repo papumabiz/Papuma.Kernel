@@ -73,6 +73,7 @@ public sealed class KernelModelBuilder
     {
         private readonly Dictionary<string, FieldPolicy> _policyOverrides = new(StringComparer.Ordinal);
         private readonly Dictionary<string, bool> _keyOverrides = new(StringComparer.Ordinal); // path → unique
+        private readonly Dictionary<int, Action<System.Text.Json.Nodes.JsonObject>> _upcasters = [];
         private LambdaExpression? _idExpression;
 
         internal DocumentTypeBuilder()
@@ -119,6 +120,35 @@ public sealed class KernelModelBuilder
             return this;
         }
 
+        /// <summary>
+        /// Registers an upcaster that lifts raw documents from
+        /// <paramref name="fromVersion"/> to <paramref name="fromVersion"/> + 1 (ADR-005).
+        /// The current schema version of the type becomes the highest <c>fromVersion</c> + 1.
+        /// </summary>
+        /// <remarks>
+        /// Only transforming changes need an upcaster — renames, restructurings, type
+        /// changes, derived defaults. Additive changes (new optional property with a
+        /// constant default, removed property, new enum value) are covered by JSON
+        /// deserialization and require neither an upcaster nor a version bump.
+        /// Never simulate a transformation additively (ADR-005, point 7). Upcasters must
+        /// not be removed while documents of their source version may still exist.
+        /// </remarks>
+        /// <param name="fromVersion">The schema version this upcaster reads (≥ 1).</param>
+        /// <param name="upcast">Mutates the raw JSON document in place to the next version.</param>
+        public DocumentTypeBuilder<T> Upcast(int fromVersion, Action<System.Text.Json.Nodes.JsonObject> upcast)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(fromVersion, 1);
+            ArgumentNullException.ThrowIfNull(upcast);
+
+            if (!_upcasters.TryAdd(fromVersion, upcast))
+            {
+                throw new InvalidOperationException(
+                    $"An upcaster from version {fromVersion} is already registered for {typeof(T).Name}.");
+            }
+
+            return this;
+        }
+
         DocumentTypeMetadata IDocumentTypeBuilder.Build()
         {
             var clrType = typeof(T);
@@ -153,7 +183,23 @@ public sealed class KernelModelBuilder
                 .Select(k => new KeyMetadata(k.Key, k.Value, BuildIndexName(name, k.Key, k.Value)))
                 .ToList();
 
-            return new DocumentTypeMetadata(name, clrType, schemaVersion: 1, policies, keyMetadata, BuildIdGetter(clrType));
+            // The upcaster chain must be contiguous from 1: lazy upcasting may encounter
+            // documents of any historical version (ADR-005).
+            var orderedUpcasters = new List<Action<System.Text.Json.Nodes.JsonObject>>(_upcasters.Count);
+            for (var version = 1; version <= _upcasters.Count; version++)
+            {
+                if (!_upcasters.TryGetValue(version, out var upcaster))
+                {
+                    throw new InvalidOperationException(
+                        $"Document type {name}: upcaster chain has a gap — no upcaster from version {version}, " +
+                        $"but versions up to {_upcasters.Keys.Max()} are registered. " +
+                        "Upcasters must form a contiguous chain starting at 1.");
+                }
+
+                orderedUpcasters.Add(upcaster);
+            }
+
+            return new DocumentTypeMetadata(name, clrType, policies, keyMetadata, BuildIdGetter(clrType), orderedUpcasters);
         }
 
         internal void SetPolicy(string path, FieldPolicy policy) => _policyOverrides[path] = policy;
