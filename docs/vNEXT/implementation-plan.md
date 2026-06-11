@@ -196,30 +196,34 @@ correlationId), Dispose-Rollback-Test, Savepoint-Test, Metadata-Test
 Rollback über Delete-Kette, Delete-Ziel abgelehnt, Redacted-Fehlertest, stale
 expectedVersion. 108 Tests grün.
 
-## Phase 7 — Feed-Konsum + Processing-Engine
+## Phase 7 — Feed-Konsum + Processing-Engine ✅ (2026-06-11)
 
 ADRs: [009](adr/adr-009-projections-as-dumb-handlers.md) ·
 [010](adr/adr-010-feed-consumption.md) · Ernte: `Projections/ProjectionWorkerBase`
 (Checkpoint-Upsert, Failure-Tabelle mit Backoff-SQL, Replay-Reset, Lag-Snapshot),
 `ChangeFeed/ChangeFeedReader` (Keyset-Pagination-Muster), AspNetCore-Health-Checks
 
-- [ ] `IChangeHandler` + Registrierung (`AddChangeHandler<T>()`)
-- [ ] Worker-Skelett aus `ProjectionWorkerBase` ernten; Event-Typ-Filterung und
-      `redacted`-Flag entfernen; Filterung optional nach `document_type`
-- [ ] Snapshot-Lesen auf explizite `txid xid8`-Spalte umstellen
-      (`txid < pg_snapshot_xmin(pg_current_snapshot())`, ADR-010 — ersetzt die
-      `xmin::text::bigint`-Casts aus v1)
-- [ ] `NOTIFY papuma_changes` am Ende der Save-Transaktion; LISTEN-Wakeup im Worker
-      (Polling bleibt Wahrheit)
-- [ ] Checkpoints, Retry/Backoff, Poison-Handling, Rebuild (Checkpoint-Reset) ernten
-- [ ] Leader-Koordination konkurrierender Prozesse via `FOR UPDATE SKIP LOCKED`
-      auf der Checkpoint-Tabelle
-- [ ] Lag-Metrik + Health-Check (AspNetCore) portieren
-- [ ] Komfort-Filter `WhenFieldChanged<T>(...)` als dünner Diff-Wrapper
+- [x] `IChangeHandler` + `ChangeRecord` (inkl. `FieldChanged`/`IsFieldTransition`-Sugar
+      und typisiertem `FieldChanged<T>(x => x.Email)`-Extension); DI-Registrierung
+      (`AddChangeHandler<T>()`) folgt mit dem Bootstrap in Phase 9
+- [x] `ChangeFeedProcessor` neu (Ernte: Checkpoint-/Failure-/Backoff-SQL-Muster aus
+      `ProjectionWorkerBase`, ohne Event-Typ-Filterung und `redacted`-Flag);
+      **Stop-the-line-Semantik**: strikte seq-Ordnung pro Handler, Retry nach Backoff,
+      Poison-Skip nach MaxAttempts mit bleibendem Failure-Eintrag
+- [x] Snapshot-Lesen über explizite `txid xid8`-Spalte
+      (`txid < pg_snapshot_xmin(pg_current_snapshot())`) statt v1s `xmin`-Casts
+- [x] `NOTIFY papuma_changes` in `CommitAsync` (nur bei Writes, atomar mit dem Commit);
+      LISTEN-Wakeup via `conn.WaitAsync(PollInterval)` — Polling bleibt Wahrheit
+- [x] Checkpoints (`FOR UPDATE SKIP LOCKED` = Leader-Koordination ohne Konsens),
+      Retry/Backoff exponentiell in SQL, Poison-Handling, `ResetCheckpointAsync` (Rebuild)
+- [x] `GetLagAsync` + `ChangeFeedLagHealthCheck` (AspNetCore, portiert von v1)
+- [x] Worker liest mit `'All'`-Scope (RLS-kompatibel)
 
-**DoD:** Gap-Test (lang offene Transaktion mit kleinerer seq wird nicht übersprungen);
-Wakeup-Latenz-Test (NOTIFY < Poll-Intervall); Rebuild-Test; Poison-Test (Handler wirft
-n-mal → übersprungen + Failure-Eintrag); Health-Check liefert Lag.
+**DoD erfüllt:** Gap-Test (lang offene Transaktion → höhere seq wird zurückgehalten,
+nichts übersprungen, Ordnung bleibt), Wakeup-Latenz (NOTIFY schlägt 30s-Poll-Intervall
+deutlich), Rebuild-Replay, Poison (2 Versuche → Skip + Failure-Eintrag, nachfolgende
+Changes fließen), Lag 2→0, Leader-Lock-Test (gesperrter Checkpoint wird konfliktfrei
+übersprungen), Uncommitted-Invisibility. 116 Tests grün.
 
 ## Phase 8 — Event-Log
 

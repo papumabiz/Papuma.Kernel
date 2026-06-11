@@ -45,6 +45,7 @@ public sealed partial class DocumentSession : IAsyncDisposable
     private NpgsqlConnection? _connection;
     private NpgsqlTransaction? _transaction;
     private bool _disposed;
+    private bool _hasWrites;
 
     /// <summary>Gets the scope this session is bound to.</summary>
     public ScopeContext Scope { get; }
@@ -75,9 +76,19 @@ public sealed partial class DocumentSession : IAsyncDisposable
             return; // nothing pending
         }
 
+        if (_hasWrites)
+        {
+            // Wakeup for feed processors; delivered atomically with the commit (ADR-010).
+            await using var notifyCmd = _connection!.CreateCommand();
+            notifyCmd.Transaction = _transaction;
+            notifyCmd.CommandText = $"NOTIFY {Processing.ChangeFeedProcessor.NotifyChannel}";
+            await notifyCmd.ExecuteNonQueryAsync(ct);
+        }
+
         await _transaction.CommitAsync(ct);
         await _transaction.DisposeAsync();
         _transaction = null;
+        _hasWrites = false;
     }
 
     /// <summary>
@@ -498,6 +509,7 @@ public sealed partial class DocumentSession : IAsyncDisposable
         AddJsonbParameter(cmd, "metadata", BuildChangeMetadata(extraMetadata));
 
         await cmd.ExecuteNonQueryAsync(ct);
+        _hasWrites = true;
     }
 
     /// <summary>
