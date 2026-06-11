@@ -367,6 +367,34 @@ RedactHistory → Klartext nachweislich aus Diff und Event-Payload entfernt, Aud
 Metadaten gesetzt, Rollback darüber scheitert typisiert); Scope-Isolationstest
 (Erasure in Tenant A lässt Tenant B byte-identisch).
 
+## Phase 13 — KI-Enablement (post-1.0, geplant; setzt Phase 11/12 voraus)
+
+Haltung: **Der Kernel bleibt KI-frei** (keine LLM-Aufrufe, keine KI-Abhängigkeiten —
+deterministische Infrastruktur), ist aber bewusst KI-freundlich: policy-minimierter
+Feed als sicherer Lesestoff, Scope-Bindung als natürliche Berechtigungsgrenze,
+dumme Handler als universeller Andockpunkt.
+
+- [ ] **Agenten-Doku aktualisieren**: `docs/ai/`-Playbook (1112 Zeilen, beschreibt
+      v1!) auf vNEXT umschreiben — Mentalmodell "Dokument ist Wahrheit", die
+      ADR-Verbote (Save ohne expectedVersion, PII ohne Policy, Query-DSL-Wünsche,
+      additive Transformations-Simulation), Handler-Idempotenz-Pflicht;
+      `concepts.md`/ADRs/getting-started als Referenzkette verlinken
+- [ ] **AGENTS.md-Snippet für konsumierende Repos**: kompakte "so denkst du über
+      Papuma"-Anleitung zum Hineinkopieren in Anwendungen, die das Paket nutzen
+- [ ] **MCP-Server als dünner Aufsatz auf Phase 11/12**: Modell-Introspektion
+      (Typen/Policies/Keys/Schema-Versionen), Lag, Failures, `GetHistoryAsync`,
+      DSGVO-Inventar — Dev-/Ops-Werkzeug, scope-gebunden, read-only als Default;
+      keine eigene Diagnose-Logik (nur Wrapper, sonst doppelte Schicht)
+- [ ] **KI-Konsumenten-Rezepte** (keine Kernel-Features, ADR-009-Demonstration):
+      Embeddings/RAG-Handler nach pgvector (gleiche Postgres-Instanz),
+      Natural-Language-Audit über `GetHistoryAsync` + LLM,
+      Anomalie-Erkennung auf dem Diff-Strom
+
+**DoD:** Agenten-Playbook beschreibt ausschließlich vNEXT (Stichprobe: ein Coding-
+Agent implementiert damit korrekt einen Handler + Save-Flow); MCP-Server liefert
+Historie/Lag/Inventar gegen den PG-18-Container; pgvector-Rezept als lauffähiges
+Beispiel.
+
 ## Weitere Post-1.0-Kandidaten (bei Bedarf, getrieben durch Lag-Metriken)
 
 Skalierungsmodell und Begründung: [concepts.md §14](concepts.md).
