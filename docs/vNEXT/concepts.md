@@ -71,6 +71,17 @@ Der Preis: Eine sehr lange offene Schreib-Transaktion hält den Feed-Fortschritt
 *aller* Konsumenten auf. Das ist akzeptiert und beobachtbar (Lag-Metrik) — und ein
 Grund mehr, warum Sessions kurze Transaktionen sein sollen.
 
+**Wer zahlt hier was?** Die Writer **nichts** — der schnelle Writer wartet nie auf
+den langsamen, beide committen unabhängig mit vollem Durchsatz; es gibt keine
+Schlange und kein Lock zwischen ihnen. Bezahlt wird ausschließlich in
+*Konsumenten-Latenz*, gedeckelt durch die längste gleichzeitig offene
+**Schreib**-Transaktion. Bei vielen Nutzern mit vielen kurzen Sessions rückt der
+Horizont kontinuierlich vor (steigendes Volumen macht es eher besser);
+Nur-Lese-Sessions halten ihn gar nicht auf, weil Postgres Transaktions-IDs erst
+beim ersten Write vergibt. Der eine Risikofall bleibt die einzelne lange offene
+Schreib-Session (z. B. über User-Denkzeit hinweg) — genau dafür ist der
+Lag-Health-Check da.
+
 ---
 
 ## 3. NOTIFY ist der Wecker, Polling ist die Wahrheit
@@ -112,6 +123,23 @@ Damit ein dauerhaft kaputter Change die Linie nicht ewig blockiert, gibt es das
 Failure-Eintrag bleibt als permanenter Alarm-Record in `papuma.failure` stehen
 (Betriebsthema, kein Datenverlust im Feed: der Change selbst ist ja noch da und
 kann nach einem Fix per Rebuild nachgeholt werden).
+
+**Wer zahlt hier was?** Es stoppt ausschließlich die Linie des *einen*
+fehlschlagenden Handlers — Writer und andere Handler (eigene Checkpoints) sind
+nicht betroffen. Die Kosten sind Latenz, nicht Durchsatz: Während des Backoffs
+wächst der Lag dieses Handlers um `Schreibrate × Backoff-Dauer`; danach holt er in
+Batches auf, was deutlich schneller geht als Echtzeit-Konsum. Voraussetzung ist
+Aufhol-Headroom — ein Handler, der der Schreibrate dauerhaft nicht folgen kann,
+hat wachsenden Lag mit oder ohne Stop-the-line (das ist Grenze 2 aus §14, nicht
+der Wartemechanismus).
+
+**Wo Writer wirklich interagieren** (der Vollständigkeit halber): nur am *Hot
+Document*. Zwei gleichzeitige Writes auf dieselbe Zeile serialisiert Postgres am
+Row-Lock für die (kurze) Dauer der ersten Transaktion, dann greift die
+Versionsprüfung → `ConcurrencyException` → App-Retry. Verschiedene Dokumente
+interagieren gar nicht: 10.000 Nutzer auf 10.000 Dokumenten skalieren linear;
+10.000 Nutzer auf *einem* globalen Zähler serialisieren an der Zeile — ein
+Modellierungsthema (Zähler sharden), kein Engine-Problem.
 
 ---
 
