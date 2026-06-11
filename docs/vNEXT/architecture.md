@@ -1,6 +1,7 @@
 # Papuma vNEXT — Grobarchitektur
 
-Status: Entwurf (2026-06-11) · Umsetzung: [implementation-plan.md](implementation-plan.md)
+Status: Entwurf (2026-06-11) · Umsetzung: [implementation-plan.md](implementation-plan.md) ·
+Hintergründe: [concepts.md](concepts.md) (das "Warum hinter dem Wie", erzählend)
 
 Dieses Dokument beschreibt den Reboot von Papuma.Kernel als **Document-Sourced CQRS**:
 JSON-Dokumente sind die Wahrheit, der Change Feed entsteht automatisch als Diff,
