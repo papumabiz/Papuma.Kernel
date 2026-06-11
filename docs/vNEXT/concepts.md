@@ -319,6 +319,48 @@ Zusammenhänge braucht, korreliert statt zu ordnen. Und weil beide Tabellen dies
 
 ---
 
+## 14. Das Skalierungsmodell der Feed-Engines — Grenzen und Auswege
+
+→ [ADR-009](adr/adr-009-projections-as-dumb-handlers.md), [ADR-010](adr/adr-010-feed-consumption.md)
+
+Pro Prozess läuft **ein** `ChangeFeedProcessor` und **ein** `EventFeedProcessor`;
+registriert werden *Handler*, nicht Prozessoren. Parallelität entsteht über
+App-Instanzen — und dort gilt: `FOR UPDATE SKIP LOCKED` macht Scale-out zu
+**Failover, nicht Throughput**. Pro Handler konsumiert immer genau eine Instanz,
+weil die strikte seq-Ordnung genau einen Konsumenten verlangt (wie Kafka mit einer
+Partition).
+
+Die drei echten Grenzen, in der Reihenfolge, in der man sie trifft:
+
+1. **Der langsamste Handler bestimmt die Zykluslatenz.** Handler laufen pro Zyklus
+   sequenziell; sie sind daten-entkoppelt (eigene Checkpoints), aber latenz-gekoppelt.
+   Bis ~10–20 zügige Handler irrelevant; ein Handler mit externem HTTP-Call zieht
+   alle in die Latenz.
+2. **Durchsatz pro Handler ist single-threaded** — die architektonische Decke.
+   Ein projektierender Handler (1 SQL-Write pro Change) schafft realistisch einige
+   hundert Changes/s. Schreibt die Anwendung dauerhaft schneller, wächst der Lag
+   unbegrenzt; mehr Instanzen helfen nicht.
+3. **Lese-Amplifikation**: Jeder Handler liest den vollen Feed (kein Typ-Filter im
+   SQL) — billig dank PK-Range-Scan ab Checkpoint, aber bei Volumen × Handler-Zahl
+   messbar.
+
+**Kein Problem**: NOTIFY-Stürme (der Prozessor arbeitet ohnehin bis "leer"),
+Connections (1–2 + LISTEN pro Prozessor), die zwei Prozessoren nebeneinander
+(getrennte Tabellen und Checkpoint-Räume).
+
+**Designhaltung**: Korrektheit + Beobachtbarkeit vor Durchsatz. Pull-basiert gibt es
+keinen Backpressure-Kollaps — nur wachsenden Lag, und genau den machen
+`GetLagAsync` + Health-Check sichtbar, lange bevor etwas kippt.
+
+**Die geplanten Auswege** (bewusst aufgeschoben, bis Lag-Metriken den Bedarf zeigen):
+Handler-Parallelisierung im Zyklus (`Task.WhenAll`, löst Grenze 1 — klein, da jeder
+Handler eigene Connection/Checkpoint hat), SQL-seitiger `document_type`-Filter pro
+Handler (löst Grenze 3), und als echtes Feature Handler-Sharding per
+`document_id`-Hash (löst Grenze 2 und erhält die fachlich relevante Ordnung *pro
+Dokument* bei N parallelen Konsumenten).
+
+---
+
 *Pflegehinweis: Neue Erklärstücke aus späteren Phasen hier ergänzen — dieses
 Dokument ist der Sammelpunkt für das "Warum hinter dem Wie" und Rohstoff für die
 Tutorials (Phase 9).*

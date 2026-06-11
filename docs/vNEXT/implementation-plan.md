@@ -302,6 +302,19 @@ grün unter den finalen Projektnamen; Paket packt.
 Alle 11 Phasen umgesetzt, alle 14 ADRs implementiert und durch Integrationstests
 gegen echtes PostgreSQL 18 abgedeckt. Der Reboot ist vollständig.
 
+## Post-1.0-Kandidaten (bei Bedarf, getrieben durch Lag-Metriken)
+
+Skalierungsmodell und Begründung: [concepts.md §14](concepts.md).
+
+- [ ] Handler-Parallelisierung im Prozessor-Zyklus (`Task.WhenAll` über Handler —
+      jeder hat eigene Connection + Checkpoint; löst Latenz-Kopplung)
+- [ ] SQL-seitiger `document_type`-Filter pro Change-Handler (reduziert
+      Lese-Amplifikation und irrelevante Zustellungen)
+- [ ] Handler-Sharding per `document_id`-Hash (Durchsatz pro Handler über einen
+      Konsumenten hinaus, Ordnung pro Dokument bleibt erhalten)
+- [ ] Diff-Engine-Benchmark bei großen Dokumenten (Risiko #4, bewusst offen)
+- [ ] Bulk-Change-Inserts via `unnest` statt Schleife (Phase-5-Notiz)
+
 ---
 
 ## Querschnitts-Checkliste (gilt für jede Phase)
