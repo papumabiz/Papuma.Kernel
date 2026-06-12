@@ -1,8 +1,10 @@
 # Polling vs. LISTEN/NOTIFY — Analyse für Papuma.Kernel
 
+> **⚠️ Historisches v1-Dokument.** Diese Analyse bezieht sich auf den v1-Code, der beim vNEXT-Reboot entfernt wurde — Code-Referenzen und relative Links lösen nicht mehr auf. Die Schlussfolgerungen bleiben gültig und werden von [ADR-010](../vNEXT/adr/adr-010-feed-consumption.md) und der [vNEXT-Architektur](../vNEXT/architecture.md) referenziert.
+
 ## Ist-Zustand
 
-Der [`ProjectionWorker`](../../src/Papuma.Kernel/Projections/ProjectionWorker.cs) nutzt **reines Polling** mit folgender Logik:
+Der `ProjectionWorker` (v1: `src/Papuma.Kernel/Projections/ProjectionWorker.cs`) nutzt **reines Polling** mit folgender Logik:
 
 ```
 loop:
