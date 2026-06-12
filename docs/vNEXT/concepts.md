@@ -701,6 +701,73 @@ the core of every backup; the question dissolves.
 
 ---
 
+## 21. Polyglot consumers: the feed as a cross-language API
+
+→ [ADR-004](adr/adr-004-changerecord-diff-only.md) (wire format),
+[ADR-011](adr/adr-011-no-business-events-in-storage.md) (the translator edge),
+§2 (gapless reads), §16 (views)
+
+Can an application written in another language react to changes and events from
+a Papuma-based system? Yes — and by design. The feed is deliberately *not* a
+.NET-private artifact: it is two ordinary Postgres tables with a documented,
+stable wire format (the ADR-004 diffs are flat JSONB, queryable even from SQL:
+`diff ? 'email'`). Everything the .NET processor does is plain SQL — read the
+checkpoint row, read gaplessly, advance the checkpoint, wait on NOTIFY. There
+are two consumption paths, with a clear decision rule.
+
+**Path A: direct SQL from the foreign language.** A Python/Go/Node consumer
+replicates the poll loop in ~50 lines and may even keep its position in the
+same `papuma.checkpoint` table (`handler_name` is just text — pick a unique
+one). Three things it must take seriously:
+
+1. **The gapless predicate is mandatory, not an optimization**:
+
+   ```sql
+   SELECT ... FROM papuma.change
+   WHERE seq > @checkpoint
+     AND txid < pg_snapshot_xmin(pg_current_snapshot())
+   ORDER BY seq
+   ```
+
+   A naive `seq > checkpoint` poll walks into the slow-writer trap (§2) and
+   silently loses changes.
+2. **At-least-once discipline**: process, then advance the checkpoint — and be
+   idempotent, exactly like a .NET handler (§19).
+3. **It sees the stored shape**: upcasting runs in the kernel, not in SQL — old
+   documents and diffs carry their historical `schema_version` (the additive
+   rules of ADR-005 are what keep this manageable). And RLS applies: set the
+   scope GUCs per transaction, or use the `'All'` scope mechanism for
+   cross-tenant workers.
+
+The built-in advantage that makes path A safe at all: **policies already
+minimized the feed at write time** (ADR-007). A foreign-language reader cannot
+reach sensitive values — the feed is safe reading material in every language.
+What path A does *not* get is the engine's machinery: retry with backoff,
+poison handling, leader coordination, lag metrics. A simple consumer can live
+without them; a critical one has to rebuild them — which is the cue for path B.
+
+**Path B: bridge through a .NET handler.** A dumb `IChangeHandler` publishes to
+a language-neutral transport — webhook, Kafka/RabbitMQ, Redis stream, an SSE
+endpoint. This is exactly the integration edge from ADR-011 (the event
+translator), and ADR-005 already notes that Protobuf is a fine choice *there*.
+The benefit: ordering, checkpoints, retry and poison handling stay in one place
+(the engine), and the foreign application gets a contract in its own world
+instead of access to your database.
+
+**The decision rule:** same Postgres instance reachable + simple consumption
+(a projection, a sync, analytics) → path A is legitimate and even elegant — the
+feed *is* the API; that is precisely why the truth lives as JSONB in Postgres.
+You need decoupling, transformation, delivery guarantees across system
+boundaries, or the database must not be shared → path B. (And for plain *state
+reads* from other languages, the SQL views of §16 exist anyway.)
+
+One boundary stays language-independent: foreign consumers are consumers.
+**Writing** goes through the kernel's session — only there do diff, policies,
+version chain and NOTIFY arise. A foreign app that needs to write talks to the
+Papuma application's API, not to `papuma.document`.
+
+---
+
 *Maintenance note: add new explainers from later phases here — this document is
 the collection point for the "why behind the how" and raw material for the
 tutorials (phase 9).*
