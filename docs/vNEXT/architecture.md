@@ -432,3 +432,6 @@ Application patterns on top of the ADRs, as drafts for later tutorials:
 - [The NATS bridge](recipes/nats-bridge.md)
   — publishing both feeds to JetStream with seq-based dedup; runnable in the
   sample via `Nats:Url`.
+- [External read models](recipes/external-read-models.md)
+  — the one projection pattern for search engines, vector stores and caches
+  (Manticore, Qdrant, Redis), plus where DotNetCore.CAP does and does not fit.
