@@ -400,6 +400,10 @@ Skalierungsmodell und Begründung: [concepts.md §14](concepts.md).
       Konsumenten hinaus, Ordnung pro Dokument bleibt erhalten)
 - [ ] Diff-Engine-Benchmark bei großen Dokumenten (Risiko #4, bewusst offen)
 - [ ] Bulk-Change-Inserts via `unnest` statt Schleife (Phase-5-Notiz)
+- [ ] Workflow-/Saga-Rezept (concepts §18): Human-in-the-Loop via Task-Dokument,
+      Zustandsmaschinen-Instanz mit `expectedVersion`-Transitionen, Timer-Poller
+      als Hosted Service (`dueAt` + Leader-Lock) — Rezept/Tutorial, kein
+      Kernel-Feature; ggf. später separates Paket oberhalb des Kernels
 
 ---
 

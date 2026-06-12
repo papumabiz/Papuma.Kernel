@@ -499,6 +499,97 @@ Decke → Bestand in Buckets sharden (Modellierungsthema, §14).
 
 ---
 
+## 18. Human-in-the-Loop und die Workflow-Frage: Warten ist Zustand, kein Thread
+
+→ §4 (Stop-the-line), [ADR-003](adr/adr-003-write-path.md) (expectedVersion),
+[ADR-013](adr/adr-013-event-log.md) (Events)
+
+Zwei scheinbar verschiedene Fragen — "kann ein Mensch im Feed mitentscheiden?"
+und "kann ich darauf eine Workflow-Engine bauen?" — haben dieselbe Antwort,
+weil sie dasselbe Muster sind.
+
+**Die harte Regel zuerst: Ein Feed-Handler wartet nie auf einen Menschen.**
+Stop-the-line (§4) bedeutet: Solange ein Handler nicht zurückkehrt, rückt sein
+Checkpoint nicht vor — ein blockierender Handler hält *seinen gesamten Feed* an
+und endet nach dem Backoff als Poison-Eintrag. Menschen antworten in Stunden
+oder Tagen; kein Thread, kein Prozess, kein Deployment überlebt das zuverlässig.
+
+Der richtige Mechanismus dreht das Warten um: **Der Handler materialisiert die
+Frage als Dokument und ist fertig.**
+
+```csharp
+// Handler auf OrderPlaced: braucht der Auftrag eine Freigabe?
+public async Task HandleAsync(ChangeRecord change, CancellationToken ct)
+{
+    await using var session = _store.OpenSession(change.Scope);
+    // Deterministische ID: dieselbe Zustellung erzeugt denselben Task (Idempotenz!)
+    var taskId = $"approval-{change.DocumentId}-v{change.Version}";
+    await session.SaveAsync(new ApprovalTask(taskId, change.DocumentId,
+        Status: ApprovalStatus.Pending, RequestedAt: _clock.UtcNow), expectedVersion: 0);
+    await session.CommitAsync();
+}
+```
+
+Der Checkpoint rückt vor, der Feed läuft weiter. Das Warten lebt jetzt **im
+Store als persistierter Zustand** — crash-sicher, deploybar, beliebig lang.
+Die menschliche Entscheidung ist dann ein ganz normaler Write:
+
+```csharp
+await session.PatchAsync<ApprovalTask>(taskId, p => p
+    .Set(x => x.Status, ApprovalStatus.Approved)
+    .Set(x => x.DecidedBy, actorId),
+    expectedVersion: 1); // zwei Approver gleichzeitig → einer verliert typisiert
+```
+
+Und dieser Write erzeugt selbst einen Change, auf den der nächste Handler
+reagiert. Der "Loop" durch den Menschen ist also kein blockierter Aufruf,
+sondern eine Kette: *Change → Task-Dokument → menschlicher Write → Change →
+nächster Schritt.* Jedes Glied ist atomar, versioniert und auditierbar.
+
+Zwei Fallen, die das Muster entschärft:
+
+1. **At-least-once**: Crasht der Prozess zwischen Task-Anlage und
+   Checkpoint-Fortschritt, wird der Change erneut zugestellt. Deterministische
+   Task-IDs (aus auslösender Dokument-ID + Version) machen die Wiederholung zum
+   harmlosen Konflikt statt zum Duplikat.
+2. **Konkurrierende Entscheider**: `expectedVersion` auf dem Task serialisiert
+   die Entscheidung — der zweite Approver bekommt die `ConcurrencyException`
+   und sieht in der UI "bereits entschieden von X" (per `GetHistoryAsync`).
+
+**Die Workflow-Engine ist dieses Muster, generalisiert.** Das klassische
+Saga-/Process-Manager-Modell braucht vier Dinge, und alle vier sind Primitive
+des Kernels:
+
+| Workflow-Bedarf | Kernel-Primitiv |
+|---|---|
+| Durable Zustandsmaschine pro Instanz | Workflow-Dokument (`currentStep`, Daten, Correlation) |
+| Trigger auf Fakten reagieren | Change- und Event-Feed-Handler |
+| Transitionen gegen Races schützen | `expectedVersion` beim Schreiben der Instanz |
+| Vollständiges Ausführungsprotokoll | Change Feed der Instanz — jede Transition mit Actor, Zeit, Correlation, reversibel |
+
+Ein Handler lädt die Instanz, entscheidet die Transition (reine Funktion:
+Zustand + Auslöser → neuer Zustand), schreibt mit `expectedVersion`. Feuern
+zwei Trigger gleichzeitig, verliert einer sauber und wertet beim Retry den
+*neuen* Zustand aus — genau die Semantik, die man bei Zustandsmaschinen will.
+Kompensation ("Saga-Rollback") sind Business-Events plus Handler, die rückwärts
+aufräumen. Human-Tasks sind der Abschnitt oben.
+
+**Das einzige fehlende Primitiv sind Timer** ("eskaliere nach 48 h ohne
+Antwort"). Bewusst: Ein Scheduler ist eine eigene Verantwortung mit eigenen
+Garantien. Das Rezept ist klein — `dueAt` als Feld auf der Instanz (per
+Key-Mapping oder View indiziert abfragbar) plus ein Hosted Service, der
+periodisch fällige Instanzen pollt und ein `WorkflowTimerFired`-Event appended;
+ab da übernimmt wieder die normale Handler-Kette. Leader-Koordination für
+diesen Poller gibt es mit `FOR UPDATE SKIP LOCKED` (§11) schon als Vorbild.
+
+Was der Kernel *nicht* wird: eine BPMN-Engine mit DSL und Designer. Der Kernel
+liefert durable State, reaktive Feeds, atomare Transitionen und das
+Audit-Protokoll — die Workflow-*Definition* (welche Schritte, welche Regeln)
+ist Anwendungscode oder ein späteres separates Paket darüber. Diese Grenze ist
+dieselbe wie bei DSGVO (ADR-015): Mechanismen unten, Entscheidungen oben.
+
+---
+
 *Pflegehinweis: Neue Erklärstücke aus späteren Phasen hier ergänzen — dieses
 Dokument ist der Sammelpunkt für das "Warum hinter dem Wie" und Rohstoff für die
 Tutorials (Phase 9).*
