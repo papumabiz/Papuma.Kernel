@@ -15,10 +15,10 @@ The vNEXT discussion ended at "fluent configuration only" (because policies are
 organization-dependent). Against that speaks: the model is the place of truth —
 whoever reads the class should see that `Email` is sensitive.
 
-Prior work from v1 that is adopted conceptually:
-[adr-2026-06-sensitive-data-reference-pattern.md](../../analyses/adr-2026-06-sensitive-data-reference-pattern.md)
-(hybrid model: references in the feed, a versioned sensitive data store, explicit
-opt-in resolution instead of invisible magic).
+Prior work from v1 that is adopted conceptually: the
+sensitive-data-reference-pattern ADR (removed with the v1 cleanup) — a hybrid
+model with references in the feed, a versioned sensitive data store, and explicit
+opt-in resolution instead of invisible magic.
 
 ## Decision
 

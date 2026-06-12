@@ -7,8 +7,10 @@
 
 Reading order for coding agents: start with the playbook (mental model + binding
 rules), then getting-started (API), then concepts (the why), then the ADRs
-(decisions; deviations are bugs). All documents are German except this file and
-the code/XML docs.
+(decisions; deviations are bugs). All canonical documents are English; the
+implementation plan and the original design chat remain German (historical
+project records), and `docs/vNEXT/concepts.de.md` is a frozen German snapshot of
+the concepts document (not maintained).
 
 These files also ship inside the Papuma.Kernel NuGet package under `docs/` —
 after `dotnet restore` they are readable locally from the global packages folder

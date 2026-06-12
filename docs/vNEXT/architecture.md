@@ -6,7 +6,8 @@ Background: [concepts.md](concepts.md) (the "why behind the how", narrative)
 This document describes the reboot of Papuma.Kernel as **document-sourced CQRS**:
 JSON documents are the truth, the change feed arises automatically as a diff,
 projections are deliberately dumb change handlers. There is no migration path
-from v1 — vNEXT is a fresh start (see [chat-1.md](chat-1.md) for the derivation).
+from v1 — vNEXT is a fresh start (derived in the original design discussion,
+"chat-1"; removed with the v1 cleanup).
 
 The binding individual decisions live in [adr/](adr/) — this document is the map
 above them.
@@ -92,8 +93,8 @@ Papuma.Kernel
 Papuma.Kernel.AspNetCore       tenant resolution, change-feed-lag health check
 ```
 
-The split into `Store / Changes / Processing` follows the sketch from chat-1.md
-("Papuma.Store / Papuma.ChangeFeed / Papuma.Processing") — but without package
+The split into `Store / Changes / Processing` follows the sketch from the design
+discussion ("Papuma.Store / Papuma.ChangeFeed / Papuma.Processing") — but without package
 splitting, which would be premature abstraction.
 
 ---
@@ -369,10 +370,9 @@ written:
 
 If a document is GDPR-erased, the values disappear with the document; the feed
 then contains only references and `changed` flags — no personal content. The
-hybrid model from
-[adr-2026-06-sensitive-data-reference-pattern.md](../analyses/adr-2026-06-sensitive-data-reference-pattern.md)
-(an explicit, versioned sensitive data store, opt-in resolution in projections)
-is adopted conceptually ([ADR-007](adr/adr-007-privacy-policies.md)).
+hybrid model from v1's sensitive-data-reference-pattern ADR (an explicit,
+versioned sensitive data store, opt-in resolution in projections) is adopted
+conceptually ([ADR-007](adr/adr-007-privacy-policies.md)).
 
 ---
 
