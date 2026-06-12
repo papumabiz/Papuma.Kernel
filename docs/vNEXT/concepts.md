@@ -389,6 +389,35 @@ Dokument* bei N parallelen Konsumenten).
 
 ---
 
+## 15. Observability ohne Vendor: warum BCL-Primitives reichen — und der Link-Trick
+
+→ Phase 11, [observability.md](observability.md)
+
+In .NET ist "OpenTelemetry oder etwas Besseres?" eine falsche Dichotomie: `Meter`
+und `ActivitySource` aus der BCL *sind* die vendor-neutralen Quellen, und OTel,
+Prometheus oder `dotnet-counters` sind austauschbare Konsumenten. Der Kernel nimmt
+deshalb null Abhängigkeiten und instrumentiert direkt — `AddMeter("Papuma.Kernel")`
+genügt der Anwendung.
+
+Zwei Details, die nicht offensichtlich sind:
+
+**Der Lag-Gauge ist ein Cache, kein Live-Query.** Observable Gauges werden synchron
+abgefragt, der Lag erfordert aber eine DB-Abfrage. Deshalb füttert `GetLagAsync` einen
+Cache, den die Run-Loop in ihren Idle-Momenten auffrischt — Gauge-Frische ≈
+Poll-Intervall. Und weil Observable Gauges nicht einzeln deregistrierbar sind, hält
+jeder Prozessor einen *eigenen* Meter (gleicher Name!), der mit ihm disposed wird.
+
+**Handler-Spans verlinken statt zu erben.** Die Session schreibt den aktiven
+`traceparent` in die Change-Metadata; der Handler-Span nimmt ihn als Span-**Link**,
+nicht als Parent. Bewusst: Ein Parent würde behaupten, die Feed-Verarbeitung sei
+Teil der Request-Latenz — ist sie nicht, sie ist asynchrone Batch-Arbeit, womöglich
+Minuten später (Backoff!). Der Link sagt korrekt "wurde verursacht von", und der
+Trace-Viewer beantwortet trotzdem per Klick, welcher Request eine Projektion
+ausgelöst hat. Datenschutz-Bonus: Durch die Policy-Bereinigung der Diffs ist die
+gesamte Observability-Pipeline PII-arm by design.
+
+---
+
 *Pflegehinweis: Neue Erklärstücke aus späteren Phasen hier ergänzen — dieses
 Dokument ist der Sammelpunkt für das "Warum hinter dem Wie" und Rohstoff für die
 Tutorials (Phase 9).*

@@ -1,6 +1,7 @@
 // Copyright (c) 2026- by Harald Lapp.
 // Licensed under the MIT License. See LICENSE in the repository root for details.
 
+using System.Diagnostics;
 using System.Linq.Expressions;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -9,6 +10,7 @@ using Npgsql;
 using NpgsqlTypes;
 
 using Papuma.Kernel.Changes;
+using Papuma.Kernel.Diagnostics;
 using Papuma.Kernel.Model;
 using Papuma.Kernel.Tenancy;
 using Papuma.Kernel.Validation;
@@ -76,6 +78,8 @@ public sealed partial class DocumentSession : IAsyncDisposable
             return; // nothing pending
         }
 
+        var stopwatch = Stopwatch.StartNew();
+
         if (_hasWrites)
         {
             // Wakeup for feed processors; delivered atomically with the commit (ADR-010).
@@ -89,6 +93,9 @@ public sealed partial class DocumentSession : IAsyncDisposable
         await _transaction.DisposeAsync();
         _transaction = null;
         _hasWrites = false;
+
+        KernelDiagnostics.SessionCommits.Add(1);
+        KernelDiagnostics.CommitDuration.Record(stopwatch.Elapsed.TotalMilliseconds);
     }
 
     /// <summary>
@@ -227,11 +234,21 @@ public sealed partial class DocumentSession : IAsyncDisposable
             ?? throw new ArgumentException(
                 $"Document of type {typeof(T).Name} must serialize to a JSON object.", nameof(document));
 
-        return await ExecuteWriteAsync(
-            (conn, tx) => expectedVersion == 0
-                ? InsertAsync(conn, tx, metadata, id, newJson, ct)
-                : UpdateAsync(conn, tx, metadata, id, newJson, expectedVersion, ct, extraMetadata: null),
-            ct);
+        using var activity = StartWriteActivity("save", metadata.Name, id);
+        try
+        {
+            var result = await ExecuteWriteAsync(
+                (conn, tx) => expectedVersion == 0
+                    ? InsertAsync(conn, tx, metadata, id, newJson, ct)
+                    : UpdateAsync(conn, tx, metadata, id, newJson, expectedVersion, ct, extraMetadata: null),
+                ct);
+            activity?.SetTag("papuma.version", result.Version);
+            return result;
+        }
+        catch (Exception ex) when (RecordFailure(activity, ex))
+        {
+            throw; // unreachable — the filter never catches
+        }
     }
 
     /// <summary>
@@ -250,8 +267,11 @@ public sealed partial class DocumentSession : IAsyncDisposable
         var metadata = _model.GetRequired<T>();
         InputValidator.ValidateDocumentId(id);
 
-        return await ExecuteWriteAsync(async (conn, tx) =>
+        using var activity = StartWriteActivity("delete", metadata.Name, id);
+        try
         {
+            return await ExecuteWriteAsync(async (conn, tx) =>
+            {
             await using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText = """
@@ -291,7 +311,12 @@ public sealed partial class DocumentSession : IAsyncDisposable
                 conn, tx, metadata, id, deletedVersion, ChangeOperation.Delete, diff, oldSchemaVersion, ct);
 
             return new SaveResult(deletedVersion, ChangeOperation.Delete, diff);
-        }, ct);
+            }, ct);
+        }
+        catch (Exception ex) when (RecordFailure(activity, ex))
+        {
+            throw; // unreachable — the filter never catches
+        }
     }
 
     /// <summary>
@@ -319,6 +344,10 @@ public sealed partial class DocumentSession : IAsyncDisposable
         var metadata = _model.GetRequired<T>();
         InputValidator.ValidateDocumentId(id);
 
+        using var activity = StartWriteActivity("rollback", metadata.Name, id);
+        activity?.SetTag("papuma.restored_version", toVersion);
+        try
+        {
         return await ExecuteWriteAsync(async (conn, tx) =>
         {
             // 1. Current state (the concurrency guarantee comes from the final UPDATE's
@@ -371,6 +400,11 @@ public sealed partial class DocumentSession : IAsyncDisposable
             };
             return await UpdateAsync(conn, tx, metadata, id, state, expectedVersion, ct, rollbackMetadata);
         }, ct);
+        }
+        catch (Exception ex) when (RecordFailure(activity, ex))
+        {
+            throw; // unreachable — the filter never catches
+        }
     }
 
     // ── Write internals ────────────────────────────────────────────────────────
@@ -510,6 +544,10 @@ public sealed partial class DocumentSession : IAsyncDisposable
 
         await cmd.ExecuteNonQueryAsync(ct);
         _hasWrites = true;
+
+        KernelDiagnostics.Writes.Add(1,
+            new KeyValuePair<string, object?>("papuma.operation", operation.ToString()),
+            new KeyValuePair<string, object?>("papuma.document_type", metadata.Name));
     }
 
     /// <summary>
@@ -529,6 +567,13 @@ public sealed partial class DocumentSession : IAsyncDisposable
             json["causationId"] = _options.CausationId;
         }
 
+        // Phase 11: propagate the active trace context through the feed so handler
+        // spans can link back to the originating request.
+        if (Activity.Current is { IdFormat: ActivityIdFormat.W3C, Id: { } traceparent })
+        {
+            json["traceparent"] = traceparent;
+        }
+
         if (extra is not null)
         {
             foreach (var (key, node) in extra)
@@ -541,6 +586,34 @@ public sealed partial class DocumentSession : IAsyncDisposable
     }
 
     // ── Transaction plumbing ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Starts a write span (phase 11). Null when no listener is attached — near-zero cost.
+    /// </summary>
+    private Activity? StartWriteActivity(string operation, string documentType, string? documentId)
+    {
+        var activity = KernelDiagnostics.ActivitySource.StartActivity($"papuma.session.{operation}");
+        if (activity is not null)
+        {
+            activity.SetTag("papuma.document_type", documentType);
+            activity.SetTag("papuma.tenant", Scope.TenantId);
+            if (documentId is not null)
+            {
+                activity.SetTag("papuma.document_id", documentId);
+            }
+        }
+
+        return activity;
+    }
+
+    /// <summary>
+    /// Exception-filter helper: marks the span as failed without catching the exception.
+    /// </summary>
+    private static bool RecordFailure(Activity? activity, Exception ex)
+    {
+        activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+        return false;
+    }
 
     /// <summary>
     /// Opens the session transaction lazily (and re-applies the scope, since
@@ -695,6 +768,9 @@ public sealed partial class DocumentSession : IAsyncDisposable
         var actual = await cmd.ExecuteScalarAsync(ct);
         if (actual is long actualVersion)
         {
+            KernelDiagnostics.Conflicts.Add(1,
+                new KeyValuePair<string, object?>("papuma.kind", "concurrency"),
+                new KeyValuePair<string, object?>("papuma.document_type", documentType));
             return new ConcurrencyException(documentType, id, expectedVersion, actualVersion);
         }
 
@@ -718,6 +794,9 @@ public sealed partial class DocumentSession : IAsyncDisposable
             var match = _model.FindKeyByIndexName(ex.ConstraintName);
             if (match is not null)
             {
+                KernelDiagnostics.Conflicts.Add(1,
+                    new KeyValuePair<string, object?>("papuma.kind", "unique_key"),
+                    new KeyValuePair<string, object?>("papuma.document_type", documentType));
                 throw new UniqueKeyViolationException(documentType, match.Value.Key.Path, ex);
             }
 

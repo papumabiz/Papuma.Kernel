@@ -302,43 +302,36 @@ grün unter den finalen Projektnamen; Paket packt.
 Alle 11 Phasen umgesetzt, alle 14 ADRs implementiert und durch Integrationstests
 gegen echtes PostgreSQL 18 abgedeckt. Der Reboot ist vollständig.
 
-## Phase 11 — Observability & Diagnostics (post-1.0, geplant)
+## Phase 11 — Observability & Diagnostics ✅ (2026-06-12)
 
 Prinzip: **Instrumentierung mit BCL-Primitives im Kernel, kein Vendor-Lock** —
-`System.Diagnostics.Metrics.Meter` + `ActivitySource` + vorhandenes `ILogger`.
-OpenTelemetry, Prometheus, `dotnet-counters` oder App Insights sind *Konsumenten*
-dieser Quellen und werden von der Anwendung verdrahtet
-(`AddMeter("Papuma.Kernel")` / `AddSource("Papuma.Kernel")`); ein eigenes
-OTel-Convenience-Paket nur, falls die Verdrahtung sich als Reibung erweist
-(Doku zuerst, Paket später — AGENTS.md: keine Pakete ohne Not).
+Guide: [observability.md](observability.md), Hintergründe: [concepts.md §15](concepts.md).
 
-- [ ] **Metriken** (Meter `Papuma.Kernel`) — die §14-Grenzen messbar machen:
-      `papuma.feed.lag` als Observable Gauge pro Handler (Change- + Event-Feed,
-      Tag `handler`/`feed`); Counter für verarbeitete Changes/Events, Failures,
-      Poison-Skips, Session-Commits, Writes pro Operation, Konflikte
-      (`ConcurrencyException`, `UniqueKeyViolation`); Histogramme für
-      Handler-Dauer (entlarvt Grenze 1), Zyklus-Dauer, Commit-Dauer
-- [ ] **Tracing** (ActivitySource `Papuma.Kernel`): Spans für Save/Patch/Delete/
-      Append/Rollback (Tags: `document_type`, `operation`, `tenant`, Version) und
-      pro Handler-Invocation (`handler`, `seq`)
-- [ ] **Trace-Kontext-Propagation durch den Feed**: aktiver `traceparent` wird in
-      die Change-/Event-Metadata geschrieben; Handler-Spans verlinken auf den
-      auslösenden Request ("welcher Request hat diese Projektion ausgelöst?")
-- [ ] **Historie-Lese-API** (schließt die ADR-003-Lücke: "zwischenzeitliche Diffs
-      laden" hat noch keine öffentliche API): `session.GetHistoryAsync<T>(id,
-      fromVersion?, toVersion?)` → ChangeRecords pro Dokument (Keyset-Pagination,
-      Ernte: v1 `ChangeFeedReader`-Muster); Grundlage für Konflikt-UIs und Audit
-- [ ] **Failure-Inspektion**: `GetFailuresAsync()` auf beiden Prozessoren
-      (Handler, seq, attempts, last_error, next_retry_at) — die Poison-Liste als
-      API statt nur als Tabelle; optional `RetryFailureAsync(handler, seq)`
-      (Failure-Eintrag löschen → nächster Zyklus versucht erneut)
-- [ ] Doku: Observability-Guide (OTel-Verdrahtung, Dashboards-Empfehlung:
-      Lag pro Handler, Poison-Alarm, Konfliktrate) + concepts.md-Abschnitt
+- [x] **Metriken** (Meter `Papuma.Kernel`, `KernelDiagnostics`): `papuma.feed.lag`
+      als Observable Gauge pro Handler/Feed (Cache-basiert — Gauge-Frische ≈
+      Poll-Intervall; per-Prozessor-Meter, disposed mit dem Prozessor); Counter
+      `feed.processed`/`feed.failures`/`feed.poisoned`/`session.commits`/
+      `session.writes` (operation + document_type)/`session.events`/
+      `session.conflicts` (concurrency | unique_key); Histogramme
+      `feed.handler.duration`, `feed.cycle.duration`, `session.commit.duration`
+- [x] **Tracing**: Spans `papuma.session.save/patch/delete/rollback/append`
+      (document_type, document_id, tenant, version; Fehlerstatus via
+      Exception-Filter ohne Catch) und `papuma.feed.handle` (feed, handler, seq)
+- [x] **Trace-Propagation**: `traceparent` in Change-/Event-Metadata; Handler-Spans
+      tragen einen Span-**Link** (bewusst kein Parent — asynchrone Batch-Arbeit
+      gehört nicht in die Request-Latenz, concepts §15)
+- [x] **`GetHistoryAsync<T>(id, fromVersion?, toVersion?)`** — schließt die
+      ADR-003-Lücke; policy-bereinigte ChangeRecords in Versionsreihenfolge,
+      sieht uncommitted Session-Writes
+- [x] **`GetFailuresAsync()` + `RetryFailureAsync(handler, seq)`** auf beiden
+      Prozessoren (`FeedFailure`-Record; Event-Prefix wird gemappt)
+- [x] Doku: [observability.md](observability.md) (Verdrahtung, Metrik-Tabelle,
+      Dashboard-Empfehlung, Diagnose-APIs) + concepts §15
 
-**DoD:** Metriken via `MeterListener` im Test verifiziert (Lag-Gauge, Poison-Counter);
-Trace-Test: Write-Span und Handler-Span teilen Trace-Id über die
-Metadata-Propagation; `GetHistoryAsync` liefert die Diffs eines Konfliktfensters
-(ADR-003-Szenario); Failure-Inspektion + Retry getestet.
+**DoD erfüllt:** MeterListener-Tests (Lag-Gauge 2→0, Failure-/Poison-Counter),
+Trace-Test (Write-Span Kind des Request-Roots; Handler-Span-Link trägt dieselbe
+Trace-Id), `GetHistoryAsync`-Konfliktfenster (ADR-003-Szenario inkl. Diff-Werten),
+Failure-Inspektion + manueller Retry-Flow. 130 Tests grün.
 
 ## Phase 12 — DSGVO-Werkzeuge (post-1.0, geplant)
 

@@ -1,6 +1,9 @@
 // Copyright (c) 2026- by Harald Lapp.
 // Licensed under the MIT License. See LICENSE in the repository root for details.
 
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Text.Json.Nodes;
 
 using Microsoft.Extensions.Logging;
@@ -8,6 +11,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 using Npgsql;
 
+using Papuma.Kernel.Diagnostics;
 using Papuma.Kernel.Processing;
 using Papuma.Kernel.Tenancy;
 
@@ -25,14 +29,20 @@ namespace Papuma.Kernel.Events;
 /// there is no global ordering across the two feeds; correlate via
 /// <c>correlationId</c> (ADR-013).
 /// </remarks>
-public sealed class EventFeedProcessor
+public sealed class EventFeedProcessor : IDisposable
 {
     private const string CheckpointPrefix = "event:";
+    private const string FeedTag = "event";
 
     private readonly NpgsqlDataSource _dataSource;
     private readonly IReadOnlyList<IEventHandler> _handlers;
     private readonly ChangeFeedProcessorOptions _options;
     private readonly ILogger _logger;
+
+    // Per-instance meter (same name as the shared one) so the observable lag gauge can
+    // be disposed with the processor (phase 11); see ChangeFeedProcessor.
+    private readonly Meter _meter;
+    private readonly ConcurrentDictionary<string, long> _lagByHandler = new(StringComparer.Ordinal);
     private bool _registered;
 
     /// <summary>
@@ -61,6 +71,27 @@ public sealed class EventFeedProcessor
         if (duplicate is not null)
         {
             throw new ArgumentException($"Handler name '{duplicate.Key}' is registered more than once.", nameof(handlers));
+        }
+
+        _meter = new Meter(KernelDiagnostics.SourceName);
+        _meter.CreateObservableGauge(
+            "papuma.feed.lag",
+            ObserveLag,
+            unit: "{record}",
+            description: "Stable-visible feed head minus checkpoint, per handler. " +
+                         "Refreshed by GetLagAsync and the idle moments of the run loop.");
+    }
+
+    /// <summary>Disposes the per-instance lag gauge.</summary>
+    public void Dispose() => _meter.Dispose();
+
+    private IEnumerable<Measurement<long>> ObserveLag()
+    {
+        foreach (var (handler, lag) in _lagByHandler)
+        {
+            yield return new Measurement<long>(lag,
+                new KeyValuePair<string, object?>("papuma.feed", FeedTag),
+                new KeyValuePair<string, object?>("papuma.handler", handler));
         }
     }
 
@@ -106,11 +137,16 @@ public sealed class EventFeedProcessor
             {
                 try
                 {
+                    await GetLagAsync(ct); // gauge freshness ≈ poll interval
                     await listenConn.WaitAsync(_options.PollInterval, ct);
                 }
                 catch (OperationCanceledException)
                 {
                     break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Lag refresh failed; continuing.");
                 }
             }
         }
@@ -126,14 +162,36 @@ public sealed class EventFeedProcessor
     {
         await EnsureRegisteredAsync(ct);
 
+        var stopwatch = Stopwatch.StartNew();
         var total = 0;
         foreach (var handler in _handlers)
         {
             total += await ProcessHandlerBatchAsync(handler, ct);
         }
 
+        KernelDiagnostics.CycleDuration.Record(stopwatch.Elapsed.TotalMilliseconds,
+            new KeyValuePair<string, object?>("papuma.feed", FeedTag));
         return total;
     }
+
+    /// <summary>
+    /// Returns the persisted failure entries (retrying and poison) of this processor's
+    /// handlers — the failure table as an API (phase 11 diagnostics).
+    /// </summary>
+    /// <param name="ct">A cancellation token.</param>
+    public Task<IReadOnlyList<FeedFailure>> GetFailuresAsync(CancellationToken ct = default) =>
+        FeedDiagnostics.GetFailuresAsync(_dataSource, _handlers.Select(h => h.Name), CheckpointPrefix, ct);
+
+    /// <summary>
+    /// Removes a failure entry so the next cycle retries the event immediately —
+    /// the manual override after fixing a poison cause.
+    /// </summary>
+    /// <param name="handlerName">The handler name (without the internal prefix).</param>
+    /// <param name="seq">The event log sequence number.</param>
+    /// <param name="ct">A cancellation token.</param>
+    /// <returns><c>true</c> when a failure entry existed and was removed.</returns>
+    public Task<bool> RetryFailureAsync(string handlerName, long seq, CancellationToken ct = default) =>
+        FeedDiagnostics.RetryFailureAsync(_dataSource, handlerName, CheckpointPrefix, seq, ct);
 
     /// <summary>
     /// Resets a handler's checkpoint to 0 and clears its failure entries — full replay
@@ -207,6 +265,7 @@ public sealed class EventFeedProcessor
 
             var lag = latestSeq > checkpoint ? latestSeq - checkpoint : 0L;
             snapshots.Add(new ChangeFeedLagSnapshot(handler.Name, checkpoint, latestSeq, lag));
+            _lagByHandler[handler.Name] = lag; // feeds the observable gauge
         }
 
         return snapshots;
@@ -256,6 +315,9 @@ public sealed class EventFeedProcessor
                 _logger.LogError(
                     "Event handler {Handler} skips poison event seq {Seq} after {Attempts} attempts.",
                     handler.Name, item.Record.Seq, item.Attempts);
+                KernelDiagnostics.FeedPoisoned.Add(1,
+                    new KeyValuePair<string, object?>("papuma.feed", FeedTag),
+                    new KeyValuePair<string, object?>("papuma.handler", handler.Name));
                 newCheckpoint = item.Record.Seq;
                 continue;
             }
@@ -265,6 +327,10 @@ public sealed class EventFeedProcessor
                 break; // stop-the-line (ADR-009)
             }
 
+            // Handler span links to the originating write's trace (metadata traceparent).
+            using var activity = FeedDiagnostics.StartHandlerActivity(
+                FeedTag, handler.Name, item.Record.Seq, item.Record.Metadata);
+            var stopwatch = Stopwatch.StartNew();
             try
             {
                 await handler.HandleAsync(item.Record, ct);
@@ -275,12 +341,23 @@ public sealed class EventFeedProcessor
             }
             catch (Exception ex)
             {
+                activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+                KernelDiagnostics.FeedFailures.Add(1,
+                    new KeyValuePair<string, object?>("papuma.feed", FeedTag),
+                    new KeyValuePair<string, object?>("papuma.handler", handler.Name));
                 var attempts = await RegisterFailureAsync(conn, tx, key, item.Record.Seq, ex, ct);
                 _logger.LogWarning(ex,
                     "Event handler {Handler} failed on event seq {Seq} (attempt {Attempts}/{MaxAttempts}).",
                     handler.Name, item.Record.Seq, attempts, _options.MaxAttempts);
                 break;
             }
+
+            KernelDiagnostics.HandlerDuration.Record(stopwatch.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("papuma.feed", FeedTag),
+                new KeyValuePair<string, object?>("papuma.handler", handler.Name));
+            KernelDiagnostics.FeedProcessed.Add(1,
+                new KeyValuePair<string, object?>("papuma.feed", FeedTag),
+                new KeyValuePair<string, object?>("papuma.handler", handler.Name));
 
             if (item.Attempts > 0)
             {

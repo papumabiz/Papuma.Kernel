@@ -48,6 +48,9 @@ public sealed partial class DocumentSession
         InputValidator.ValidateDocumentId(id);
         var operations = CollectOperations(patch);
 
+        using var activity = StartWriteActivity("patch", metadata.Name, id);
+        try
+        {
         return await ExecuteWriteAsync(async (conn, tx) =>
         {
             await using var cmd = conn.CreateCommand();
@@ -103,6 +106,11 @@ public sealed partial class DocumentSession
 
             return new SaveResult(newVersion, ChangeOperation.Update, diff);
         }, ct);
+        }
+        catch (Exception ex) when (RecordFailure(activity, ex))
+        {
+            throw; // unreachable — the filter never catches
+        }
     }
 
     /// <summary>

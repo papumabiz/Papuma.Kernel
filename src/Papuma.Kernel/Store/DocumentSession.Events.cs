@@ -35,6 +35,9 @@ public sealed partial class DocumentSession
                 $"Event of type {typeof(TEvent).Name} must serialize to a JSON object.", nameof(@event));
         payload = EventPayloadPolicyApplier.Apply(payload, metadata);
 
+        using var activity = StartWriteActivity("append", metadata.Name, documentId: null);
+        try
+        {
         return await ExecuteWriteAsync(async (conn, tx) =>
         {
             await using var cmd = conn.CreateCommand();
@@ -52,7 +55,15 @@ public sealed partial class DocumentSession
 
             var seq = (long)(await cmd.ExecuteScalarAsync(ct))!;
             _hasWrites = true;
+
+            Diagnostics.KernelDiagnostics.EventsAppended.Add(1,
+                new KeyValuePair<string, object?>("papuma.event_type", metadata.Name));
             return seq;
         }, ct);
+        }
+        catch (Exception ex) when (RecordFailure(activity, ex))
+        {
+            throw; // unreachable — the filter never catches
+        }
     }
 }
