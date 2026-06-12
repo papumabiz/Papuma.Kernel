@@ -768,6 +768,76 @@ Papuma application's API, not to `papuma.document`.
 
 ---
 
+## 22. Event buses (NATS, Kafka, RabbitMQ): the feed is the outbox
+
+→ [ADR-002](adr/adr-002-document-as-truth.md) (derived feed),
+[ADR-009](adr/adr-009-projections-as-dumb-handlers.md) (handlers),
+§21 (polyglot consumers, path B)
+
+Where does an event bus fit next to the kernel? Behind the feed — never beside
+it. The reasoning has a neat punchline: **the derived change feed already *is* a
+transactional outbox.**
+
+Publishing to a bus directly from the write path would be the classic dual-write
+problem: there is always a window in which one of the two writes succeeds and
+the other does not — exactly what the outbox pattern was invented to fix
+(laboriously, in v1). In Papuma the ChangeRecord is created *in the same
+transaction* as the document (ADR-003): atomic, gapless, replayable. Nothing can
+be forgotten, nothing can be published that was never committed. The bus
+attachment is therefore an ordinary dumb handler — and inherits ordering,
+checkpoints, retry and poison handling from the engine:
+
+```csharp
+public sealed class NatsChangePublisher(INatsJSContext jetStream) : IChangeHandler
+{
+    public string Name => "nats-publisher";
+
+    public async Task HandleAsync(ChangeRecord change, CancellationToken ct)
+    {
+        var subject = $"papuma.change.{change.Scope.TenantId}.{change.DocumentType}";
+        await jetStream.PublishAsync(subject, Serialize(change),
+            opts: new NatsJSPubOpts { MsgId = $"change-{change.Seq}" },
+            cancellationToken: ct);
+    }
+}
+```
+
+Three details make NATS a particularly good fit:
+
+1. **JetStream dedup via `Nats-Msg-Id`**: using the feed `seq` as the message id
+   turns the handler's at-least-once into effective exactly-once toward the bus
+   — the idempotency obligation dissolves into one line. (Kafka achieves the
+   same with an idempotent producer + seq-keyed messages.)
+2. **The subject hierarchy mirrors the scope model**:
+   `papuma.change.{tenant}.{type}` means NATS accounts/permissions can *extend*
+   tenant isolation onto the transport — a consumer allowed to subscribe only to
+   `papuma.change.acme.>` structurally never sees foreign tenants.
+3. **Policies already acted**: what reaches the bus is the policy-applied record
+   (ADR-007) — the bus cannot distribute sensitive values.
+
+**Core NATS vs. JetStream** is the second fork. Core (at-most-once, ephemeral)
+fits throwaway signals — UI pushes, cache invalidation: a lost signal costs
+nothing because the truth sits in Postgres and is reloaded on demand. JetStream
+(persistent, at-least-once, consumer groups) fits real integrations. But even
+with JetStream: **the stream on the bus is a copy; the feed remains the truth
+and the replay source.** A rebuild means resetting a checkpoint at the feed,
+never "rewinding the bus". Retention on the bus is purely a transport decision
+and never endangers data.
+
+**When is a bus worth it?** Many (polyglot) consumers, fan-out across network
+boundaries, decoupling consumers from the database → bus (this is the
+industrial-strength version of §21 path B). A single .NET application reacting
+to its own changes → handlers suffice; a bus would be pure operational
+complexity. And the kernel itself never needs one internally — LISTEN/NOTIFY as
+the wakeup is deliberately dependency-free (ADR-010).
+
+Often the right granularity for the bus is not the raw change but the
+**translated domain event** (ADR-011): the same handler that detects
+`status: Pending → Paid` publishes `OrderPaid` to the bus — external consumers
+get a stable, intention-revealing contract instead of your document shapes.
+
+---
+
 *Maintenance note: add new explainers from later phases here — this document is
 the collection point for the "why behind the how" and raw material for the
 tutorials (phase 9).*
