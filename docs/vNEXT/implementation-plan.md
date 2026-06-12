@@ -415,7 +415,10 @@ Skalierungsmodell und Begründung: [concepts.md §14](concepts.md).
 - [ ] Handler-Sharding per `document_id`-Hash (Durchsatz pro Handler über einen
       Konsumenten hinaus, Ordnung pro Dokument bleibt erhalten)
 - [ ] Diff-Engine-Benchmark bei großen Dokumenten (Risiko #4, bewusst offen)
-- [ ] Bulk-Change-Inserts via `unnest` statt Schleife (Phase-5-Notiz)
+- [x] Bulk-Change-Inserts via `unnest` statt Schleife (Phase-5-Notiz) —
+      ✅ 2026-06-12: `InsertChangeRecordsAsync` (ein set-basiertes INSERT für alle
+      ChangeRecords einer Bulk-Operation; text[]/bigint[]/int[]/jsonb[]-Arrays),
+      genutzt von BulkPatch und BulkDelete; Verhalten unverändert (145 Tests grün)
 - [ ] Workflow-/Saga-Rezept (concepts §18): Human-in-the-Loop via Task-Dokument,
       Zustandsmaschinen-Instanz mit `expectedVersion`-Transitionen, Timer-Poller
       als Hosted Service (`dueAt` + Leader-Lock) — Rezept/Tutorial, kein

@@ -260,6 +260,7 @@ public sealed partial class DocumentSession
                 },
                 metadata.Name);
 
+            var changes = new List<(string Id, long Version, int SchemaVersion, DocumentDiff Diff)>(rows.Count);
             foreach (var (id, oldJsonText, newJsonText, newVersion, oldSchemaVersion) in rows)
             {
                 // Any violation rolls the entire statement back — bulk is atomic (ADR-014).
@@ -270,11 +271,10 @@ public sealed partial class DocumentSession
 
                 var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
                 var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, storedNewJson), metadata, id);
-                await InsertChangeRecordAsync(
-                    conn, tx, metadata, id, newVersion, ChangeOperation.Update, diff,
-                    metadata.SchemaVersion, ct);
+                changes.Add((id, newVersion, metadata.SchemaVersion, diff));
             }
 
+            await InsertChangeRecordsAsync(conn, tx, metadata, changes, ChangeOperation.Update, ct);
             return new BulkResult(rows.Count, CorrelationId);
         }, ct);
     }
@@ -310,17 +310,17 @@ public sealed partial class DocumentSession
                 }
             }
 
+            var changes = new List<(string Id, long Version, int SchemaVersion, DocumentDiff Diff)>(rows.Count);
             foreach (var (id, oldJsonText, version, oldSchemaVersion) in rows)
             {
                 EnsureSchemaNotNewer(metadata, id, oldSchemaVersion);
 
                 var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
                 var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, after: null), metadata, id);
-                await InsertChangeRecordAsync(
-                    conn, tx, metadata, id, version + 1, ChangeOperation.Delete, diff,
-                    oldSchemaVersion, ct);
+                changes.Add((id, version + 1, oldSchemaVersion, diff));
             }
 
+            await InsertChangeRecordsAsync(conn, tx, metadata, changes, ChangeOperation.Delete, ct);
             return new BulkResult(rows.Count, CorrelationId);
         }, ct);
     }

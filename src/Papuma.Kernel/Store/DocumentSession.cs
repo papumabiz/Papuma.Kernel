@@ -551,6 +551,66 @@ public sealed partial class DocumentSession : IAsyncDisposable
     }
 
     /// <summary>
+    /// Inserts the change records of one bulk operation as a single set-based
+    /// statement (<c>unnest</c> instead of N inserts — the phase-5 note). All records
+    /// share the operation and the session metadata (common correlation id, ADR-014).
+    /// </summary>
+    private async Task InsertChangeRecordsAsync(
+        NpgsqlConnection conn,
+        NpgsqlTransaction tx,
+        DocumentTypeMetadata metadata,
+        IReadOnlyList<(string Id, long Version, int SchemaVersion, DocumentDiff Diff)> records,
+        ChangeOperation operation,
+        CancellationToken ct)
+    {
+        if (records.Count == 0)
+        {
+            return;
+        }
+
+        var ids = new string[records.Count];
+        var versions = new long[records.Count];
+        var schemaVersions = new int[records.Count];
+        var diffs = new string[records.Count];
+        for (var i = 0; i < records.Count; i++)
+        {
+            ids[i] = records[i].Id;
+            versions[i] = records[i].Version;
+            schemaVersions[i] = records[i].SchemaVersion;
+            diffs[i] = records[i].Diff.ToJson().ToJsonString();
+        }
+
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            INSERT INTO papuma.change
+                (scope, tenant_id, document_type, document_id, version, schema_version, operation, diff, metadata)
+            SELECT @scope, @tenantId, @type, u.id, u.version, u.schema_version, @operation, u.diff, @metadata
+            FROM unnest(@ids, @versions, @schemaVersions, @diffs) AS u(id, version, schema_version, diff)
+            """;
+        AddScopeParameters(cmd, metadata.Name);
+        cmd.Parameters.AddWithValue("operation", (short)operation);
+        AddJsonbParameter(cmd, "metadata", BuildChangeMetadata(null));
+        cmd.Parameters.AddWithValue("ids", ids);
+        cmd.Parameters.AddWithValue("versions", versions);
+        cmd.Parameters.Add(new NpgsqlParameter("schemaVersions", NpgsqlDbType.Array | NpgsqlDbType.Integer)
+        {
+            Value = schemaVersions,
+        });
+        cmd.Parameters.Add(new NpgsqlParameter("diffs", NpgsqlDbType.Array | NpgsqlDbType.Jsonb)
+        {
+            Value = diffs,
+        });
+
+        await cmd.ExecuteNonQueryAsync(ct);
+        _hasWrites = true;
+
+        KernelDiagnostics.Writes.Add(records.Count,
+            new KeyValuePair<string, object?>("papuma.operation", operation.ToString()),
+            new KeyValuePair<string, object?>("papuma.document_type", metadata.Name));
+    }
+
+    /// <summary>
     /// Builds the change metadata for this session: correlation id always, actor and
     /// causation when configured, plus operation-specific extras (e.g. rollback markers).
     /// </summary>
