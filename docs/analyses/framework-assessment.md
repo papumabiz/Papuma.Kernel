@@ -1,5 +1,7 @@
 # Framework-Bewertung und Erweiterungsvorschläge
 
+> **⚠️ Historisches v1-Dokument.** Diese Bewertung bezieht sich auf den v1-Code, der beim vNEXT-Reboot entfernt wurde — Code-Referenzen und relative Links lösen nicht mehr auf. Erhalten als Kontext für den Reboot; die eingefrorene v1-Dokumentation liegt unter [docs/v1](../v1/implementation/README.md).
+
 ## Gesamteinschätzung
 
 Papuma.Kernel ist ein **überraschend vollständiges und durchdachtes Framework** für seine Größe. Die Architekturentscheidungen sind konsistent, die Abstraktionen sind schlank, und die Implementierung folgt einem klaren Prinzip: *Explizitheit über Magie*.
