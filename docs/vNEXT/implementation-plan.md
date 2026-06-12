@@ -406,14 +406,37 @@ Mutations-Gate default-zu); Rezepte gegen die reale API geschrieben. 145 Tests g
 
 ## Weitere Post-1.0-Kandidaten (bei Bedarf, getrieben durch Lag-Metriken)
 
-Skalierungsmodell und Begründung: [concepts.md §14](concepts.md).
+Skalierungsmodell und Begründung: [concepts.md §14](concepts.md). Festlegung
+(2026-06-12): Diese drei werden **bewusst nicht auf Vorrat gebaut** — jede kostet
+Semantik oder Betriebskomplexität, die ohne reale Workload nicht validierbar ist.
+Stattdessen gilt pro Kandidat ein **objektiver Trigger** (alle Messgrößen
+existieren seit Phase 11); man trifft die Grenzen typischerweise in der
+Reihenfolge 1 → 3 → 2.
 
-- [ ] Handler-Parallelisierung im Prozessor-Zyklus (`Task.WhenAll` über Handler —
-      jeder hat eigene Connection + Checkpoint; löst Latenz-Kopplung)
-- [ ] SQL-seitiger `document_type`-Filter pro Change-Handler (reduziert
-      Lese-Amplifikation und irrelevante Zustellungen)
-- [ ] Handler-Sharding per `document_id`-Hash (Durchsatz pro Handler über einen
-      Konsumenten hinaus, Ordnung pro Dokument bleibt erhalten)
+- [ ] **Handler-Parallelisierung** im Prozessor-Zyklus (`Task.WhenAll` über
+      Handler — jeder hat eigene Connection + Checkpoint; löst Grenze 1,
+      Latenz-Kopplung).
+      **Trigger:** `papuma.feed.cycle.duration` p95 ≫ max(`handler.duration` p95)
+      — die *Summe* der Handler dominiert den Zyklus, nicht der langsamste.
+      Kleinster Eingriff, aber: N parallele Connections, verschränkte
+      Fehlerbilder — ohne Not schwerer zu debuggen.
+- [ ] **SQL-seitiger `document_type`-Filter** pro Change-Handler (löst Grenze 3,
+      Lese-Amplifikation).
+      **Trigger:** Feed-Lese-I/O bei Volumen × Handler-Zahl messbar *und*
+      Handler verwerfen >90 % ihrer Zustellungen.
+      Achtung API-Oberfläche: Handler müssen ihr Interesse deklarieren — erst
+      entwerfen, wenn echte Handler-Muster aus realen Anwendungen vorliegen.
+- [ ] **Handler-Sharding** per `document_id`-Hash (löst Grenze 2, die
+      Single-Consumer-Decke; Ordnung pro Dokument bleibt erhalten).
+      **Trigger:** Lag eines Handlers wächst *dauerhaft* ohne Failure-Einträge —
+      Schreibrate > Handler-Durchsatz, mehr Instanzen helfen nicht.
+      Das größte Stück (Checkpoint pro Shard, Rebalancing, Poison pro Shard) —
+      echte Feature-Arbeit, nur gegen nachgewiesenen Bedarf.
+- [ ] **Feed-Durchsatz-Baseline messen** (Vorarbeit für alle drei Trigger):
+      Benchmark/Probe gegen PG 18 — Changes/s pro Handler und Zyklus-Latenz bei
+      N Writern × M Handlern; ersetzt die §14-Schätzung "einige hundert
+      Changes/s" durch gemessene Zahlen, gegen die Anwendungen ihren Headroom
+      bestimmen können
 - [x] Diff-Engine-Benchmark bei großen Dokumenten (Risiko #4) — ✅ 2026-06-12,
       siehe Risiko-Tabelle und ADR-004-Amendment
 - [x] Bulk-Change-Inserts via `unnest` statt Schleife (Phase-5-Notiz) —
