@@ -63,3 +63,15 @@ opt-in resolution instead of invisible magic.
 - The sensitive data store (versioned offloading) is only needed when historical
   sensitive values are required beyond the document lifecycle; for the start, the
   reference pattern against the document itself suffices.
+- **Closure (2026-06-12): there will be no kernel-managed sensitive store.**
+  References resolve against the *current* document state only; once a field
+  changes or the document is deleted, the historical value is deliberately
+  unrecoverable — that is data minimization working, not a gap. The original v1
+  motivation is superseded by phase 12 (`RedactHistoryAsync` as the safety net,
+  the inventory as the review tool, the policy-applied export). Applications
+  with a *legitimate* need for versioned sensitive values have state worth
+  remembering — and state belongs in documents: model the history as its own
+  document type with its own policies, retention and erasability. A kernel
+  store would add key management, another RLS surface and integration duties
+  in redaction/export/inventory for a need the existing primitives already
+  cover.

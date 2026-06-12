@@ -451,4 +451,4 @@ Skalierungsmodell und Begründung: [concepts.md §14](concepts.md).
 | 2 | ~~PG-18-Image in CI~~ | ✅ Phase 0: `postgres:18-alpine` läuft lokal (Podman); CI-Lauf bestätigt sich beim ersten vnext-Push |
 | 3 | ~~Diff-Pfad-Syntax für Arrays~~ | ✅ Phase 2: Arrays atomar, in ADR-004 nachgetragen |
 | 4 | Performance der Diff-Engine bei großen Dokumenten | Benchmark in Phase 2; Limit-Empfehlung dokumentieren |
-| 5 | `Reference`-Policy: eigener Sensitive Store nötig? | Start ohne (Referenz aufs Dokument); Bedarf nach Phase 8 neu bewerten (ADR-007) |
+| 5 | ~~`Reference`-Policy: eigener Sensitive Store nötig?~~ | ✅ 2026-06-12 geschlossen: **bewusst nein** (ADR-007-Amendment). Referenzen lösen nur gegen den aktuellen Dokumentzustand auf; historische sensible Werte sind absichtlich unwiederbringlich (= Minimierung). Die v1-Motivation ist durch Phase 12 überholt (RedactHistoryAsync, Inventar, policy-bereinigter Export); legitimer Bedarf an versionierten sensiblen Werten ist Zustand → eigene Dokumente mit Policies/Retention |
