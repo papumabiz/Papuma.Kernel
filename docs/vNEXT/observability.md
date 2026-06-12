@@ -1,13 +1,13 @@
-# Papuma vNEXT — Observability-Guide
+# Papuma vNEXT — Observability Guide
 
-Status: Verifiziert gegen die implementierte API (Phase 11, 2026-06-12)
+Status: verified against the implemented API (phase 11, 2026-06-12)
 
-Der Kernel instrumentiert mit **BCL-Primitives** (`System.Diagnostics.Metrics.Meter`
-+ `ActivitySource`, beides unter dem Namen `Papuma.Kernel`) — ohne Vendor-Abhängigkeit.
-OpenTelemetry, Prometheus-Exporter, `dotnet-counters` oder Application Insights sind
-*Konsumenten* dieser Quellen.
+The kernel instruments with **BCL primitives** (`System.Diagnostics.Metrics.Meter`
++ `ActivitySource`, both under the name `Papuma.Kernel`) — without vendor
+dependencies. OpenTelemetry, Prometheus exporters, `dotnet-counters` or
+Application Insights are *consumers* of these sources.
 
-## Verdrahtung (OpenTelemetry-Beispiel)
+## Wiring (OpenTelemetry example)
 
 ```csharp
 builder.Services.AddOpenTelemetry()
@@ -20,85 +20,86 @@ builder.Services.AddOpenTelemetry()
         .AddOtlpExporter());
 ```
 
-Ohne OTel: `dotnet-counters monitor --counters Papuma.Kernel -p <pid>` zeigt alle
-Metriken live.
+Without OTel: `dotnet-counters monitor --counters Papuma.Kernel -p <pid>` shows
+all metrics live.
 
-## Metriken
+## Metrics
 
-| Instrument | Typ | Tags | Bedeutung |
+| Instrument | Type | Tags | Meaning |
 |---|---|---|---|
-| `papuma.feed.lag` | ObservableGauge | `papuma.feed`, `papuma.handler` | **Die wichtigste Zahl**: stabil-sichtbarer Feed-Kopf minus Checkpoint, pro Handler. Frische ≈ Poll-Intervall (Cache, aktualisiert von `GetLagAsync` und den Idle-Momenten der Run-Loop). |
-| `papuma.feed.processed` | Counter | `papuma.feed`, `papuma.handler` | Zugestellte Records |
-| `papuma.feed.failures` | Counter | `papuma.feed`, `papuma.handler` | Handler-Fehlschläge (jeder Versuch zählt) |
-| `papuma.feed.poisoned` | Counter | `papuma.feed`, `papuma.handler` | Als Poison übersprungene Records — **Alarmkandidat** |
-| `papuma.feed.handler.duration` | Histogram (ms) | `papuma.feed`, `papuma.handler` | Dauer pro Handler-Invocation — entlarvt den "langsamen Handler" (concepts §14, Grenze 1) |
-| `papuma.feed.cycle.duration` | Histogram (ms) | `papuma.feed` | Dauer eines Zyklus über alle Handler |
-| `papuma.session.commits` | Counter | — | Committete Sessions |
-| `papuma.session.commit.duration` | Histogram (ms) | — | Commit-Dauer (inkl. NOTIFY) |
-| `papuma.session.writes` | Counter | `papuma.operation`, `papuma.document_type` | Geschriebene ChangeRecords |
-| `papuma.session.events` | Counter | `papuma.event_type` | Appendete Events |
-| `papuma.session.conflicts` | Counter | `papuma.kind` (`concurrency` \| `unique_key`), `papuma.document_type` | Konflikte — hohe Raten deuten auf Hot Documents (concepts §4) |
+| `papuma.feed.lag` | ObservableGauge | `papuma.feed`, `papuma.handler` | **The most important number**: stable-visible feed head minus checkpoint, per handler. Freshness ≈ poll interval (cache, refreshed by `GetLagAsync` and the run loop's idle moments). |
+| `papuma.feed.processed` | Counter | `papuma.feed`, `papuma.handler` | Delivered records |
+| `papuma.feed.failures` | Counter | `papuma.feed`, `papuma.handler` | Handler failures (every attempt counts) |
+| `papuma.feed.poisoned` | Counter | `papuma.feed`, `papuma.handler` | Records skipped as poison — **alert candidate** |
+| `papuma.feed.handler.duration` | Histogram (ms) | `papuma.feed`, `papuma.handler` | Duration per handler invocation — exposes the "slow handler" (concepts §14, limit 1) |
+| `papuma.feed.cycle.duration` | Histogram (ms) | `papuma.feed` | Duration of one cycle across all handlers |
+| `papuma.session.commits` | Counter | — | Committed sessions |
+| `papuma.session.commit.duration` | Histogram (ms) | — | Commit duration (incl. NOTIFY) |
+| `papuma.session.writes` | Counter | `papuma.operation`, `papuma.document_type` | Written ChangeRecords |
+| `papuma.session.events` | Counter | `papuma.event_type` | Appended events |
+| `papuma.session.conflicts` | Counter | `papuma.kind` (`concurrency` \| `unique_key`), `papuma.document_type` | Conflicts — high rates indicate hot documents (concepts §4) |
 
-**Dashboard-Empfehlung**: Lag pro Handler (Gauge, Alarm bei anhaltendem Wachstum),
-Poison-Counter (Alarm bei > 0), Konfliktrate pro Dokumenttyp, p95 der Handler-Dauer.
-Der `AddPapumaChangeFeedLag(...)`-Health-Check bleibt der einfachste Einstieg.
+**Dashboard recommendation**: lag per handler (gauge, alert on sustained growth),
+poison counter (alert at > 0), conflict rate per document type, p95 of handler
+duration. The `AddPapumaChangeFeedLag(...)` health check remains the simplest
+entry point.
 
 ## Tracing
 
-| Span | Tags | Wann |
+| Span | Tags | When |
 |---|---|---|
-| `papuma.session.save` / `.patch` / `.delete` / `.rollback` / `.append` | `papuma.document_type`, `papuma.document_id`, `papuma.tenant`, `papuma.version` | Pro Write, als Kind des aktiven Spans (z. B. des ASP.NET-Core-Requests) |
-| `papuma.feed.handle` | `papuma.feed`, `papuma.handler`, `papuma.seq` | Pro Handler-Invocation |
+| `papuma.session.save` / `.patch` / `.delete` / `.rollback` / `.append` | `papuma.document_type`, `papuma.document_id`, `papuma.tenant`, `papuma.version` | Per write, as a child of the active span (e.g. the ASP.NET Core request) |
+| `papuma.feed.handle` | `papuma.feed`, `papuma.handler`, `papuma.seq` | Per handler invocation |
 
-**Trace-Propagation durch den Feed**: Ist beim Write eine `Activity` aktiv, schreibt
-die Session den `traceparent` in die Change-/Event-Metadata. Der Handler-Span
-verlinkt darauf (Span-**Link**, nicht Parent — Feed-Verarbeitung ist asynchrone
-Batch-Arbeit). Im Trace-Viewer beantwortet das die Frage *"welcher Request hat diese
-Projektion ausgelöst?"* mit einem Klick.
+**Trace propagation through the feed**: if an `Activity` is active during a
+write, the session writes the `traceparent` into the change/event metadata. The
+handler span links to it (a span **link**, not a parent — feed processing is
+asynchronous batch work). In the trace viewer this answers *"which request
+triggered this projection?"* with one click.
 
-## Diagnose-APIs
+## Diagnostics APIs
 
 ```csharp
-// Historie eines Dokuments (ADR-003: Konflikt-UIs, Audit) — policy-bereinigt
+// History of a document (ADR-003: conflict UIs, audit) — policy-applied
 IReadOnlyList<ChangeRecord> history =
     await session.GetHistoryAsync<User>(id, fromVersion: expectedVersion + 1);
 
-// Failure-Tabelle als API (beide Prozessoren)
+// The failure table as an API (both processors)
 IReadOnlyList<FeedFailure> failures = await processor.GetFailuresAsync();
 
-// Manueller Retry nach behobener Ursache (Poison-Eintrag löschen)
+// Manual retry after fixing the cause (removes the poison entry)
 await processor.RetryFailureAsync(handlerName, seq);
-// Liegt der Checkpoint schon hinter der Poison-seq: zusätzlich
-// ResetCheckpointAsync(handlerName) für ein Replay.
+// If the checkpoint already passed the poison seq, additionally
+// ResetCheckpointAsync(handlerName) for a replay.
 ```
 
-Hinweis Datenschutz: Spans taggen Dokument-*IDs* und Tenant, nie Inhalte; Diffs in
-`GetHistoryAsync` sind policy-bereinigt — sensible Werte erreichen auch die
-Observability-Pipeline nicht (ADR-007).
+Privacy note: spans tag document *ids* and the tenant, never contents; diffs in
+`GetHistoryAsync` are policy-applied — sensitive values do not reach the
+observability pipeline either (ADR-007).
 
-## MCP-Server (Phase 13): die Diagnose-APIs für KI-Agenten
+## MCP server (phase 13): the diagnostics APIs for AI agents
 
-Das Paket **`Papuma.Kernel.Mcp`** exponiert exakt diese Diagnose-Oberfläche als
-MCP-Tools — dünner Wrapper, keine eigene Diagnose-Logik, read-only als Default:
+The **`Papuma.Kernel.Mcp`** package exposes exactly this diagnostics surface as
+MCP tools — a thin wrapper, no own diagnostics logic, read-only by default:
 
 ```csharp
 builder.Services
     .AddMcpServer()
-    .WithHttpTransport()        // oder WithStdioServerTransport()
-    .WithPapumaKernel();        // read-only; Mutationen opt-in:
+    .WithHttpTransport()        // or WithStdioServerTransport()
+    .WithPapumaKernel();        // read-only; mutations opt-in:
     // .WithPapumaKernel(o => o with { AllowMutations = true });
 ```
 
-| Tool | Entspricht | Schreibend? |
+| Tool | Corresponds to | Mutating? |
 |---|---|---|
-| `get_model_inventory` | `DataInventory.Build(model)` (Art.-30-Inventar, Policies, Keys) | nein |
-| `get_feed_lag` | `GetLagAsync()` beider Prozessoren | nein |
-| `get_feed_failures` | `GetFailuresAsync()` beider Prozessoren | nein |
-| `get_document_history` | `GetHistoryAsync` (scope-gebunden, policy-bereinigt) | nein |
-| `retry_feed_failure` | `RetryFailureAsync` | ja — nur mit `AllowMutations` |
-| `reset_feed_checkpoint` | `ResetCheckpointAsync` (nur Projektionen!) | ja — nur mit `AllowMutations` |
+| `get_model_inventory` | `DataInventory.Build(model)` (Art.-30 inventory, policies, keys) | no |
+| `get_feed_lag` | `GetLagAsync()` of both processors | no |
+| `get_feed_failures` | `GetFailuresAsync()` of both processors | no |
+| `get_document_history` | `GetHistoryAsync` (scope-bound, policy-applied) | no |
+| `retry_feed_failure` | `RetryFailureAsync` | yes — only with `AllowMutations` |
+| `reset_feed_checkpoint` | `ResetCheckpointAsync` (projections only!) | yes — only with `AllowMutations` |
 
-Der Server läuft **in der Anwendung** (das Metamodell entsteht erst beim
-App-Start aus CLR-Typen + Fluent-Config — ein externer Prozess kennt es nicht).
-Bewusst kein `gdpr_export`-Tool: Ein Betroffenen-Export ist ein
-Anwendungsworkflow mit Auslieferungsentscheidungen, keine Agenten-Fähigkeit.
+The server runs **inside the application** (the metamodel only comes into being
+at app startup from CLR types + fluent config — an external process does not know
+it). Deliberately no `gdpr_export` tool: a data-subject export is an application
+workflow with delivery decisions, not an agent capability.

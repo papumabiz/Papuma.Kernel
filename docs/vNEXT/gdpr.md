@@ -1,50 +1,51 @@
-# Papuma vNEXT — DSGVO-Guide
+# Papuma vNEXT — GDPR Guide
 
-Status: Verifiziert gegen die implementierte API (Phase 12, 2026-06-12)
+Status: verified against the implemented API (phase 12, 2026-06-12)
 
-Grundprinzip (ADR-015): **Der Kernel liefert ausführende Mechanismen über das, was
-nur er kennt** (Metamodell, Historie, Scopes) — **die Anwendung trifft die
-fachlich-juristischen Entscheidungen** (welche Daten gehören zur Person, Löschen
-vs. Einschränken vs. Aufbewahren pro Tenant).
+Core principle (ADR-015): **the kernel provides executing mechanisms over what
+only it knows** (metamodel, history, scopes) — **the application makes the
+domain-legal decisions** (which data belongs to the person, erase vs. restrict
+vs. retain per tenant).
 
-## Erste Verteidigungslinie: PII-Policy-Disziplin
+## First line of defense: PII policy discipline
 
-Alle personenbezogenen Felder gehören unter Policy (ADR-007) — dann ist der Feed
-von Haus aus minimiert und die scharfen Werkzeuge unten sind nur das Sicherheitsnetz:
+All personal fields belong under a policy (ADR-007) — then the feed is minimized
+out of the box and the sharp tools below are only the safety net:
 
 ```csharp
 private sealed record User(
     string Id,
-    string Name,                                      // bewusst Track? → Inventar prüfen!
+    string Name,                                      // deliberately Track? → check the inventory!
     [property: UniqueKey] string Email,
-    [property: SensitiveData] string? Iban,           // Diff: nur "changed"
-    [property: TrackHash] string? PasswordHash);      // Diff: Marker + SHA-256
+    [property: SensitiveData] string? Iban,           // diff: only "changed"
+    [property: TrackHash] string? PasswordHash);      // diff: marker + SHA-256
 ```
 
-## Daten-Inventar (Art.-30-Unterstützung)
+## Data inventory (Art.-30 support)
 
-Reiner Metamodell-Report, kein Datenbankzugriff — als Verzeichnis-Anhang und als
-**Review-Werkzeug** ("welche Felder sind ungeschützt?"), z. B. als Snapshot-Test in CI:
+A pure metamodel report, no database access — as a record-of-processing
+attachment and as a **review tool** ("which fields are unprotected?"), e.g. as a
+snapshot test in CI:
 
 ```csharp
 DataInventoryReport report = DataInventory.Build(model);
 
 foreach (var doc in report.Documents)
 {
-    Console.WriteLine($"{doc.Name}: ungeschützt = [{string.Join(", ", doc.UnprotectedPaths)}]");
+    Console.WriteLine($"{doc.Name}: unprotected = [{string.Join(", ", doc.UnprotectedPaths)}]");
 }
 
 File.WriteAllText("art30-inventory.json", report.ToJson().ToJsonString());
 ```
 
-Der Report listet pro Dokumenttyp alle Blatt-Pfade mit effektiver Policy
-(Attribut-Defaults, Fluent-Overrides und Vererbung aufgelöst), Keys und
-Schema-Version; pro Event-Typ die Payload-Pfade und die Retention.
+The report lists, per document type, all leaf paths with their effective policy
+(attribute defaults, fluent overrides and inheritance resolved), keys and schema
+version; per event type, the payload paths and the retention.
 
-## Export (Art. 15 Auskunft / Art. 20 Portabilität)
+## Export (Art. 15 access / Art. 20 portability)
 
-Die Anwendung liefert das Subjekt→Daten-Mapping (über ihre Keys und Projektionen),
-der Kernel assembliert in **einer Transaktion** (konsistenter Snapshot):
+The application supplies the subject→data mapping (via its keys and projections);
+the kernel assembles in **one transaction** (consistent snapshot):
 
 ```csharp
 JsonObject export = await GdprExport.ExportAsync(store, scope,
@@ -52,38 +53,40 @@ JsonObject export = await GdprExport.ExportAsync(store, scope,
     events: [new EventSelector("UserLoggedIn", "userId", userId)]);
 ```
 
-Inhalt pro Dokument: aktueller Zustand (`exists: false` bei gelöschten — die
-Historie kommt trotzdem), Versionen, vollständige Änderungshistorie mit Diffs und
-Metadaten. Events werden generisch über Payload-Pfad = Wert selektiert; überlappende
-Selektoren dedupliziert der Export. **Die Policy-Minimierung wirkt automatisch**:
-Diffs und Event-Payloads liegen policy-bereinigt im Store — redactete Werte
-erscheinen auch im Export nur als Änderungsmarker. Der aktuelle Dokumentzustand ist
-dagegen die gespeicherte Wahrheit im Klartext (das ist der Sinn der Auskunft).
+Content per document: current state (`exists: false` for deleted ones — the
+history still comes), versions, the complete change history with diffs and
+metadata. Events are selected generically via payload path = value; overlapping
+selectors are deduplicated by the export. **Policy minimization applies
+automatically**: diffs and event payloads are stored policy-applied — redacted
+values appear in the export only as change markers. The current document state,
+by contrast, is the stored truth in plain form (that is the point of an access
+request).
 
-## Löschung (Art. 17) — das Tenant-Muster
+## Erasure (Art. 17) — the tenant pattern
 
-Die Rechtslage unterscheidet sich pro Tenant: Tenant A darf wirklich löschen,
-Tenant B hat Aufbewahrungspflichten (HGB/AO, 6–10 Jahre). Die Scope-Isolation
-garantiert strukturell, dass die Exekution in A den Tenant B nicht berührt.
+The legal situation differs per tenant: tenant A may truly erase, tenant B has
+retention obligations (German HGB/AO, 6–10 years). Scope isolation structurally
+guarantees that execution in A does not touch tenant B.
 
-**Tenant A — echte Löschung:**
+**Tenant A — real erasure:**
 
 ```csharp
 await using var session = store.OpenSession(scopeA,
-    new SessionOptions { ActorId = "dpo@firma.de" });
+    new SessionOptions { ActorId = "dpo@company.com" });
 
-await session.DeleteAsync<User>(userId, expectedVersion);          // Zustand weg
-await session.RedactHistoryAsync<User>(userId,                     // Historie bereinigt
+await session.DeleteAsync<User>(userId, expectedVersion);          // state gone
+await session.RedactHistoryAsync<User>(userId,                     // history cleaned
     reason: "erasure-request-4711");
-await session.RedactEventsAsync<UserLoggedIn>(                     // Events bereinigt
+await session.RedactEventsAsync<UserLoggedIn>(                     // events cleaned
     selectorPath: "userId", selectorValue: userId,
     paths: ["ip", "userAgent"], reason: "erasure-request-4711");
 await session.CommitAsync();
 ```
 
-**Tenant B — Einschränkung statt Löschung (Art. 18):** Sperrstatus als Dokumentfeld,
-Verarbeitung anwendungsseitig einschränken, Lösch-Fälligkeit vormerken — und nach
-Fristablauf terminiert dasselbe Lösch-Primitiv aufrufen (Workflow-Muster: concepts §18).
+**Tenant B — restriction instead of erasure (Art. 18):** a blocking status as a
+document field, processing restricted application-side, erasure due date noted —
+and after the deadline, the same erasure primitive is called on schedule (the
+workflow pattern: concepts §18).
 
 ```csharp
 await session.PatchAsync<User>(userId, p => p
@@ -91,33 +94,33 @@ await session.PatchAsync<User>(userId, p => p
     .Set(x => x.EraseAfter, new DateOnly(2036, 6, 12)));
 ```
 
-## `RedactHistoryAsync` / `RedactEventsAsync` — das Sicherheitsnetz
+## `RedactHistoryAsync` / `RedactEventsAsync` — the safety net
 
-Dokument-Löschung bereinigt den Feed nur für policy-geschützte Felder — ein
-getracktes PII-Feld (z. B. `Name` ohne Attribut) bleibt nach dem Delete im Klartext
-in historischen Diffs. Genau diese Lücke schließen die Redaction-Primitive:
+Document deletion cleans the feed only for policy-protected fields — a tracked
+PII field (e.g. `Name` without an attribute) remains in plain text in historical
+diffs after the delete. Exactly this gap is closed by the redaction primitives:
 
-- `RedactHistoryAsync<T>(id, reason, paths?)` schreibt historische Diff-Einträge
-  auf den Redacted-Marker um (`paths` deckt Nachfahren ab; `null` = alles).
-  Funktioniert auch für bereits gelöschte Dokumente. Idempotent.
-- `RedactEventsAsync<TEvent>(selectorPath, selectorValue, paths, reason)` entfernt
-  Payload-Felder aus selektierten Events (Semantik der Redact-Event-Policy:
-  Feld fehlt, Konsumenten sehen Defaults).
+- `RedactHistoryAsync<T>(id, reason, paths?)` rewrites historical diff entries to
+  the redaction marker (`paths` covers descendants; `null` = everything). Also
+  works for already-deleted documents. Idempotent.
+- `RedactEventsAsync<TEvent>(selectorPath, selectorValue, paths, reason)` removes
+  payload fields from selected events (semantics of the Redact event policy: the
+  field is absent, consumers see defaults).
 
-Beide sind **irreversibel** und verlangen einen Audit-Grund; jede umgeschriebene
-Zeile erhält einen `redaction`-Block in den Metadaten (wann, warum, Actor,
-Correlation). Konsequenz nach ADR-008: Rollback über redactete Historie scheitert
-typisiert (`RollbackNotPossibleException`) — die Werte sind weg, absichtlich.
+Both are **irreversible** and demand an audit reason; every rewritten row gets a
+`redaction` block in its metadata (when, why, actor, correlation). Consequence
+per ADR-008: rollback across redacted history fails typed
+(`RollbackNotPossibleException`) — the values are gone, intentionally.
 
-Das verletzt bewusst die Append-only-Reinheit des Feeds: **Art. 17 schlägt
-Architekturästhetik.** Redaction ist kein Bestandteil normaler Anwendungsabläufe —
-wer es regelmäßig braucht, hat ein Policy-Versäumnis (→ Inventar-Review).
+This deliberately violates the append-only purity of the feed: **Art. 17 beats
+architectural aesthetics.** Redaction is not part of normal application flows —
+whoever needs it regularly has a policy omission (→ inventory review).
 
-## Was bewusst Anwendungssache bleibt
+## What deliberately remains application business
 
-| Aufgabe | Warum nicht im Kernel |
+| Task | Why not in the kernel |
 |---|---|
-| Subjekt → Dokumente/Events mappen | Domänenwissen (Keys, Projektionen) |
-| Löschen vs. Einschränken vs. Aufbewahren pro Tenant | juristische Konfiguration |
-| Fristen-Scheduling ("nach 10 Jahren löschen") | Workflow (concepts §18: `dueAt` + Poller) |
-| Export-Auslieferung (Format, Verschlüsselung, Zustellweg) | Produktentscheidung |
+| Mapping subject → documents/events | domain knowledge (keys, projections) |
+| Erase vs. restrict vs. retain per tenant | legal configuration |
+| Deadline scheduling ("erase after 10 years") | workflow (concepts §18: `dueAt` + poller) |
+| Export delivery (format, encryption, channel) | product decision |

@@ -1,112 +1,114 @@
-# Papuma vNEXT — Grobarchitektur
+# Papuma vNEXT — Architecture Overview
 
-Status: Entwurf (2026-06-11) · Umsetzung: [implementation-plan.md](implementation-plan.md) ·
-Hintergründe: [concepts.md](concepts.md) (das "Warum hinter dem Wie", erzählend)
+Status: draft (2026-06-11) · Implementation: [implementation-plan.md](implementation-plan.md) ·
+Background: [concepts.md](concepts.md) (the "why behind the how", narrative)
 
-Dieses Dokument beschreibt den Reboot von Papuma.Kernel als **Document-Sourced CQRS**:
-JSON-Dokumente sind die Wahrheit, der Change Feed entsteht automatisch als Diff,
-Projektionen sind bewusst dumme Change Handler. Es gibt keinen Migrationspfad von v1 —
-vNEXT ist ein Neuanfang (siehe [chat-1.md](chat-1.md) für die Herleitung).
+This document describes the reboot of Papuma.Kernel as **document-sourced CQRS**:
+JSON documents are the truth, the change feed arises automatically as a diff,
+projections are deliberately dumb change handlers. There is no migration path
+from v1 — vNEXT is a fresh start (see [chat-1.md](chat-1.md) for the derivation).
 
-Die verbindlichen Einzelentscheidungen stehen in [adr/](adr/) — dieses Dokument ist die
-Landkarte darüber.
+The binding individual decisions live in [adr/](adr/) — this document is the map
+above them.
 
 ---
 
-## 1. Problemstellung
+## 1. Problem statement
 
-Das eigentliche Problem von Papuma war nie "Wie speichere ich Daten?", sondern:
+Papuma's actual problem was never "how do I store data?", but:
 
-> Wie bekomme ich Änderungen als First-Class-Konzept, ohne Event-Sourcing-Zwang?
+> How do I get changes as a first-class concept without an event-sourcing
+> mandate?
 
-v1 hat das mit relationalen Tabellen, Outbox und explizit erzeugten Events gelöst —
-mit dem bekannten Preis: Change Detection ist mühsam, Events müssen manuell definiert
-werden, DSGVO-relevante Daten landen in unveränderlichen Feeds.
+v1 solved this with relational tables, an outbox and explicitly produced events —
+at the familiar price: change detection is laborious, events must be defined
+manually, GDPR-relevant data ends up in immutable feeds.
 
-vNEXT dreht das Modell um:
+vNEXT inverts the model:
 
 ```text
-Entity (C#-Klasse)
+Entity (C# class)
       ↓
-JSON-Dokument (Wahrheit)
+JSON document (truth)
       ↓
-Change Kernel (Diff, Version, Policies)
+Change kernel (diff, version, policies)
       ↓
-PostgreSQL (Dokument + Change Feed, eine Transaktion)
+PostgreSQL (document + change feed, one transaction)
       ↓
-Change Handler (Projektionen, Suche, Audit, Integration)
+Change handlers (projections, search, audit, integration)
 ```
 
-Abgrenzung zu Marten: Dort ist das **Event** die Wahrheit und der State abgeleitet.
-Bei Papuma ist das **Dokument** die Wahrheit und der Change Stream abgeleitet.
-Konzeptionell näher an "Git für Aggregate" bzw. dem Cosmos-DB-Change-Feed als an
-Event Sourcing.
+Contrast with Marten: there, the **event** is the truth and state is derived.
+With Papuma, the **document** is the truth and the change stream is derived.
+Conceptually closer to "git for aggregates" or the Cosmos DB change feed than to
+event sourcing.
 
 ---
 
-## 2. Leitprinzipien
+## 2. Guiding principles
 
-1. **Dokument ist Wahrheit.** Der aktuelle Zustand liegt als JSONB-Dokument vor; der
-   Change Feed ist abgeleitet, nicht umgekehrt ([ADR-002](adr/adr-002-document-as-truth.md)).
-2. **PostgreSQL ≥ 18, ohne Provider-Abstraktion.** Der Kernel nutzt JSONB,
-   Expression-Indizes, LISTEN/NOTIFY und `RETURNING OLD/NEW` bewusst aus
+1. **The document is the truth.** The current state exists as a JSONB document;
+   the change feed is derived, not the other way around
+   ([ADR-002](adr/adr-002-document-as-truth.md)).
+2. **PostgreSQL ≥ 18, without a provider abstraction.** The kernel deliberately
+   exploits JSONB, expression indexes, LISTEN/NOTIFY and `RETURNING OLD/NEW`
    ([ADR-001](adr/adr-001-postgresql-18-only.md)).
-3. **Ein Write = eine Transaktion = ein atomarer Roundtrip.** Optimistische Concurrency
-   über eine `version`-Spalte ist eine Invariante des Kernels, kein Implementierungsdetail
+3. **One write = one transaction = one atomic roundtrip.** Optimistic concurrency
+   via a `version` column is a kernel invariant, not an implementation detail
    ([ADR-003](adr/adr-003-write-path-concurrency.md)).
-4. **Der Change Feed speichert Diffs, keine Snapshots.** Reversibel, schlank,
-   policy-fähig ([ADR-004](adr/adr-004-changerecord-diff-only.md)).
-5. **Schema-Evolution ist ein Tag-1-Konzept.** Jedes Dokument trägt eine
-   `schema_version`; Upcaster heben alte Dokumente beim Laden an
+4. **The change feed stores diffs, not snapshots.** Reversible, lean,
+   policy-capable ([ADR-004](adr/adr-004-changerecord-diff-only.md)).
+5. **Schema evolution is a day-one concept.** Every document carries a
+   `schema_version`; upcasters lift old documents at load time
    ([ADR-005](adr/adr-005-schema-evolution.md)).
-6. **Constraints kommen kontrolliert zurück.** Uniqueness und Lookup-Keys werden im
-   Metamodell deklariert und als JSONB-Expression-Indizes materialisiert — nicht ad-hoc
-   ([ADR-006](adr/adr-006-keys-and-constraints.md)).
-7. **Datenschutz ist Kernel-Aufgabe.** Policies (Redact, Reference, DoNotTrack, Hash)
-   werden beim Erzeugen des Diffs angewendet, bevor irgendetwas den Feed erreicht
-   ([ADR-007](adr/adr-007-privacy-policies.md)).
-8. **Keine fachlichen Events im Storage Layer.** Der Kernel kennt nur `DocumentChanged`;
-   `OrderPaid` entsteht — wenn überhaupt — in der Processing-Schicht
+6. **Constraints come back under control.** Uniqueness and lookup keys are
+   declared in the metamodel and materialized as JSONB expression indexes — not
+   ad hoc ([ADR-006](adr/adr-006-keys-and-constraints.md)).
+7. **Privacy is a kernel responsibility.** Policies (redact, reference,
+   do-not-track, hash) are applied when the diff is produced, before anything
+   reaches the feed ([ADR-007](adr/adr-007-privacy-policies.md)).
+8. **No domain events in the storage layer.** The kernel only knows
+   `DocumentChanged`; `OrderPaid` arises — if at all — in the processing layer
    ([ADR-011](adr/adr-011-no-business-events-in-storage.md)).
-9. **Projektionen sind dumm, die Engine ist Infrastruktur.** Kein SQL-Generator, keine
-   Read-Model-DSL ([ADR-009](adr/adr-009-projections-as-dumb-handlers.md)).
+9. **Projections are dumb, the engine is infrastructure.** No SQL generator, no
+   read-model DSL ([ADR-009](adr/adr-009-projections-as-dumb-handlers.md)).
 
 ---
 
-## 3. Schichten und Projektstruktur
+## 3. Layers and project structure
 
-vNEXT bleibt eine kleine Library (ein Paket plus optionale ASP.NET-Core-Integration),
-die Schichten sind Namespaces, keine eigenen NuGet-Pakete:
+vNEXT remains a small library (one package plus optional ASP.NET Core
+integration); the layers are namespaces, not separate NuGet packages:
 
 ```text
 Papuma.Kernel
-├── Papuma.Kernel.Store        Dokumente laden/speichern/löschen, Write-Pfad, Session
-├── Papuma.Kernel.Changes      ChangeRecord, Diff-Engine, Policies
-├── Papuma.Kernel.Events       Event-Log: Append, EventFeedProcessor, Retention (ADR-013)
-├── Papuma.Kernel.Processing   Change-Handler-Engine: Checkpoints, Retry, Rebuild
-├── Papuma.Kernel.Model        Metamodell: Typen, Keys, Policies, Schema-Versionen
-└── Papuma.Kernel.Hosting      AddPapumaKernel-Bootstrap, gehostete Feed-Worker
+├── Papuma.Kernel.Store        load/save/delete documents, write path, session
+├── Papuma.Kernel.Changes      ChangeRecord, diff engine, policies
+├── Papuma.Kernel.Events       event log: append, EventFeedProcessor, retention (ADR-013)
+├── Papuma.Kernel.Processing   change-handler engine: checkpoints, retry, rebuild
+├── Papuma.Kernel.Model        metamodel: types, keys, policies, schema versions
+└── Papuma.Kernel.Hosting      AddPapumaKernel bootstrap, hosted feed workers
 
-Papuma.Kernel.AspNetCore       Tenant-Resolution, Change-Feed-Lag-Health-Check
+Papuma.Kernel.AspNetCore       tenant resolution, change-feed-lag health check
 ```
 
-Die Aufteilung in `Store / Changes / Processing` folgt der Skizze aus chat-1.md
-("Papuma.Store / Papuma.ChangeFeed / Papuma.Processing"), aber ohne Paket-Splitting —
-das wäre verfrühte Abstraktion.
+The split into `Store / Changes / Processing` follows the sketch from chat-1.md
+("Papuma.Store / Papuma.ChangeFeed / Papuma.Processing") — but without package
+splitting, which would be premature abstraction.
 
 ---
 
-## 4. Datenmodell (PostgreSQL)
+## 4. Data model (PostgreSQL)
 
 ```sql
 CREATE TABLE papuma.document
 (
-    scope           text        NOT NULL,   -- 'Platform' | 'Tenant' (Scope-Modell aus v1)
-    tenant_id       text        NOT NULL DEFAULT '',  -- leer bei Platform-Scope
-    document_type   text        NOT NULL,   -- logischer Aggregatname aus dem Metamodell
+    scope           text        NOT NULL,   -- 'Platform' | 'Tenant' (scope model from v1)
+    tenant_id       text        NOT NULL DEFAULT '',  -- empty for platform scope
+    document_type   text        NOT NULL,   -- logical aggregate name from the metamodel
     id              text        NOT NULL,
-    version         bigint      NOT NULL,   -- optimistische Concurrency, startet bei 1
-    schema_version  int         NOT NULL,   -- Stand der C#-Klasse beim letzten Schreiben
+    version         bigint      NOT NULL,   -- optimistic concurrency, starts at 1
+    schema_version  int         NOT NULL,   -- state of the C# class at the last write
     data            jsonb       NOT NULL,
     created_at      timestamptz NOT NULL DEFAULT now(),
     updated_at      timestamptz NOT NULL DEFAULT now(),
@@ -121,24 +123,24 @@ CREATE TABLE papuma.change
     tenant_id       text        NOT NULL DEFAULT '',
     document_type   text        NOT NULL,
     document_id     text        NOT NULL,
-    version         bigint      NOT NULL,   -- Dokumentversion NACH der Änderung
+    version         bigint      NOT NULL,   -- document version AFTER the change
     schema_version  int         NOT NULL,
-    operation       smallint    NOT NULL,   -- 1=Insert, 2=Update, 3=Delete
-    diff            jsonb       NOT NULL,   -- siehe ADR-004 (reversibles Feld-Diff)
-    metadata        jsonb       NOT NULL,   -- IsRollback, RestoredVersion, Actor, CorrelationId, ...
+    operation       smallint    NOT NULL,   -- 1=insert, 2=update, 3=delete
+    diff            jsonb       NOT NULL,   -- see ADR-004 (reversible field diff)
+    metadata        jsonb       NOT NULL,   -- isRollback, restoredVersion, actor, correlationId, ...
     occurred_at     timestamptz NOT NULL DEFAULT now(),
-    txid            xid8        NOT NULL DEFAULT pg_current_xact_id()  -- für lückenloses Lesen, ADR-010
+    txid            xid8        NOT NULL DEFAULT pg_current_xact_id()  -- gapless reads, ADR-010
 );
 
 CREATE UNIQUE INDEX ux_change_document_version
     ON papuma.change (scope, tenant_id, document_type, document_id, version);
 ```
 
-Beide Tabellen tragen Row-Level-Security-Policies (inkl. `'All'`-Scope für Worker und
-`FORCE ROW LEVEL SECURITY`); die verbindliche DDL liegt in `SchemaDdl.cs`.
+Both tables carry row-level-security policies (including the `'All'` scope for
+workers and `FORCE ROW LEVEL SECURITY`); the binding DDL lives in `SchemaDdl.cs`.
 
-Unique-Keys und Lookup-Spalten pro Dokumenttyp entstehen als Expression-Indizes aus dem
-Metamodell, z. B.:
+Unique keys and lookup columns per document type are created as expression
+indexes from the metamodel, e.g.:
 
 ```sql
 CREATE UNIQUE INDEX ux_user_email
@@ -148,14 +150,14 @@ CREATE UNIQUE INDEX ux_user_email
 
 ---
 
-## 5. Der Write-Pfad
+## 5. The write path
 
-Kern des Designs: **ein einziges atomares Statement liefert alten und neuen Zustand**,
-dank PostgreSQL ≥ 18 `RETURNING OLD/NEW`. Kein vorheriges Laden, kein zweiter Roundtrip,
-kein Fenster für Race Conditions.
+The core of the design: **a single atomic statement delivers the old and the new
+state**, thanks to PostgreSQL ≥ 18 `RETURNING OLD/NEW`. No prior load, no second
+roundtrip, no window for race conditions.
 
 ```sql
--- Update mit optimistischer Concurrency
+-- update with optimistic concurrency
 UPDATE papuma.document
 SET data           = @data,
     version        = version + 1,
@@ -168,129 +170,134 @@ WHERE tenant_id = @tenantId
 RETURNING old.data AS old_data, new.data AS new_data, new.version;
 ```
 
-- **0 Zeilen** → `ConcurrencyException` (jemand anderes hat zwischenzeitlich geschrieben
-  oder das Dokument existiert nicht).
-- **1 Zeile** → der Kernel diffed `old_data` gegen `new_data` in C#, wendet die
-  Datenschutz-Policies an und schreibt den `ChangeRecord` **in derselben Transaktion**.
+- **0 rows** → `ConcurrencyException` (someone else wrote in the meantime, or the
+  document does not exist).
+- **1 row** → the kernel diffs `old_data` against `new_data` in C#, applies the
+  privacy policies and writes the `ChangeRecord` **in the same transaction**.
 
-Insert (`old` ist NULL) und Delete (`new` ist NULL, `DELETE ... RETURNING old.data`)
-folgen demselben Muster. Details und API-Skizze: [ADR-003](adr/adr-003-write-path-concurrency.md).
+Insert (`old` is NULL) and delete (`new` is NULL, `DELETE ... RETURNING old.data`)
+follow the same pattern. Details and the API sketch:
+[ADR-003](adr/adr-003-write-path-concurrency.md).
 
-Die öffentliche API bleibt klein:
+The public API stays small:
 
 ```csharp
 DocumentSession session = store.OpenSession(tenant);
 
 SaveResult<User> result = await session.SaveAsync(user, expectedVersion);
-// result.Version, result.Operation, result.Diff (policy-bereinigt)
+// result.Version, result.Operation, result.Diff (policy-applied)
 
 await session.DeleteAsync<User>(id, expectedVersion);
-User? current = await session.LoadAsync<User>(id);          // inkl. Upcasting
+User? current = await session.LoadAsync<User>(id);          // incl. upcasting
 ```
 
-### Partielle Updates (Patch)
+### Partial updates (patch)
 
-Für Einzelfeld-Änderungen gibt es ein zweites Write-Primitiv — **ohne vorheriges
-Laden**, weder durch den Aufrufer noch intern:
+For single-field changes there is a second write primitive — **without a prior
+load**, neither by the caller nor internally:
 
 ```csharp
 await session.PatchAsync<User>(id, p => p.Set(x => x.DisplayName, "Harry"));
 ```
 
-Der "Read" passiert im `UPDATE` selbst (`jsonb_set` + `RETURNING old.data, new.data`);
-Diff, Policies und ChangeRecord entstehen wie beim Save. Concurrency ist beim Patch
-opt-in (Field-Level Last-Writer-Wins ohne `expectedVersion`). Details und Grenzen des
-Operationskatalogs: [ADR-012](adr/adr-012-partial-updates.md).
+The "read" happens inside the `UPDATE` itself (`jsonb_set` +
+`RETURNING old.data, new.data`); diff, policies and ChangeRecord arise as with a
+save. Concurrency is opt-in for patches (field-level last-writer-wins without
+`expectedVersion`). Details and the limits of the operation catalog:
+[ADR-012](adr/adr-012-partial-updates.md).
 
-### Session = Unit of Work
+### Session = unit of work
 
-Eine `DocumentSession` bündelt mehrere Writes in **einer** Postgres-Transaktion
-(lazy geöffnet; jeder Write läuft unter einem Savepoint, sodass ein typisierter
-Fehlschlag frühere Writes nicht verwirft; Dispose ohne Commit rollt zurück):
+A `DocumentSession` bundles several writes into **one** Postgres transaction
+(opened lazily; every write runs under a savepoint, so a typed failure does not
+discard earlier writes; dispose without commit rolls back):
 
 ```csharp
 await using var session = store.OpenSession(tenant);
-await session.SaveAsync(user, expectedVersion: 0);      // Registrierung: zwei Aggregate,
-await session.SaveAsync(address, expectedVersion: 0);   // ein atomarer Commit
+await session.SaveAsync(user, expectedVersion: 0);      // registration: two aggregates,
+await session.SaveAsync(address, expectedVersion: 0);   // one atomic commit
 await session.CommitAsync();
 ```
 
-Dokumente und ChangeRecords aller Writes werden atomar sichtbar. Konsumenten sehen
-pro Dokument einen eigenen ChangeRecord; eine gemeinsame `correlationId` in den
-Change-Metadaten verbindet die Writes einer Session fachlich. Modellierungs-Faustregel
-bleibt davon unberührt: *Embed by default* — was zusammen konsistent sein muss, gehört
-in **ein** Dokument; eigene Aggregate nur bei eigenem Lebenszyklus.
+Documents and ChangeRecords of all writes become visible atomically. Consumers
+see one ChangeRecord per document; a shared `correlationId` in the change
+metadata connects a session's writes at the domain level. The modeling rule of
+thumb is unaffected: *embed by default* — what must be consistent together
+belongs in **one** document; separate aggregates only for separate lifecycles.
 
-Rollback ist bewusst **kein eigener Operationstyp**, sondern ein Update mit
+Rollback is deliberately **not its own operation type** but an update with
 `metadata.IsRollback = true` ([ADR-008](adr/adr-008-rollback-is-update.md)).
 
 ---
 
-## 6. Metamodell
+## 6. Metamodel
 
-Beim Start (zunächst Reflection, später optional Source Generator) baut der Kernel pro
-registriertem Dokumenttyp ein vollständiges Metamodell:
+At startup (reflection for now, later optionally a source generator) the kernel
+builds a complete metamodel per registered document type:
 
-> **Source Generator — wann, nicht ob:** Der Reflection-Scan läuft einmal beim Start
-> (Millisekunden); Laufzeit-Performance ist kein SG-Argument. Die Fluent-Overrides
-> bleiben per ADR-007 ohnehin Runtime (Policies ohne Recompile änderbar) — ein SG kann
-> nur den Attribut-Teil vorberechnen. Trigger für den Umstieg: (a) NativeAOT/Trimming
-> als Ziel (dann zusammen mit STJ-`JsonSerializerContext`), (b) Compile-Zeit-Diagnostik
-> als DX-Politur. Da `KernelModel` eine immutable Datenstruktur ist, ist der Tausch der
-> Bauquelle für alle Konsumenten unsichtbar — die Entscheidung ist gefahrlos vertagt.
+> **Source generator — when, not if:** the reflection scan runs once at startup
+> (milliseconds); runtime performance is not an SG argument. The fluent overrides
+> remain runtime per ADR-007 anyway (policies changeable without recompiling) —
+> an SG can only precompute the attribute part. Triggers for the switch:
+> (a) NativeAOT/trimming as a target (then together with the STJ
+> `JsonSerializerContext`), (b) compile-time diagnostics as DX polish. Since
+> `KernelModel` is an immutable data structure, swapping the build source is
+> invisible to all consumers — the decision is safely deferred.
 
 ```csharp
 DocumentTypeMetadata
 {
     Name           = "User",
     ClrType        = typeof(User),
-    SchemaVersion  = 3,                    // höchster registrierter Upcaster + 1
+    SchemaVersion  = 3,                    // highest registered upcaster + 1
     Keys           = [ UniqueKey("email") ],
     Properties     =
     [
         { Path = "email",     Policy = Reference },
         { Path = "phone",     Policy = Redact },
         { Path = "lastSeen",  Policy = DoNotTrack },
-        { Path = "name",      Policy = Track }      // Default
+        { Path = "name",      Policy = Track }      // default
     ]
 }
 ```
 
-Quellen des Metamodells, in dieser Prioritätsreihenfolge:
+Sources of the metamodel, in this priority order:
 
-1. **Fluent-Konfiguration** beim Store-Setup (organisationsspezifische Overrides),
-2. **Attribute** an der C#-Klasse (`[SensitiveData]`, `[DoNotTrack]`, `[TrackHash]`,
-   `[UniqueKey]`) als Default am Ort der Wahrheit,
-3. Konvention (alles wird getrackt).
+1. **Fluent configuration** at store setup (organization-specific overrides),
+2. **Attributes** on the C# class (`[SensitiveData]`, `[DoNotTrack]`,
+   `[TrackHash]`, `[UniqueKey]`) as defaults at the place of truth,
+3. Convention (everything is tracked).
 
-Begründung und Attribut-/Policy-Katalog: [ADR-007](adr/adr-007-privacy-policies.md),
-Keys: [ADR-006](adr/adr-006-keys-and-constraints.md).
+Rationale and the attribute/policy catalog:
+[ADR-007](adr/adr-007-privacy-policies.md), keys:
+[ADR-006](adr/adr-006-keys-and-constraints.md).
 
 ---
 
-## 7. Schema-Evolution
+## 7. Schema evolution
 
-Die C#-Klasse ist die Wahrheit von *heute* — in der Datenbank liegen Dokumente von
-*gestern*. Deshalb ([ADR-005](adr/adr-005-schema-evolution.md)):
+The C# class is the truth of *today* — the database holds documents from
+*yesterday*. Therefore ([ADR-005](adr/adr-005-schema-evolution.md)):
 
-- Jedes Dokument und jeder ChangeRecord trägt `schema_version`.
-- Pro Typ werden Upcaster registriert, die JSON von Version n nach n+1 heben:
+- Every document and every ChangeRecord carries `schema_version`.
+- Per type, upcasters are registered that lift JSON from version n to n+1:
 
   ```csharp
   builder.For<User>()
       .Upcast(fromVersion: 1, json => { json["email"] = json["mail"]; json.Remove("mail"); });
   ```
 
-- Upcasting passiert **beim Laden** (lazy); das Dokument wird erst beim nächsten
-  `Save` physisch auf den neuen Stand geschrieben.
-- ChangeRecords werden **nie** rückwirkend migriert — Konsumenten alter Changes müssen
-  mit der damaligen `schema_version` umgehen (oder den Replay über Upcaster laufen lassen).
+- Upcasting happens **at load time** (lazily); the document is physically written
+  to the new state only on the next `Save`.
+- ChangeRecords are **never** migrated retroactively — consumers of old changes
+  must handle the historical `schema_version` (or run the replay through the
+  upcasters).
 
 ---
 
-## 8. Change-Konsum und Projektionen
+## 8. Change consumption and projections
 
-### Handler-Modell
+### Handler model
 
 ```csharp
 public interface IChangeHandler
@@ -300,116 +307,122 @@ public interface IChangeHandler
 }
 ```
 
-Mehr nicht. Ein Handler kann eine SQL-Projektion sein, ein Suchindex-Update, ein
-Webhook, ein Audit-Log, ein Event-Translator. Der Kernel generiert kein SQL und kennt
-keine Read Models ([ADR-009](adr/adr-009-projections-as-dumb-handlers.md)).
+Nothing more. A handler can be a SQL projection, a search index update, a
+webhook, an audit log, an event translator. The kernel generates no SQL and knows
+no read models ([ADR-009](adr/adr-009-projections-as-dumb-handlers.md)).
 
-Die Engine liefert die Infrastruktur:
+The engine provides the infrastructure:
 
-- **Reihenfolge**: pro Handler strikt nach `seq`; pro Dokument damit automatisch nach `version`.
-- **Checkpoints**: pro Handler eine persistierte Position (`papuma.checkpoint`).
-- **Retry** mit Backoff und Poison-Handling.
-- **Rebuild**: Checkpoint auf 0, Feed-Replay (Upcaster optional dazwischengeschaltet).
+- **Ordering**: per handler strictly by `seq`; per document therefore
+  automatically by `version`.
+- **Checkpoints**: one persisted position per handler (`papuma.checkpoint`).
+- **Retry** with backoff and poison handling.
+- **Rebuild**: checkpoint to 0, feed replay (upcasters optionally in between).
 
-### Lückenloses Lesen
+### Gapless reading
 
-Ein naives `WHERE seq > @lastSeq` verliert Änderungen, deren Transaktion später committet
-als eine mit höherer `seq`. Deshalb liest die Engine snapshot-basiert: nur Changes, deren
-`txid` vor `pg_snapshot_xmin(pg_current_snapshot())` liegt, gelten als sichtbar-stabil.
-LISTEN/NOTIFY dient nur als Wakeup, Polling bleibt die Wahrheit
-([ADR-010](adr/adr-010-feed-consumption.md), aufbauend auf
+A naive `WHERE seq > @lastSeq` loses changes whose transaction commits later than
+one with a higher `seq`. The engine therefore reads snapshot-based: only changes
+whose `txid` lies before `pg_snapshot_xmin(pg_current_snapshot())` count as
+visibly stable. LISTEN/NOTIFY serves only as the wakeup; polling remains the
+truth ([ADR-010](adr/adr-010-feed-consumption.md), building on
 [polling-vs-listen-analysis.md](../analyses/polling-vs-listen-analysis.md)).
 
-### Komfort obendrauf, nicht darunter
+### Convenience on top, not underneath
 
-Helfer wie
+Helpers such as
 
 ```csharp
 WhenFieldChanged<User>(x => x.Email)
 ```
 
-sind dünne Filter über `ChangeRecord.Diff` — Zucker über dem Handler-Interface, keine
-eigene Abstraktionsschicht.
+are thin filters over `ChangeRecord.Diff` — sugar above the handler interface,
+not a separate abstraction layer.
 
-### Fachliche Events: drei Fälle
+### Domain events: three cases
 
-| Fall | Beispiel | Modellierung |
-|------|----------|--------------|
-| Zustandsübergang | `OrderPlaced`, `OrderPaid` | Translator-Handler leitet aus dem Diff ab ([ADR-011](adr/adr-011-no-business-events-in-storage.md)) |
-| Faktum ohne Zustand | `UserLoggedIn`, `EmailSent` | `session.AppendAsync(...)` ins append-only **Event-Log** ([ADR-013](adr/adr-013-business-event-log.md)) |
-| Trigger ("danach X auslösen") | Bestätigungsmail | Handler-Subscription — kein gespeichertes Event |
+| Case | Example | Modeling |
+|------|---------|----------|
+| State transition | `OrderPlaced`, `OrderPaid` | translator handler derives from the diff ([ADR-011](adr/adr-011-no-business-events-in-storage.md)) |
+| Fact without state | `UserLoggedIn`, `EmailSent` | `session.AppendAsync(...)` into the append-only **event log** ([ADR-013](adr/adr-013-business-event-log.md)) |
+| Trigger ("do X afterwards") | confirmation email | handler subscription — no stored event |
 
-Das Event-Log (`papuma.event`) teilt Session-Transaktion, Policies, Metamodell und
-Processing-Engine mit dem Change Feed, hat aber eigene Checkpoints und erlaubt
-Typ-spezifische Retention. Rote Linie: Es ist **niemals Replay-Quelle für Zustand**.
+The event log (`papuma.event`) shares the session transaction, policies,
+metamodel and processing engine with the change feed, but has its own checkpoints
+and allows type-specific retention. Red line: it is **never a replay source for
+state**.
 
 ---
 
-## 9. Datenschutz-Schicht
+## 9. Privacy layer
 
-Policies werden beim Erzeugen des Diffs angewendet — **bevor** der ChangeRecord
-geschrieben wird:
+Policies are applied when the diff is produced — **before** the ChangeRecord is
+written:
 
-| Policy        | Diff-Eintrag                                  | Verwendung                          |
-|---------------|-----------------------------------------------|-------------------------------------|
-| `Track`       | `{ "old": ..., "new": ... }`                  | Default                             |
-| `Redact`      | `{ "changed": true }`                         | PII, die niemand im Feed braucht    |
-| `Reference`   | `{ "ref": "User/123/email" }`                 | Wert bleibt ausschließlich im Dokument bzw. Sensitive Store |
-| `Hash`        | `{ "changed": true, "hash": "..." }`          | Passwort-Hashes, Vergleichbarkeit ohne Inhalt |
-| `DoNotTrack`  | Feld erscheint nicht im Diff                  | Telemetrie-Felder                   |
+| Policy        | Diff entry                                    | Use                                  |
+|---------------|-----------------------------------------------|--------------------------------------|
+| `Track`       | `{ "old": ..., "new": ... }`                  | default                              |
+| `Redact`      | `{ "changed": true }`                         | PII nobody needs in the feed         |
+| `Reference`   | `{ "ref": "User/123/email" }`                 | value stays exclusively in the document or the sensitive store |
+| `Hash`        | `{ "changed": true, "hash": "..." }`          | password hashes, comparability without content |
+| `DoNotTrack`  | field does not appear in the diff             | telemetry fields                     |
 
-Wird ein Dokument DSGVO-gelöscht, verschwinden die Werte mit dem Dokument; der Feed
-enthält nur noch Referenzen und `changed`-Flags — keine personenbezogenen Inhalte.
-Das Hybrid-Modell aus [adr-2026-06-sensitive-data-reference-pattern.md](../analyses/adr-2026-06-sensitive-data-reference-pattern.md)
-(expliziter, versionierter Sensitive Data Store, opt-in-Auflösung in Projektionen) wird
-konzeptionell übernommen ([ADR-007](adr/adr-007-privacy-policies.md)).
+If a document is GDPR-erased, the values disappear with the document; the feed
+then contains only references and `changed` flags — no personal content. The
+hybrid model from
+[adr-2026-06-sensitive-data-reference-pattern.md](../analyses/adr-2026-06-sensitive-data-reference-pattern.md)
+(an explicit, versioned sensitive data store, opt-in resolution in projections)
+is adopted conceptually ([ADR-007](adr/adr-007-privacy-policies.md)).
 
 ---
 
 ## 10. Tenancy
 
-Mehrmandantenfähigkeit bleibt First-Class wie in v1: `tenant_id` ist Teil des
-Primärschlüssels von Dokumenten und Changes, die `DocumentSession` ist immer an einen
-Tenant gebunden, und `Papuma.Kernel.AspNetCore` liefert weiterhin die Tenant-Resolution.
+Multi-tenancy stays first-class as in v1: `tenant_id` is part of the primary key
+of documents and changes, the `DocumentSession` is always bound to a tenant, and
+`Papuma.Kernel.AspNetCore` continues to provide tenant resolution.
 
 ---
 
-## 11. Bewusst NICHT Teil von vNEXT
+## 11. Deliberately NOT part of vNEXT
 
-- **Provider-Abstraktion / andere Datenbanken** — Postgres-only, siehe ADR-001.
-- **Event Sourcing / Event Store** — Changes sind abgeleitet, nicht die Wahrheit.
-- **Read-Model-Generierung, Query-DSL, LINQ-Provider** — Projektionen schreiben SQL selbst.
-- **Cross-Document-Transaktionen über die Session hinaus** — innerhalb einer Session
-  sind Multi-Dokument-Commits atomar (Abschnitt 5, "Session = Unit of Work");
-  Cross-Document-*Constraints* und verteilte Sagas sind dagegen Anwendungssache.
-- **Automatische fachliche Events** — siehe ADR-011.
-- **Migrationscode von v1** — der Reboot ist vollständig.
+- **Provider abstraction / other databases** — Postgres-only, see ADR-001.
+- **Event sourcing / an event store** — changes are derived, not the truth.
+- **Read-model generation, query DSL, LINQ provider** — projections write their
+  own SQL.
+- **Cross-document transactions beyond the session** — within one session,
+  multi-document commits are atomic (section 5, "session = unit of work");
+  cross-document *constraints* and distributed sagas are application business.
+- **Automatic domain events** — see ADR-011.
+- **Migration code from v1** — the reboot is complete.
 
 ---
 
-## 12. ADR-Index
+## 12. ADR index
 
-| ADR | Titel | Status |
+| ADR | Title | Status |
 |-----|-------|--------|
-| [001](adr/adr-001-postgresql-18-only.md) | PostgreSQL ≥ 18 als einzige Zieldatenbank | Accepted |
-| [002](adr/adr-002-document-as-truth.md) | Dokument als Source of Truth, Change Feed abgeleitet | Accepted |
-| [003](adr/adr-003-write-path-concurrency.md) | Atomarer Write-Pfad mit optimistischer Concurrency und RETURNING OLD/NEW | Accepted |
-| [004](adr/adr-004-changerecord-diff-only.md) | ChangeRecord speichert reversibles Diff, keine Snapshots | Accepted |
-| [005](adr/adr-005-schema-evolution.md) | Schema-Evolution über schema_version und Upcaster | Accepted |
-| [006](adr/adr-006-keys-and-constraints.md) | Keys und Constraints über Metamodell und Expression-Indizes | Accepted |
-| [007](adr/adr-007-privacy-policies.md) | Datenschutz-Policies: Attribute als Default, Fluent als Override | Accepted |
-| [008](adr/adr-008-rollback-is-update.md) | Rollback ist ein Update mit Metadata | Accepted |
-| [009](adr/adr-009-projections-as-dumb-handlers.md) | Projektionen als dumme Change Handler | Accepted |
-| [010](adr/adr-010-feed-consumption.md) | Snapshot-basiertes Polling mit LISTEN/NOTIFY-Wakeup | Accepted |
-| [011](adr/adr-011-no-business-events-in-storage.md) | Keine fachlichen Events im Storage Layer | Accepted |
-| [012](adr/adr-012-partial-updates.md) | Partielle Updates als Patch-Primitiv (ohne Load, atomar via jsonb_set + RETURNING) | Accepted |
-| [013](adr/adr-013-business-event-log.md) | Fachliche Events: Translator, append-only Event-Log und Trigger-Handler | Accepted |
-| [014](adr/adr-014-bulk-operations.md) | Bulk-Operationen als set-basierter Patch (Key-Prädikate oder ID-Listen, ein ChangeRecord pro Dokument) | Accepted |
-| [015](adr/adr-015-gdpr-tooling.md) | DSGVO-Werkzeuge: Export/Inventar/Redaction im Kernel, Rechtsentscheidungen pro Tenant in der Anwendung | Accepted (Umsetzung: Phase 12) |
+| [001](adr/adr-001-postgresql-18-only.md) | PostgreSQL ≥ 18 as the only target database | Accepted |
+| [002](adr/adr-002-document-as-truth.md) | Document as source of truth, change feed derived | Accepted |
+| [003](adr/adr-003-write-path-concurrency.md) | Atomic write path with optimistic concurrency and RETURNING OLD/NEW | Accepted |
+| [004](adr/adr-004-changerecord-diff-only.md) | ChangeRecord stores a reversible diff, no snapshots | Accepted |
+| [005](adr/adr-005-schema-evolution.md) | Schema evolution via schema_version and upcasters | Accepted |
+| [006](adr/adr-006-keys-and-constraints.md) | Keys and constraints via metamodel and expression indexes | Accepted |
+| [007](adr/adr-007-privacy-policies.md) | Privacy policies: attributes as defaults, fluent as override | Accepted |
+| [008](adr/adr-008-rollback-is-update.md) | Rollback is an update with metadata | Accepted |
+| [009](adr/adr-009-projections-as-dumb-handlers.md) | Projections as dumb change handlers | Accepted |
+| [010](adr/adr-010-feed-consumption.md) | Snapshot-based polling with LISTEN/NOTIFY wakeup | Accepted |
+| [011](adr/adr-011-no-business-events-in-storage.md) | No domain events in the storage layer | Accepted |
+| [012](adr/adr-012-partial-updates.md) | Partial updates as a patch primitive (no load, atomic via jsonb_set + RETURNING) | Accepted |
+| [013](adr/adr-013-business-event-log.md) | Domain events: translator, append-only event log and trigger handlers | Accepted |
+| [014](adr/adr-014-bulk-operations.md) | Bulk operations as set-based patch (key predicates or id lists, one ChangeRecord per document) | Accepted |
+| [015](adr/adr-015-gdpr-tooling.md) | GDPR tooling: export/inventory/redaction in the kernel, legal decisions per tenant in the application | Accepted (implemented: phase 12) |
 
-## 13. Rezepte (Tutorial-Vorstufen)
+## 13. Recipes (tutorial precursors)
 
-Anwendungsmuster auf Basis der ADRs, als Entwürfe für spätere Tutorials:
+Application patterns on top of the ADRs, as drafts for later tutorials:
 
-- [Echtzeit-UI-Benachrichtigungen über Dokumentänderungen](recipes/realtime-ui-notifications.md)
-  — SignalR-Notifier als Change Handler, inkl. Abgrenzung zu Presence.
+- [Realtime UI notifications on document changes](recipes/realtime-ui-notifications.md)
+  — a SignalR notifier as a change handler, incl. the presence boundary.
+- [AI consumers of the change feed](recipes/ai-consumers.md)
+  — pgvector embeddings, natural-language audit, anomaly detection.

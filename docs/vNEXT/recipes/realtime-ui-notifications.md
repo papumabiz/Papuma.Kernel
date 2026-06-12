@@ -1,32 +1,32 @@
-# Rezept: Echtzeit-UI-Benachrichtigungen über Dokumentänderungen
+# Recipe: Realtime UI notifications on document changes
 
-Status: Verifiziert gegen die implementierte API (Phase 9, 2026-06-11) —
-Typnamen und Signaturen entsprechen `Papuma.Kernel.Processing` / `Papuma.Kernel.Changes`
+Status: verified against the implemented API (phase 9, 2026-06-11) — type names
+and signatures match `Papuma.Kernel.Processing` / `Papuma.Kernel.Changes`
 ([ADR-009](../adr/adr-009-projections-as-dumb-handlers.md),
 [ADR-010](../adr/adr-010-feed-consumption.md)).
 
-## Szenario
+## Scenario
 
-Mehrere Benutzer arbeiten gleichzeitig auf denselben Daten (z. B. ein User-Stammdaten-
-Editor). Sobald jemand speichert, sollen alle anderen Clients, die dasselbe Dokument
-anzeigen, sofort informiert werden — inklusive der Information, *welche Felder* sich
-geändert haben. So kann die UI reagieren, **bevor** der zweite Benutzer auf Speichern
-drückt und in die `ConcurrencyException` läuft (proaktive Ergänzung zum reaktiven
-Konfliktfall aus [ADR-003](../adr/adr-003-write-path-concurrency.md)).
+Multiple users work on the same data concurrently (e.g. a user master-data
+editor). As soon as someone saves, all other clients displaying the same document
+should be informed immediately — including *which fields* changed. The UI can
+then react **before** the second user hits save and runs into the
+`ConcurrencyException` (a proactive complement to the reactive conflict case from
+[ADR-003](../adr/adr-003-write-path-concurrency.md)).
 
-## Warum das fast gratis ist
+## Why this is almost free
 
-| Eigenschaft | Woher sie kommt |
+| Property | Where it comes from |
 |---|---|
-| Nahezu Echtzeit (ms statt Poll-Intervall) | LISTEN/NOTIFY-Wakeup der Processing-Engine (ADR-010) |
-| "Was hat sich geändert?" im Push | Der Diff liegt im `ChangeRecord` (ADR-004) |
-| Keine PII im Push | Policies wirken vor dem Schreiben — der Handler sieht nur den policy-bereinigten Diff (ADR-007) |
-| At-least-once, Checkpoints, Retry | Processing-Engine-Infrastruktur (ADR-009) |
+| Near-realtime (ms instead of the poll interval) | the processing engine's LISTEN/NOTIFY wakeup (ADR-010) |
+| "What changed?" inside the push | the diff lives in the `ChangeRecord` (ADR-004) |
+| No PII in the push | policies act before the write — the handler only sees the policy-applied diff (ADR-007) |
+| At-least-once, checkpoints, retry | processing-engine infrastructure (ADR-009) |
 
-## Der Handler
+## The handler
 
-Ein gewöhnlicher `IChangeHandler` — der Kernel kennt kein SignalR, der Handler ist
-Applikationscode:
+An ordinary `IChangeHandler` — the kernel knows no SignalR; the handler is
+application code:
 
 ```csharp
 public sealed class DocumentChangedNotifier : IChangeHandler
@@ -50,26 +50,27 @@ public sealed class DocumentChangedNotifier : IChangeHandler
                 change.DocumentId,
                 change.Version,
                 change.Operation,                    // Insert | Update | Delete
-                ChangedFields = change.Diff.Paths    // policy-bereinigt!
+                ChangedFields = change.Diff.Paths    // policy-applied!
             }, ct);
     }
 }
 ```
 
-Hinweise:
+Notes:
 
-- **Nur Pfade pushen, keine Werte.** `Diff.Paths` reicht der UI für "Feld X wurde
-  geändert" und vermeidet, dass Dokumentinhalte ungefiltert über den Hub laufen. Wer
-  Werte braucht, lädt das Dokument gezielt nach (autorisierter Read-Pfad).
-- **Idempotenz ist trivial erfüllt**: Ein doppelt gesendetes "documentChanged" ist
-  harmlos (At-least-once-Semantik der Engine, ADR-009).
-- **Versionssprünge erkennen**: Die UI kann anhand `Version` erkennen, ob sie
-  Benachrichtigungen verpasst hat (lokal bekannte Version + 1 ≠ gepushte Version →
-  Dokument neu laden).
+- **Push only paths, never values.** `Diff.Paths` is enough for the UI to say
+  "field X was changed" and avoids document contents flowing unfiltered through
+  the hub. Whoever needs values reloads the document explicitly (the authorized
+  read path).
+- **Idempotency is trivially satisfied**: a doubly sent "documentChanged" is
+  harmless (the engine's at-least-once semantics, ADR-009).
+- **Detect version jumps**: using `Version`, the UI can tell whether it missed
+  notifications (locally known version + 1 ≠ pushed version → reload the
+  document).
 
-## Hub und Gruppen-Verwaltung (Skizze)
+## Hub and group management (sketch)
 
-Clients treten beim Öffnen eines Dokuments der Gruppe bei, beim Schließen aus:
+Clients join the group when opening a document and leave it when closing:
 
 ```csharp
 public sealed class DocumentHub : Hub
@@ -82,22 +83,22 @@ public sealed class DocumentHub : Hub
 }
 ```
 
-Client-Seite (Skizze):
+Client side (sketch):
 
 ```javascript
 connection.on("documentChanged", ({ documentId, version, changedFields }) => {
-    showBanner(`Dieses Dokument wurde gerade geändert (${changedFields.join(", ")}).`);
-    // optional: Felder markieren, Reload anbieten, Save-Button mit Warnung versehen
+    showBanner(`This document was just changed (${changedFields.join(", ")}).`);
+    // optionally: highlight fields, offer a reload, add a warning to the save button
 });
 
 await connection.invoke("watch", "User", userId);
 ```
 
-> 🔐 **Autorisierung nicht vergessen**: `Watch` muss prüfen, ob der Benutzer das
-> Dokument überhaupt sehen darf (Tenant-Scope + Fachrechte) — sonst leaken schon die
-> Änderungs*pfade* Informationen.
+> 🔐 **Do not forget authorization**: `Watch` must check whether the user may see
+> the document at all (tenant scope + domain permissions) — otherwise even the
+> change *paths* leak information.
 
-## Registrierung
+## Registration
 
 ```csharp
 builder.Services
@@ -112,15 +113,16 @@ builder.Services.AddSignalR();
 builder.Services.AddHealthChecks().AddPapumaChangeFeedLag(maxAllowedLag: 1000);
 ```
 
-Der Bootstrap hostet die Feed-Worker automatisch (NOTIFY-getrieben, Polling als
-Fallback) und legt das Schema beim Start an.
+The bootstrap hosts the feed workers automatically (NOTIFY-driven, polling as the
+fallback) and creates the schema at startup.
 
-## Abgrenzung: "wird gerade bearbeitet" (Presence)
+## Out of scope: "currently being edited" (presence)
 
-Bewusst **nicht** Teil dieses Rezepts und nicht Teil des Kernels: Die Information
-"Benutzer X hat das Dokument gerade im Editor offen" ist keine Zustandsänderung und
-kein erinnernswertes Faktum — sie fällt durch alle drei Raster der Entscheidungsregel
-aus [ADR-013](../adr/adr-013-business-event-log.md) (*Zustand → Dokument, Faktum →
-Event-Log, Auslösen → Handler*). Presence ist flüchtige Information mit TTL-Semantik
-und gehört vollständig in die Transportschicht der Anwendung (SignalR-Groups direkt,
-In-Memory, Redis-Presence) — niemals in `papuma.document` oder `papuma.event`.
+Deliberately **not** part of this recipe and not part of the kernel: the
+information "user X currently has the document open in an editor" is neither a
+state change nor a fact worth remembering — it falls through all three filters of
+the decision rule from [ADR-013](../adr/adr-013-business-event-log.md) (*state →
+document, fact → event log, trigger → handler*). Presence is ephemeral
+information with TTL semantics and belongs entirely in the application's
+transport layer (SignalR groups directly, in-memory, Redis presence) — never in
+`papuma.document` or `papuma.event`.

@@ -1,26 +1,26 @@
-# Rezept: KI-Konsumenten des Change Feeds
+# Recipe: AI consumers of the change feed
 
-Status: Verifiziert gegen die implementierte API (Phase 13, 2026-06-12)
+Status: verified against the implemented API (phase 13, 2026-06-12)
 
-Haltung (Phase 13): **Der Kernel bleibt KI-frei** — keine LLM-Aufrufe, keine
-KI-Abhängigkeiten, deterministische Infrastruktur. Aber er ist bewusst
-KI-*freundlich*: Der policy-minimierte Feed ist sicherer Lesestoff, die
-Scope-Bindung eine natürliche Berechtigungsgrenze, und dumme Handler (ADR-009)
-sind der universelle Andockpunkt. Alles hier sind **Anwendungsrezepte**, keine
-Kernel-Features.
+Stance (phase 13): **the kernel stays AI-free** — no LLM calls, no AI
+dependencies, deterministic infrastructure. But it is deliberately
+AI-*friendly*: the policy-minimized feed is safe reading material, scope binding
+is a natural permission boundary, and dumb handlers (ADR-009) are the universal
+attachment point. Everything here is an **application recipe**, not a kernel
+feature.
 
-## 1. Embeddings/RAG: pgvector-Index als Projektion
+## 1. Embeddings/RAG: a pgvector index as a projection
 
-Semantische Suche über Dokumente — der Embeddings-Index ist eine ganz normale
-Projektion: ein Change-Handler, der bei relevanten Änderungen das Dokument lädt,
-ein Embedding rechnet und in eine pgvector-Tabelle (gleiche Postgres-Instanz!)
-schreibt. Rebuild, Checkpoints, Lag-Metriken — alles geschenkt (concepts §19).
+Semantic search over documents — the embeddings index is a perfectly normal
+projection: a change handler that, on relevant changes, loads the document,
+computes an embedding and writes it into a pgvector table (same Postgres
+instance!). Rebuild, checkpoints, lag metrics — all for free (concepts §19).
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE TABLE app.product_embedding (
     scope text NOT NULL, tenant_id text NOT NULL, document_id text NOT NULL,
-    version bigint NOT NULL,                  -- Idempotenz: nur neuere schreiben
+    version bigint NOT NULL,                  -- idempotency: only write newer
     embedding vector(1536) NOT NULL,
     PRIMARY KEY (scope, tenant_id, document_id)
 );
@@ -31,7 +31,7 @@ public sealed class ProductEmbeddingProjection(
     DocumentStore store, NpgsqlDataSource dataSource, IEmbeddingClient embeddings)
     : IChangeHandler
 {
-    public string Name => "product-embeddings";   // Checkpoint-Identität
+    public string Name => "product-embeddings";   // checkpoint identity
 
     public async Task HandleAsync(ChangeRecord change, CancellationToken ct)
     {
@@ -39,11 +39,11 @@ public sealed class ProductEmbeddingProjection(
         if (change.Operation == ChangeOperation.Delete) { /* DELETE embedding row */ return; }
         if (!change.FieldChanged("name") && !change.FieldChanged("description")) return;
 
-        // Zustand laden (der Diff trägt nur Änderungen) — scope-gebunden!
+        // Load the state (the diff only carries changes) — scope-bound!
         await using var session = store.OpenSession(change.Scope);
         var product = await session.LoadAsync<Product>(change.DocumentId, ct);
-        if (product is null || product.Version > change.Version) return; // stale: späterer
-            // Change rechnet ohnehin neu — Idempotenz über die version-Spalte (s. u.)
+        if (product is null || product.Version > change.Version) return; // stale: a later
+            // change recomputes anyway — idempotency via the version column (see below)
 
         var vector = await embeddings.EmbedAsync($"{product.Document.Name}\n{product.Document.Description}", ct);
 
@@ -56,22 +56,22 @@ public sealed class ProductEmbeddingProjection(
             DO UPDATE SET version = @version, embedding = @embedding
             WHERE app.product_embedding.version < @version
             """;
-        // Parameter binden … (at-least-once: das version-Prädikat macht Redelivery harmlos)
+        // bind parameters … (at-least-once: the version predicate makes redelivery harmless)
         await cmd.ExecuteNonQueryAsync(ct);
     }
 }
 ```
 
-Hinweise: Embedding-API-Aufrufe sind langsam → dieser Handler dominiert
-`papuma.feed.handler.duration`; bei Lag-Wachstum zuerst hier schauen (concepts
-§14) und ggf. nur ein Marker-Dokument schreiben + Batch-Verarbeitung getrennt.
-Die RAG-Abfrage selbst ist gewöhnliches SQL (`ORDER BY embedding <=> @query`)
-mit expliziten Scope-Prädikaten.
+Notes: embedding API calls are slow → this handler dominates
+`papuma.feed.handler.duration`; when lag grows, look here first (concepts §14)
+and consider writing only a marker document + separate batch processing. The RAG
+query itself is ordinary SQL (`ORDER BY embedding <=> @query`) with explicit
+scope predicates.
 
-## 2. Natural-Language-Audit: `GetHistoryAsync` + LLM
+## 2. Natural-language audit: `GetHistoryAsync` + LLM
 
-"Was ist mit Bestellung 4711 passiert?" — die Historie ist policy-bereinigt
-(sensible Werte erreichen das LLM nie) und trägt Actor/Correlation/Zeit:
+"What happened to order 4711?" — the history is policy-applied (sensitive values
+never reach the LLM) and carries actor/correlation/time:
 
 ```csharp
 public async Task<string> ExplainHistoryAsync(string orderId, ScopeContext scope, CancellationToken ct)
@@ -83,27 +83,27 @@ public async Task<string> ExplainHistoryAsync(string orderId, ScopeContext scope
     {
         c.Version, Operation = c.Operation.ToString(), c.OccurredAt,
         Actor = (string?)c.Metadata["actorId"],
-        Changes = c.Diff.ToJson(),       // Redacted-Felder: nur {"changed": true}
+        Changes = c.Diff.ToJson(),       // redacted fields: only {"changed": true}
     });
 
     return await _llm.CompleteAsync($"""
-        Erkläre einem Support-Mitarbeiter chronologisch und knapp, was mit dieser
-        Bestellung passiert ist. Felder mit {{"changed": true}} sind geschützt —
-        erwähne nur, DASS sie sich geändert haben.
+        Explain to a support agent, chronologically and briefly, what happened
+        to this order. Fields with {{"changed": true}} are protected — only
+        mention THAT they changed.
 
         {JsonSerializer.Serialize(facts)}
         """, ct);
 }
 ```
 
-Dasselbe Muster über den MCP-Server (`get_document_history`): ein Agent mit
-Zugriff auf das Tool beantwortet solche Fragen ohne eigenen Code — die
-Policy-Bereinigung gilt dort identisch.
+The same pattern works via the MCP server (`get_document_history`): an agent with
+access to the tool answers such questions without custom code — policy
+application holds identically there.
 
-## 3. Anomalie-Erkennung: der Feed als Verhaltensstrom
+## 3. Anomaly detection: the feed as a behavior stream
 
-Der Event-Feed ist ein chronologischer Faktenstrom pro Scope — ideales Futter
-für Erkennungslogik (regelbasiert oder Modell). Wieder nur ein Handler:
+The event feed is a chronological fact stream per scope — ideal fodder for
+detection logic (rule-based or model-based). Again, just a handler:
 
 ```csharp
 public sealed class LoginAnomalyDetector(DocumentStore store) : IEventHandler
@@ -117,31 +117,31 @@ public sealed class LoginAnomalyDetector(DocumentStore store) : IEventHandler
 
         if (!await _detector.IsSuspiciousAsync(login, ct)) return;
 
-        // Befund = Dokument (Human-in-the-Loop-Muster, concepts §18):
-        // deterministische Id macht at-least-once harmlos.
+        // The finding = a document (human-in-the-loop pattern, concepts §18):
+        // a deterministic id makes at-least-once harmless.
         await using var session = store.OpenSession(@event.Scope);
         await session.SaveAsync(new SecurityAlert(
             Id: $"alert-login-{@event.Seq}", UserId: login.UserId,
             Status: AlertStatus.Open, RaisedAt: @event.OccurredAt), 0);
         try { await session.CommitAsync(); }
-        catch (UniqueKeyViolationException) { /* Redelivery — Alert existiert */ }
+        catch (UniqueKeyViolationException) { /* redelivery — alert exists */ }
     }
 }
 ```
 
-Der Alert ist selbst ein Dokument → die Triage durch einen Menschen (oder
-Agenten) ist ein normaler Write, der nächste Handler reagiert darauf — die
-komplette Eskalationskette läuft auf Kernel-Primitiven.
+The alert is itself a document → triage by a human (or an agent) is a normal
+write that the next handler reacts to — the entire escalation chain runs on
+kernel primitives.
 
-## Leitplanken für alle drei Muster
+## Guardrails for all three patterns
 
-1. **LLM-/Embedding-Aufrufe gehören in Handler oder Anwendungscode, nie in den
-   Write-Pfad** — sie sind langsam und nichtdeterministisch; der Feed entkoppelt.
-2. **Policy-Disziplin ist die KI-Sicherheitsgrenze**: Was redacted ist, kann kein
-   Prompt leaken. Vor dem ersten KI-Konsumenten das Inventar prüfen
+1. **LLM/embedding calls belong in handlers or application code, never in the
+   write path** — they are slow and nondeterministic; the feed decouples.
+2. **Policy discipline is the AI safety boundary**: what is redacted cannot be
+   leaked by any prompt. Before the first AI consumer, review the inventory
    (`DataInventory` → `UnprotectedPaths`, [gdpr.md](../gdpr.md)).
-3. **Scope-Bindung ist die Berechtigungsgrenze**: Ein Agent/Handler arbeitet mit
-   dem Scope des auslösenden Records — nie scope-übergreifend aggregieren, außer
-   bewusst im `'All'`-Worker.
-4. **Idempotenz wie immer** (at-least-once): version-Prädikate, deterministische
-   IDs, Unique-Keys.
+3. **Scope binding is the permission boundary**: an agent/handler works with the
+   scope of the triggering record — never aggregate across scopes, except
+   deliberately in an `'All'` worker.
+4. **Idempotency as always** (at-least-once): version predicates, deterministic
+   ids, unique keys.
