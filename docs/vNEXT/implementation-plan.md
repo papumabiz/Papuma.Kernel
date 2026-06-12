@@ -299,7 +299,7 @@ grün unter den finalen Projektnamen; Paket packt.
 
 # 🏁 Plan abgeschlossen (2026-06-12)
 
-Alle 12 Phasen umgesetzt, alle 15 ADRs implementiert und durch Integrationstests
+Alle 13 Phasen umgesetzt, alle 15 ADRs implementiert und durch Integrationstests
 gegen echtes PostgreSQL 18 abgedeckt. Der Reboot ist vollständig.
 
 ## Phase 11 — Observability & Diagnostics ✅ (2026-06-12)
@@ -366,33 +366,39 @@ entfernt, Audit-Metadaten gesetzt, Rollback scheitert typisiert, idempotent,
 Reason-Pflicht); Scope-Isolationstest (Erasure in Tenant A bei gleicher Dokument-Id
 lässt Tenant B unberührt). 141 Tests grün.
 
-## Phase 13 — KI-Enablement (post-1.0, geplant; setzt Phase 11/12 voraus)
+## Phase 13 — KI-Enablement ✅ (2026-06-12)
 
 Haltung: **Der Kernel bleibt KI-frei** (keine LLM-Aufrufe, keine KI-Abhängigkeiten —
 deterministische Infrastruktur), ist aber bewusst KI-freundlich: policy-minimierter
 Feed als sicherer Lesestoff, Scope-Bindung als natürliche Berechtigungsgrenze,
 dumme Handler als universeller Andockpunkt.
 
-- [ ] **Agenten-Doku aktualisieren**: `docs/ai/`-Playbook (1112 Zeilen, beschreibt
-      v1!) auf vNEXT umschreiben — Mentalmodell "Dokument ist Wahrheit", die
-      ADR-Verbote (Save ohne expectedVersion, PII ohne Policy, Query-DSL-Wünsche,
-      additive Transformations-Simulation), Handler-Idempotenz-Pflicht;
-      `concepts.md`/ADRs/getting-started als Referenzkette verlinken
-- [ ] **AGENTS.md-Snippet für konsumierende Repos**: kompakte "so denkst du über
-      Papuma"-Anleitung zum Hineinkopieren in Anwendungen, die das Paket nutzen
-- [ ] **MCP-Server als dünner Aufsatz auf Phase 11/12**: Modell-Introspektion
-      (Typen/Policies/Keys/Schema-Versionen), Lag, Failures, `GetHistoryAsync`,
-      DSGVO-Inventar — Dev-/Ops-Werkzeug, scope-gebunden, read-only als Default;
-      keine eigene Diagnose-Logik (nur Wrapper, sonst doppelte Schicht)
-- [ ] **KI-Konsumenten-Rezepte** (keine Kernel-Features, ADR-009-Demonstration):
-      Embeddings/RAG-Handler nach pgvector (gleiche Postgres-Instanz),
-      Natural-Language-Audit über `GetHistoryAsync` + LLM,
-      Anomalie-Erkennung auf dem Diff-Strom
+- [x] **Agenten-Doku aktualisiert**: v1-Playbook (3760 Zeilen über 4 Dateien)
+      ersetzt durch [docs/ai/papuma-kernel-playbook.md](../ai/papuma-kernel-playbook.md) —
+      Mentalmodell in 4 Sätzen, ADR-Verbote als Tabelle, API-Schnellkarte,
+      "Ich will …"-Entscheidungsbaum, Troubleshooting; Referenzkette
+      getting-started → concepts → ADRs statt parallel gepflegter API-Referenz
+- [x] **AGENTS.md-Snippet**: [docs/ai/papuma-kernel-agents-snippet.md](../ai/papuma-kernel-agents-snippet.md) —
+      10 verbindliche Regeln + Platzhalter (Scope-Auflösung, Modell-Bootstrap,
+      Projektion-vs.-Effekt-Handler) zum Hineinkopieren
+- [x] **MCP-Server**: Paket `Papuma.Kernel.Mcp` (Kernel bleibt KI-frei; offizielles
+      `ModelContextProtocol`-SDK 1.4.0) — Tools `get_model_inventory` (= Phase-12-
+      Inventar), `get_feed_lag`/`get_feed_failures` (beide Prozessoren),
+      `get_document_history` (scope-gebunden, policy-bereinigt; Typname→CLR via
+      Reflection-Bridge), `retry_feed_failure`/`reset_feed_checkpoint` nur mit
+      `AllowMutations`-Opt-in; Registrierung `AddMcpServer().WithPapumaKernel()`;
+      bewusst kein `gdpr_export`-Tool (Betroffenen-Export = Anwendungsworkflow);
+      Doku in [observability.md](observability.md)
+- [x] **KI-Konsumenten-Rezepte**: [recipes/ai-consumers.md](recipes/ai-consumers.md) —
+      pgvector-Embeddings-Projektion (Idempotenz via version-Prädikat),
+      Natural-Language-Audit über `GetHistoryAsync` (Policy-Bereinigung als
+      Prompt-Sicherheitsgrenze), Anomalie-Erkennung mit Alert-Dokument
+      (Human-in-the-Loop-Anschluss, concepts §18) + 4 Leitplanken
 
-**DoD:** Agenten-Playbook beschreibt ausschließlich vNEXT (Stichprobe: ein Coding-
-Agent implementiert damit korrekt einen Handler + Save-Flow); MCP-Server liefert
-Historie/Lag/Inventar gegen den PG-18-Container; pgvector-Rezept als lauffähiges
-Beispiel.
+**DoD erfüllt:** Playbook/Snippet beschreiben ausschließlich vNEXT mit verifizierten
+Signaturen; MCP-Tools gegen den PG-18-Container getestet (Inventar mit Policies,
+scope-gebundene + policy-bereinigte Historie, Lag/Failures beider Feeds,
+Mutations-Gate default-zu); Rezepte gegen die reale API geschrieben. 145 Tests grün.
 
 ## Weitere Post-1.0-Kandidaten (bei Bedarf, getrieben durch Lag-Metriken)
 

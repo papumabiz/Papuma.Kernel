@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Papuma.Kernel/Papuma.Kernel.csproj" />
     <Project Path="src/Papuma.Kernel.AspNetCore/Papuma.Kernel.AspNetCore.csproj" />
+    <Project Path="src/Papuma.Kernel.Mcp/Papuma.Kernel.Mcp.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Papuma.Kernel.Tests/Papuma.Kernel.Tests.csproj" />

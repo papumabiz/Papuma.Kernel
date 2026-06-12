@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Papuma.Kernel.Mcp</PackageId>
+    <Description>Model Context Protocol (MCP) server tools for Papuma.Kernel — exposes model introspection, the Art.-30 data inventory, feed lag, failure diagnostics and document history to AI agents. Thin, read-only-by-default wrapper over the kernel's diagnostics APIs; the kernel itself stays AI-free.</Description>
+    <PackageTags>mcp;model-context-protocol;ai;diagnostics;postgresql;documents;cqrs</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Papuma.Kernel\Papuma.Kernel.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" Version="1.4.0" />
+  </ItemGroup>
+
+</Project>

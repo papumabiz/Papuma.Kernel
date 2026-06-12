@@ -75,3 +75,30 @@ await processor.RetryFailureAsync(handlerName, seq);
 Hinweis Datenschutz: Spans taggen Dokument-*IDs* und Tenant, nie Inhalte; Diffs in
 `GetHistoryAsync` sind policy-bereinigt — sensible Werte erreichen auch die
 Observability-Pipeline nicht (ADR-007).
+
+## MCP-Server (Phase 13): die Diagnose-APIs für KI-Agenten
+
+Das Paket **`Papuma.Kernel.Mcp`** exponiert exakt diese Diagnose-Oberfläche als
+MCP-Tools — dünner Wrapper, keine eigene Diagnose-Logik, read-only als Default:
+
+```csharp
+builder.Services
+    .AddMcpServer()
+    .WithHttpTransport()        // oder WithStdioServerTransport()
+    .WithPapumaKernel();        // read-only; Mutationen opt-in:
+    // .WithPapumaKernel(o => o with { AllowMutations = true });
+```
+
+| Tool | Entspricht | Schreibend? |
+|---|---|---|
+| `get_model_inventory` | `DataInventory.Build(model)` (Art.-30-Inventar, Policies, Keys) | nein |
+| `get_feed_lag` | `GetLagAsync()` beider Prozessoren | nein |
+| `get_feed_failures` | `GetFailuresAsync()` beider Prozessoren | nein |
+| `get_document_history` | `GetHistoryAsync` (scope-gebunden, policy-bereinigt) | nein |
+| `retry_feed_failure` | `RetryFailureAsync` | ja — nur mit `AllowMutations` |
+| `reset_feed_checkpoint` | `ResetCheckpointAsync` (nur Projektionen!) | ja — nur mit `AllowMutations` |
+
+Der Server läuft **in der Anwendung** (das Metamodell entsteht erst beim
+App-Start aus CLR-Typen + Fluent-Config — ein externer Prozess kennt es nicht).
+Bewusst kein `gdpr_export`-Tool: Ein Betroffenen-Export ist ein
+Anwendungsworkflow mit Auslieferungsentscheidungen, keine Agenten-Fähigkeit.

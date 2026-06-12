@@ -30,7 +30,7 @@ jobs:
         run: dotnet test Papuma.Kernel.slnx --configuration Release --no-build --verbosity normal
 
       - name: Pack
-        run: dotnet pack src/Papuma.Kernel/Papuma.Kernel.csproj --configuration Release --no-build --output artifacts
+        run: dotnet pack Papuma.Kernel.slnx --configuration Release --no-build --output artifacts
 
       - name: Upload NuGet package artifact
         uses: actions/upload-artifact@v4
