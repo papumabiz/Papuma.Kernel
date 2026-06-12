@@ -77,6 +77,34 @@ Privacy note: spans tag document *ids* and the tenant, never contents; diffs in
 `GetHistoryAsync` are policy-applied — sensitive values do not reach the
 observability pipeline either (ADR-007).
 
+## The embedded dashboard: a first look without infrastructure
+
+Before Prometheus/Grafana exist (and for a quick glance afterwards), the
+`Papuma.Kernel.AspNetCore` package ships a Hangfire-style embedded dashboard —
+one self-contained HTML page (no framework, no CDN, no build step) over the
+diagnostics APIs:
+
+```csharp
+builder.Services.AddPapumaDashboard();      // starts the in-process meter listener
+…
+app.MapPapumaDashboard("/papuma");          // page + JSON at /papuma/data
+```
+
+It shows: throughput cards (writes/commits/events/conflicts/deliveries per
+second, computed client-side from cumulative counters between 2-second polls),
+lag per handler for both feeds (bars, fed live by the processors), the failure
+table (retry pending / poison), and average handler durations. The JSON endpoint
+(`{path}/data`) is also a ready-made API for your own UI (e.g. a Blazor/Radzen
+page) if you outgrow the built-in page.
+
+Security: the dashboard exposes operational metadata (handler names, lag, error
+messages). Protect it like a health endpoint —
+`MapPapumaDashboard().RequireAuthorization(...)` or bind it internally.
+
+It is a viewer, not a second source of truth: lag and failures come from the
+same `GetLagAsync`/`GetFailuresAsync` the MCP server uses; counter totals are
+process-local (they reset with the process — rates are what matters here).
+
 ## MCP server (phase 13): the diagnostics APIs for AI agents
 
 The **`Papuma.Kernel.Mcp`** package exposes exactly this diagnostics surface as

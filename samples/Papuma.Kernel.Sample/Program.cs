@@ -8,6 +8,7 @@ using NATS.Client.Core;
 using NATS.Client.JetStream;
 using NATS.Net;
 
+using Papuma.Kernel.AspNetCore.Dashboard;
 using Papuma.Kernel.AspNetCore.Processing;
 using Papuma.Kernel.AspNetCore.Tenancy;
 using Papuma.Kernel.Hosting;
@@ -64,6 +65,7 @@ builder.Services.AddPapumaScope<DemoScopeResolver>();
 builder.Services.AddHostedService<ApprovalEscalationService>(); // the timer primitive
 builder.Services.AddSignalR();
 builder.Services.AddHealthChecks().AddPapumaChangeFeedLag(maxAllowedLag: 1000);
+builder.Services.AddPapumaDashboard(); // embedded first-look dashboard
 
 // ── MCP server: the diagnostics surface for AI agents (observability.md) ───────
 builder.Services
@@ -216,6 +218,7 @@ app.MapGet("/products/{id}/stock", async (string id, DocumentStore store, HttpCo
 app.MapHub<ShopHub>("/hub/shop");   // realtime push (recipe: realtime-ui-notifications)
 app.MapHealthChecks("/health");     // includes the change-feed lag check
 app.MapMcp("/mcp");                 // AI agents: get_feed_lag, get_document_history, …
+app.MapPapumaDashboard("/papuma");  // lag, failures, throughput — live in the browser
 
 app.Run();
 

@@ -3,9 +3,13 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>Papuma.Kernel.AspNetCore</PackageId>
-    <Description>Optional ASP.NET Core integration for Papuma.Kernel — tenant scope resolution middleware and change feed lag health checks.</Description>
-    <PackageTags>aspnetcore;multi-tenancy;health-checks;change-feed</PackageTags>
+    <Description>Optional ASP.NET Core integration for Papuma.Kernel — tenant scope resolution middleware, change feed lag health checks, and an embedded first-look dashboard (lag, failures, throughput).</Description>
+    <PackageTags>aspnetcore;multi-tenancy;health-checks;change-feed;dashboard</PackageTags>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Papuma.Kernel.Tests" />
+  </ItemGroup>
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
