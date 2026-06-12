@@ -418,6 +418,45 @@ gesamte Observability-Pipeline PII-arm by design.
 
 ---
 
+## 16. Lesen mit Garantie: Session-Load, SQL-Views und Projektionen
+
+→ [ADR-002](adr/adr-002-document-as-truth.md), [ADR-005](adr/adr-005-schema-evolution.md), [ADR-006](adr/adr-006-keys-and-constraints.md)
+
+Projektionen sind asynchron — aber **der Document Store ist die Wahrheit**, und
+`LoadAsync`/`LoadByKeyAsync` lesen ihn direkt und transaktional konsistent. Der
+Klassiker "Passwortänderung muss sofort abrufbar sein" ist deshalb der eingebaute
+Normalfall: Login-Check via `LoadByKeyAsync` liest den Stand *jetzt*, ohne Feed,
+ohne Lag, indexgestützt über den deklarierten Key.
+
+**SQL-Views über den JSONB-Store** sind als zusätzliche "Lese-Linse" legitim — genau
+dafür liegt die Wahrheit als JSONB *in Postgres*. Eine View ist garantiert aktuell
+(gleicher MVCC-Snapshot), braucht keine Sync-Maschinerie und verletzt kein ADR.
+Vier Caveats gehören dazu:
+
+1. **Nur lesen.** Writes gehen immer durch die Session (Diffs, Policies, Concurrency).
+2. **`security_invoker = on`** (PG ≥ 15) ist Pflicht — sonst wertet Postgres die
+   RLS-Policies gegen den View-Owner statt den Aufrufer aus und die Tenant-Isolation
+   ist still ausgehebelt.
+3. **Views sehen die gespeicherte Form, nicht die upgecastete.** Die Upcaster-Pipeline
+   läuft im Kernel, nicht in SQL — nach einem Rename liegen dank Lazy-Upcasting noch
+   Alt-Dokumente in alter Form da (`COALESCE(data->>'neu', data->>'alt')` als
+   Übergang, oder Views auf schema-stabile Felder beschränken).
+4. **Policies wirken nicht** — der Store enthält Klartext; Grants auf Views, die
+   sensible Felder exponieren, entsprechend eng halten.
+
+Die Entscheidungsmatrix:
+
+| Bedarf | Werkzeug | Konsistenz |
+|---|---|---|
+| Strong-consistency-Read im Code (Login, Geschäftslogik) | `LoadAsync` / `LoadByKeyAsync` | sofort |
+| Ad-hoc-SQL, Reporting, BI auf aktuellen Daten | View (mit den 4 Caveats) | sofort |
+| Schwere Read-Models, Aggregationen, externe Ziele | Projektion via Handler | eventual (Lag beobachtbar) |
+
+Materialized Views sind die schlechteste der Welten: Sie holen die Staleness zurück
+(`REFRESH`-Zyklus), ohne die Freiheit einer echten Projektion zu bieten.
+
+---
+
 *Pflegehinweis: Neue Erklärstücke aus späteren Phasen hier ergänzen — dieses
 Dokument ist der Sammelpunkt für das "Warum hinter dem Wie" und Rohstoff für die
 Tutorials (Phase 9).*
