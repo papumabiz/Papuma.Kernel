@@ -1,19 +1,19 @@
-# ADR-009: Projektionen als dumme Change Handler
+# ADR-009: Projections as dumb change handlers
 
 ## Status
 
 Accepted (2026-06-11)
 
-## Kontext
+## Context
 
-CQRS-/Projection-Frameworks abstrahieren oft an der falschen Stelle: Die Write-Seite ist
-generisch (lohnt Abstraktion), die Read-Seite ist es fast nie — Suchindex, Dashboard-SQL
-und Reporting-Insert derselben Änderung haben nichts gemeinsam. Read-Model-DSLs enden
-regelmäßig bei "okay, ich brauche doch SQL".
+CQRS/projection frameworks often abstract in the wrong place: the write side is
+generic (worth abstracting), the read side almost never is — a search index, a
+dashboard SQL statement and a reporting insert for the same change have nothing in
+common. Read-model DSLs regularly end at "okay, I do need SQL after all".
 
-## Entscheidung
+## Decision
 
-1. **Ein Interface, mehr nicht:**
+1. **One interface, nothing more:**
 
    ```csharp
    public interface IChangeHandler
@@ -23,33 +23,34 @@ regelmäßig bei "okay, ich brauche doch SQL".
    }
    ```
 
-   Ein Handler kann SQL-Projektion, Elasticsearch-Update, Webhook, Kafka-Publish,
-   Audit-Log oder Event-Translator (ADR-011) sein. Der Kernel generiert kein SQL und
-   kennt keine Read Models.
+   A handler can be a SQL projection, an Elasticsearch update, a webhook, a Kafka
+   publish, an audit log or an event translator (ADR-011). The kernel generates no
+   SQL and knows no read models.
 
-2. **Die Engine liefert ausschließlich Infrastruktur:**
-   - Reihenfolge: pro Handler strikt nach `seq` (damit pro Dokument nach `version`),
-   - persistierte Checkpoints pro Handler (`papuma.checkpoint`),
-   - Retry mit Backoff, Poison-Handling (Change überspringen + Alarm statt Endlosschleife),
-   - Rebuild: Checkpoint zurücksetzen, Feed-Replay,
-   - Parallelisierung über Handler hinweg (nie innerhalb eines Handlers).
+2. **The engine delivers infrastructure only:**
+   - ordering: per handler strictly by `seq` (and thus per document by `version`),
+   - persisted checkpoints per handler (`papuma.checkpoint`),
+   - retry with backoff, poison handling (skip the change + alarm instead of an
+     endless loop),
+   - rebuild: reset the checkpoint, replay the feed,
+   - parallelization across handlers (never within one handler).
 
-3. **At-least-once-Semantik.** Handler müssen idempotent sein; die Engine liefert dafür
-   `(handler, seq)` als natürlichen Idempotenz-Schlüssel.
+3. **At-least-once semantics.** Handlers must be idempotent; the engine provides
+   `(handler, seq)` as the natural idempotency key for this.
 
-4. **Komfort als Zucker, nicht als Schicht:** Filter-Helfer wie
+4. **Convenience as sugar, not as a layer:** filter helpers such as
 
    ```csharp
    WhenFieldChanged<User>(x => x.Email)
    ```
 
-   sind dünne Wrapper über `ChangeRecord.Diff` und erzeugen gewöhnliche Handler.
+   are thin wrappers over `ChangeRecord.Diff` and produce ordinary handlers.
 
-## Konsequenzen
+## Consequences
 
-- Projektionen nutzen das jeweils beste Werkzeug direkt (SQL, Client-SDKs) — keine
-  Leaky Abstraction, kein "ja, aber dieser Fall ist speziell".
-- Die Qualität des Kernels entscheidet sich an Checkpoints/Retry/Rebuild — genau dort
-  wird investiert.
-- Idempotenz ist Handler-Pflicht und wird in der Doku mit Mustern belegt
-  (Upsert, `ON CONFLICT`, Checkpoint-vergleichendes Schreiben).
+- Projections use the best tool directly (SQL, client SDKs) — no leaky
+  abstraction, no "yes, but this case is special".
+- The kernel's quality is decided at checkpoints/retry/rebuild — exactly where the
+  investment goes.
+- Idempotency is a handler obligation and is backed in the docs with patterns
+  (upsert, `ON CONFLICT`, checkpoint-comparing writes).

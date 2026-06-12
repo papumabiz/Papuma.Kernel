@@ -1,66 +1,65 @@
-# ADR-007: Datenschutz-Policies — Attribute als Default, Fluent als Override
+# ADR-007: Privacy policies — attributes as defaults, fluent as override
 
 ## Status
 
 Accepted (2026-06-11)
 
-## Kontext
+## Context
 
-Da der Kernel das C#-Modell kennt (Typen, Properties, Attribute), kann er
-Datenschutz-Regeln automatisch auf den Change Feed anwenden — bevor personenbezogene
-Daten jemals einen unveränderlichen Feed erreichen. Das ist das Alleinstellungsmerkmal
-von vNEXT gegenüber Outbox- und Event-Sourcing-Systemen, die dieses Problem Jahre später
-schmerzhaft einholt.
+Because the kernel knows the C# model (types, properties, attributes), it can
+apply privacy rules to the change feed automatically — before personal data ever
+reaches an immutable feed. That is vNEXT's unique selling point over outbox and
+event-sourcing systems, which this problem catches up with painfully years later.
 
-Die vNEXT-Diskussion endete bei "nur Fluent-Konfiguration" (weil Policies
-organisationsabhängig sind). Dagegen spricht: Das Modell ist der Ort der Wahrheit — wer
-die Klasse liest, soll sehen, dass `Email` sensibel ist.
+The vNEXT discussion ended at "fluent configuration only" (because policies are
+organization-dependent). Against that speaks: the model is the place of truth —
+whoever reads the class should see that `Email` is sensitive.
 
-Vorarbeit aus v1, die konzeptionell übernommen wird:
+Prior work from v1 that is adopted conceptually:
 [adr-2026-06-sensitive-data-reference-pattern.md](../../analyses/adr-2026-06-sensitive-data-reference-pattern.md)
-(Hybrid-Modell: Referenzen im Feed, versionierter Sensitive Data Store, explizite
-opt-in-Auflösung statt unsichtbarer Magie).
+(hybrid model: references in the feed, a versioned sensitive data store, explicit
+opt-in resolution instead of invisible magic).
 
-## Entscheidung
+## Decision
 
-1. **Policy-Katalog** (Wirkung auf den Diff-Eintrag eines Feldes, vgl. ADR-004):
+1. **Policy catalog** (effect on a field's diff entry, cf. ADR-004):
 
-   | Policy       | Attribut          | Diff-Eintrag                          |
+   | Policy       | Attribute         | Diff entry                            |
    |--------------|-------------------|---------------------------------------|
-   | `Track`      | — (Default)       | `{ "old": ..., "new": ... }`          |
+   | `Track`      | — (default)       | `{ "old": ..., "new": ... }`          |
    | `Redact`     | `[SensitiveData]` | `{ "changed": true }`                 |
    | `Reference`  | `[TrackReference]`| `{ "ref": "User/123/email" }`         |
    | `Hash`       | `[TrackHash]`     | `{ "changed": true, "hash": "..." }`  |
-   | `DoNotTrack` | `[DoNotTrack]`    | Feld erscheint nicht im Diff          |
+   | `DoNotTrack` | `[DoNotTrack]`    | field does not appear in the diff     |
 
-2. **Zwei Quellen, klare Priorität**: Attribute an der Klasse setzen den Default;
-   Fluent-Konfiguration beim Store-Setup überschreibt pro Organisation/Deployment:
+2. **Two sources, clear priority**: attributes on the class set the default;
+   fluent configuration at store setup overrides per organization/deployment:
 
    ```csharp
    builder.For<User>()
-       .Property(x => x.Email).StoreAsReference()   // Override: Redact → Reference
+       .Property(x => x.Email).StoreAsReference()   // override: Redact → Reference
        .Property(x => x.LastLoginIp).DoNotTrack();
    ```
 
-3. **Policies wirken beim Erzeugen des Diffs**, in derselben Transaktion wie der Save
-   (ADR-003). Es gibt keinen nachgelagerten Scrubbing-Prozess für neue Changes.
-4. **Referenzen lösen nie automatisch auf.** Change Handler, die den Wert brauchen,
-   lösen explizit über eine Resolver-API auf (opt-in) — gegen den aktuellen
-   Dokumentzustand bzw. den Sensitive Data Store. Wird das Dokument DSGVO-gelöscht,
-   laufen Referenzen ins Leere; der Feed bleibt frei von Inhalten.
-5. **Delete-Diffs respektieren Policies**: Auch das letzte `old` eines sensiblen Feldes
-   erscheint nur als `changed`/`ref`, nie als Klartext.
-6. Das Metamodell (inkl. Policies) wird **einmal beim Start** gebaut (Reflection,
-   später optional Source Generator) — Laufzeitkosten pro Save sind Lookups, keine
-   Reflection.
+3. **Policies act when the diff is produced**, in the same transaction as the save
+   (ADR-003). There is no downstream scrubbing process for new changes.
+4. **References never resolve automatically.** Change handlers that need the value
+   resolve explicitly via a resolver API (opt-in) — against the current document
+   state or the sensitive data store. If the document is GDPR-deleted, references
+   dangle; the feed stays free of content.
+5. **Delete diffs respect policies**: even the last `old` of a sensitive field
+   appears only as `changed`/`ref`, never as plain text.
+6. The metamodel (including policies) is built **once at startup** (reflection,
+   later optionally a source generator) — runtime cost per save is lookups, not
+   reflection.
 
-## Konsequenzen
+## Consequences
 
-- DSGVO-Löschung = Dokument löschen; der Feed muss nicht angefasst werden.
-- Die Klasse dokumentiert die Default-Sensitivität; Compliance-Abweichungen pro
-  Organisation sind ohne Recompile möglich (Fluent).
-- Handler, die sensible Werte brauchen, sind im Code als solche erkennbar
-  (expliziter Resolver-Aufruf) — auditierbar statt magisch.
-- Der Sensitive Data Store (versionierte Auslagerung) wird nur gebraucht, wenn
-  historische sensible Werte über den Dokument-Lebenszyklus hinaus benötigt werden;
-  für den Start genügt das Reference-Pattern gegen das Dokument selbst.
+- GDPR erasure = delete the document; the feed does not need to be touched.
+- The class documents the default sensitivity; per-organization compliance
+  deviations are possible without recompiling (fluent).
+- Handlers that need sensitive values are recognizable as such in code (explicit
+  resolver call) — auditable instead of magical.
+- The sensitive data store (versioned offloading) is only needed when historical
+  sensitive values are required beyond the document lifecycle; for the start, the
+  reference pattern against the document itself suffices.

@@ -1,69 +1,71 @@
-# ADR-014: Bulk-Operationen als set-basierter Patch
+# ADR-014: Bulk operations as set-based patch
 
 ## Status
 
 Accepted (2026-06-11)
 
-## Kontext
+## Context
 
-Anwendungen brauchen Änderungen über mehrere Dokumente: "alle User mit Status X
-archivieren", "diese Liste von IDs bearbeiten". PostgreSQLs `RETURNING OLD/NEW` ist
-set-basiert — ein `UPDATE ... WHERE` liefert **eine Zeile pro betroffenem Dokument**
-mit altem und neuem Zustand. Der Phase-2-Spike-Befund (ADR-003) trägt also auch für
-Mengen: ein Statement, atomar, Diff-Material für jedes Dokument.
+Applications need changes across multiple documents: "archive all users with
+status X", "edit this list of ids". PostgreSQL's `RETURNING OLD/NEW` is
+set-based — an `UPDATE ... WHERE` delivers **one row per affected document** with
+old and new state. The phase-2 spike finding (ADR-003) thus carries over to sets:
+one statement, atomic, diff material for every document.
 
-Gleichzeitig droht hier die Hintertür zum Query-DSL, das vNEXT bewusst nicht sein will
-(ADR-006/009): "Update mit beliebigem WHERE" wäre der Anfang eines LINQ-Providers.
+At the same time, the back door to a query DSL looms here, which vNEXT
+deliberately does not want to be (ADR-006/009): "update with arbitrary WHERE"
+would be the beginning of a LINQ provider.
 
-## Entscheidung
+## Decision
 
-1. **Bulk = Patch, nie Save.** Bulk-Operationen verwenden ausschließlich den
-   Patch-Katalog aus ADR-012 (`Set` / `Remove` / `Increment`) — derselbe Patch über
-   N Dokumente. Ein "Bulk-Save" ganzer Dokumente existiert nicht.
-2. **Zwei Selektionsformen, keine dritte:**
+1. **Bulk = patch, never save.** Bulk operations use exclusively the patch
+   catalog from ADR-012 (`Set` / `Remove` / `Increment`) — the same patch across
+   N documents. A "bulk save" of whole documents does not exist.
+2. **Two selection forms, no third:**
 
    ```csharp
-   // a) Prädikat auf deklarierten Metamodell-Keys (ADR-006)
+   // a) predicate on declared metamodel keys (ADR-006)
    await session.PatchWhereAsync<User>(
        where: w => w.Key(x => x.Status, "inactive"),
        patch: p => p.Set(x => x.Status, "archived"));
 
-   // b) Explizite ID-Liste (WHERE id = ANY(@ids))
+   // b) explicit id list (WHERE id = ANY(@ids))
    await session.PatchManyAsync<User>(ids, p => p.Set(x => x.Status, "archived"));
    ```
 
-   Prädikate sind auf **deklarierte Keys** beschränkt (Gleichheit, ggf. Key-Listen) —
-   genau die Felder, die ohnehin Expression-Indizes tragen. Komplexere Selektionen
-   ermittelt die Anwendung selbst (Projektion, SQL) und nutzt Form (b). Ein freies
-   WHERE-DSL gibt es bewusst nicht.
-3. **Delete analog**: `DeleteWhereAsync` / `DeleteManyAsync` über
-   `DELETE ... RETURNING old.data` — gleiche Mechanik, Delete-Diffs pro Dokument.
-4. **Ein ChangeRecord pro Dokument**, nicht pro Statement. Konsumenten (ADR-009)
-   merken nichts Besonderes; die lückenlose Versionierung pro Dokument bleibt intakt
-   (jede Trefferzeile bumpt ihre eigene `version`). Eine gemeinsame `correlationId`
-   in den Metadaten verbindet die Records einer Bulk-Operation; die Change-Inserts
-   erfolgen gebündelt in derselben Transaktion.
-5. **Kein `expectedVersion`.** Bulk ist per Definition zustandsbasiert: Prädikat und
-   Änderung wirken im selben Statement auf den aktuellen Zustand — es gibt kein
-   Read-Modify-Write-Fenster, die Operation ist in sich konsistent. Parallele
-   optimistische Writer laufen anschließend korrekt in die `ConcurrencyException`
-   (ihre erwartete Version wurde gebumpt).
-6. **Schema-Guard wie ADR-012**: Trifft der Bulk-Patch Dokumente mit veralteter
-   `schema_version`, deren gepatchte Pfade upcasting-betroffen sind, schlägt die
-   Operation typisiert fehl — keine stille Korruption alter Dokumente.
-7. **Policies und Diff-Pipeline unverändert**: Jedes betroffene Dokument durchläuft
-   dieselbe Diff-Erzeugung und Policy-Anwendung wie ein Einzel-Patch (ADR-007).
+   Predicates are limited to **declared keys** (equality, possibly key lists) —
+   exactly the fields that carry expression indexes anyway. More complex
+   selections are determined by the application itself (projection, SQL), which
+   then uses form (b). A free WHERE DSL deliberately does not exist.
+3. **Delete analogously**: `DeleteWhereAsync` / `DeleteManyAsync` via
+   `DELETE ... RETURNING old.data` — same mechanics, delete diffs per document.
+4. **One ChangeRecord per document**, not per statement. Consumers (ADR-009)
+   notice nothing special; gapless versioning per document stays intact (every
+   hit row bumps its own `version`). A shared `correlationId` in the metadata
+   connects the records of one bulk operation; the change inserts happen batched
+   in the same transaction.
+5. **No `expectedVersion`.** Bulk is state-based by definition: predicate and
+   change act on the current state within the same statement — there is no
+   read-modify-write window; the operation is internally consistent. Parallel
+   optimistic writers subsequently run correctly into the `ConcurrencyException`
+   (their expected version was bumped).
+6. **Schema guard as in ADR-012**: if the bulk patch hits documents with an
+   outdated `schema_version` whose patched paths are affected by upcasting, the
+   operation fails typed — no silent corruption of old documents.
+7. **Policies and the diff pipeline unchanged**: every affected document goes
+   through the same diff creation and policy application as a single patch
+   (ADR-007).
 
-## Konsequenzen
+## Consequences
 
-- Massenänderungen sind ein einziger Roundtrip statt N — und atomar: entweder alle
-  Treffer samt ChangeRecords oder nichts.
-- Key-Prädikate sind automatisch indexgestützt (Synergie mit ADR-006).
-- Große Treffermengen bedeuten eine große Transaktion und einen Feed-Schwall —
-  Batch-Begrenzung (z. B. ID-Listen chunken) ist Anwendungsentscheidung und wird
-  dokumentiert. Sehr lange Bulk-Transaktionen verzögern außerdem den Feed-Fortschritt
-  aller Konsumenten (Snapshot-Lesen, ADR-010).
-- Validierung pro Dokument (ADR-012 Punkt 5) ist bei großen Mengen teuer; Bulk-Patches
-  auf validierte Typen deserialisieren jede Trefferzeile — bewusster Trade-off des
-  Aufrufers.
-- Umsetzung in Phase 5 zusammen mit dem Einzel-Patch (gemeinsame SQL-Generierung).
+- Mass changes are a single roundtrip instead of N — and atomic: either all hits
+  including their ChangeRecords, or nothing.
+- Key predicates are automatically index-backed (synergy with ADR-006).
+- Large hit sets mean a large transaction and a feed surge — batch limiting
+  (e.g. chunking id lists) is an application decision and is documented. Very
+  long bulk transactions also delay feed progress for all consumers (snapshot
+  reading, ADR-010).
+- Per-document validation (ADR-012 point 5) is expensive at scale; bulk patches
+  on validated types deserialize every hit row — a deliberate trade-off of the
+  caller.
+- Implemented in phase 5 together with the single patch (shared SQL generation).

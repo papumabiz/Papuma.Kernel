@@ -1,71 +1,70 @@
-# ADR-015: DSGVO-Werkzeuge — Mechanismen im Kernel, Rechtsentscheidungen in der Anwendung
+# ADR-015: GDPR tooling — mechanisms in the kernel, legal decisions in the application
 
 ## Status
 
-Accepted (2026-06-12) · Umgesetzt in Phase 12 (Guide: [gdpr.md](../gdpr.md))
+Accepted (2026-06-12) · Implemented in phase 12 (guide: [gdpr.md](../gdpr.md))
 
-## Kontext
+## Context
 
-Über die Policies (ADR-007) hinaus stellen sich drei Betroffenenrechte-Fragen:
-Export/Auskunft (Art. 15/20), Löschung (Art. 17) und der Konflikt mit
-Aufbewahrungspflichten (Art. 17 Abs. 3 / Art. 18 — z. B. HGB/AO-Fristen von 6–10
-Jahren bei bestehendem Geschäftsverhältnis), der **pro Tenant unterschiedlich**
-ausfällt: Tenant A darf wirklich löschen, Tenant B hat berechtigtes Interesse bzw.
-gesetzliche Pflicht zur Aufbewahrung.
+Beyond the policies (ADR-007), three data-subject-rights questions arise:
+export/access (Art. 15/20), erasure (Art. 17), and the conflict with retention
+obligations (Art. 17 (3) / Art. 18 — e.g. German HGB/AO periods of 6–10 years
+within an ongoing business relationship), which plays out **differently per
+tenant**: tenant A may truly erase, tenant B has a legitimate interest or a legal
+duty to retain.
 
-Zusätzlich existiert eine Lücke: Dokument-Löschung bereinigt den Feed nur für
-**policy-geschützte** Felder. Ein getracktes Feld mit personenbezogenen Daten
-(z. B. `Name` ohne Attribut) bleibt nach dem Delete im Klartext in historischen
-Diffs stehen.
+Additionally a gap exists: document deletion cleans the feed only for
+**policy-protected** fields. A tracked field containing personal data (e.g.
+`Name` without an attribute) remains in plain text in historical diffs after the
+delete.
 
-## Entscheidung
+## Decision
 
-Die Trennlinie folgt dem Projektions-Prinzip (ADR-009): **Der Kernel liefert
-ausführende Mechanismen über das, was nur er kennt (Metamodell, Historie, Scopes);
-die Anwendung trifft die fachlich-juristischen Entscheidungen.**
+The dividing line follows the projection principle (ADR-009): **the kernel
+provides executing mechanisms over what only it knows (metamodel, history,
+scopes); the application makes the domain-legal decisions.**
 
-### Kernel-Mechanismen (Phase 12)
+### Kernel mechanisms (phase 12)
 
-1. **Export-Assembly** (Art. 15/20): Gegeben Dokument-Referenzen und
-   Event-Selektoren (Payload-Pfad = Wert, z. B. `userId = X`) erzeugt der Kernel
-   einen strukturierten JSON-Export: aktueller Zustand + Änderungshistorie
-   (Diffs/Metadata) + Events. Policy-geschützte Felder erscheinen als
-   Änderungsmarker, nie als Wertverlauf — die Minimierung aus ADR-007 wirkt
-   automatisch auch im Export.
-2. **Daten-Inventar** (Art.-30-Unterstützung): Report aus dem Metamodell — welche
-   Typen/Felder welche Policies tragen, welche Event-Typen welche Retention haben.
-3. **Lösch-Primitiv pro Scope**: Dokument-Hard-Delete (existiert) **plus
-   `RedactHistoryAsync(documentRef, paths?)`** — nachträgliches Umschreiben
-   historischer Diff-Einträge und Event-Payload-Felder auf Redacted-Marker, mit
-   Audit-Metadaten (wer/wann/warum). Schließt die Lücke der getrackten PII-Felder.
-   Das verletzt bewusst die Append-only-Reinheit — Art. 17 schlägt
-   Architekturästhetik. Konsequenz bleibt konsistent zu ADR-008: Rollback über
-   redactete Historie scheitert typisiert.
+1. **Export assembly** (Art. 15/20): given document references and event
+   selectors (payload path = value, e.g. `userId = X`), the kernel produces a
+   structured JSON export: current state + change history (diffs/metadata) +
+   events. Policy-protected fields appear as change markers, never as value
+   histories — the minimization from ADR-007 automatically applies to the export
+   as well.
+2. **Data inventory** (Art.-30 support): a report from the metamodel — which
+   types/fields carry which policies, which event types have which retention.
+3. **Erasure primitive per scope**: document hard delete (exists) **plus
+   `RedactHistoryAsync(documentRef, paths?)`** — retroactively rewriting
+   historical diff entries and event payload fields to redaction markers, with
+   audit metadata (who/when/why). Closes the gap of tracked PII fields. This
+   deliberately violates append-only purity — Art. 17 beats architectural
+   aesthetics. The consequence stays consistent with ADR-008: rollback across
+   redacted history fails typed.
 
-### Anwendungssache (bewusst keine Framework-Magie)
+### Application business (deliberately no framework magic)
 
-1. **Subjekt → Daten-Mapping**: Welche Dokumente/Events zu einer Person gehören,
-   ist Domänenwissen — die Anwendung liefert die Referenzen (über ihre Keys und
-   Projektionen).
-2. **Rechtsgrundlagen-Entscheidung pro Tenant/Datenkategorie**: Löschen vs.
-   Einschränken vs. Aufbewahren ist juristische Konfiguration. Der Kernel
-   exekutiert pro Scope; die Scope-Isolation garantiert strukturell, dass die
-   Löschung in Tenant A den aufbewahrungspflichtigen Tenant B nicht berührt.
-   Für den Aufbewahrungsfall ist das Muster **Einschränkung statt Löschung**
-   (Art. 18): Sperrstatus als Dokumentfeld, Verarbeitung anwendungsseitig
-   einschränken, Lösch-Fälligkeit vormerken.
-3. **Fristen-Scheduling** ("nach 10 Jahren wirklich löschen"): Anwendungs-Workflow,
-   der terminiert das Kernel-Primitiv aufruft.
+1. **Subject → data mapping**: which documents/events belong to a person is
+   domain knowledge — the application supplies the references (via its keys and
+   projections).
+2. **Legal-basis decision per tenant/data category**: erase vs. restrict vs.
+   retain is legal configuration. The kernel executes per scope; scope isolation
+   structurally guarantees that erasure in tenant A does not touch the
+   retention-obligated tenant B. For the retention case, the pattern is
+   **restriction instead of erasure** (Art. 18): a blocking status as a document
+   field, processing restricted application-side, erasure due date noted.
+3. **Deadline scheduling** ("really erase after 10 years"): an application
+   workflow that calls the kernel primitive on schedule.
 
-## Konsequenzen
+## Consequences
 
-- Auskunfts- und Löschersuchen werden mit wenigen Zeilen App-Code bedienbar, ohne
-  dass das Framework juristische Annahmen einbacken muss, die pro Organisation
-  falsch wären.
-- Die PII-Disziplin bleibt erste Verteidigungslinie: **alle** personenbezogenen
-  Felder gehören unter Policy — dann ist Delete von Haus aus sauber und
-  `RedactHistoryAsync` nur das Sicherheitsnetz für Versäumnisse und Altbestände.
-- `RedactHistoryAsync` ist ein scharfes Werkzeug (irreversibel): Audit-Metadaten
-  verpflichtend, kein Bestandteil normaler Anwendungsabläufe.
-- Das Inventar macht Policy-Lücken sichtbar (Review-Werkzeug: "welche Felder sind
-  *nicht* geschützt?") — präventiv gegen genau die Lücke, die dieses ADR schließt.
+- Access and erasure requests become servable with a few lines of app code,
+  without the framework baking in legal assumptions that would be wrong per
+  organization.
+- PII discipline remains the first line of defense: **all** personal fields
+  belong under a policy — then delete is clean out of the box and
+  `RedactHistoryAsync` is only the safety net for omissions and legacy data.
+- `RedactHistoryAsync` is a sharp tool (irreversible): audit metadata mandatory,
+  not part of normal application flows.
+- The inventory makes policy gaps visible (review tool: "which fields are *not*
+  protected?") — preventive against exactly the gap this ADR closes.

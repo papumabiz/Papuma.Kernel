@@ -1,37 +1,37 @@
-# ADR-013: Fachliche Events — Translator, Event-Log und die Grenze dazwischen
+# ADR-013: Domain events — translator, event log and the boundary between them
 
 ## Status
 
 Accepted (2026-06-11)
 
-## Kontext
+## Context
 
-ADR-011 hält fachliche Events aus dem Storage Layer heraus: Der Kernel kennt nur
-`DocumentChanged`. Das deckt aber nur Events ab, die **Zustandsübergänge** sind
-(`OrderPaid` aus `status: Pending → Paid`). Es gibt eine zweite Kategorie: **Fakten
-ohne Zustandswahrheit** — `UserLoggedIn`, `EmailSent`, `ExportDownloaded`. Für sie
-existiert kein Diff, aus dem ein Translator etwas ableiten könnte; das Faktum selbst
-ist die Information (Audit, Fraud Detection, Verhaltensanalyse).
+ADR-011 keeps domain events out of the storage layer: the kernel only knows
+`DocumentChanged`. But that covers only events that are **state transitions**
+(`OrderPaid` from `status: Pending → Paid`). There is a second category: **facts
+without state truth** — `UserLoggedIn`, `EmailSent`, `ExportDownloaded`. For
+them, no diff exists from which a translator could derive anything; the fact
+itself is the information (audit, fraud detection, behavioral analysis).
 
-v1 trennte dafür bereits `change_feed` und `business_event_log` — diese Trennung kehrt
-als bewusstes vNEXT-Konzept zurück.
+v1 already separated `change_feed` and `business_event_log` for this — that
+separation returns as a deliberate vNEXT concept.
 
-## Entscheidung
+## Decision
 
-Fachliche Events werden nach drei Fällen modelliert:
+Domain events are modeled according to three cases:
 
-| Fall | Beispiel | Modellierung |
-|------|----------|--------------|
-| **Zustandsübergang** | `OrderPlaced`, `OrderPaid` | Dokumentänderung ist die Wahrheit; Translator-Handler leitet das Event aus dem Diff ab (ADR-011). Rückwirkend per Rebuild erzeugbar. |
-| **Faktum ohne Zustand** | `UserLoggedIn`, `EmailSent` | Explizites `session.Append(...)` in das **append-only Event-Log** (unten). |
-| **Trigger** ("danach X auslösen") | Bestätigungsmail nach Bestellung | Kein gespeichertes Event — Handler-Subscription auf Fall 1 oder 2 (ADR-009). |
+| Case | Example | Modeling |
+|------|---------|----------|
+| **State transition** | `OrderPlaced`, `OrderPaid` | The document change is the truth; a translator handler derives the event from the diff (ADR-011). Retroactively producible via rebuild. |
+| **Fact without state** | `UserLoggedIn`, `EmailSent` | Explicit `session.Append(...)` into the **append-only event log** (below). |
+| **Trigger** ("do X afterwards") | Confirmation email after an order | No stored event — a handler subscription on case 1 or 2 (ADR-009). |
 
-Entscheidungsregel: *Muss sich das System einen Zustand merken → Dokument. Muss es sich
-ein Vorkommnis merken → Event-Log. Soll nur etwas passieren → Handler.*
+Decision rule: *Must the system remember a state → document. Must it remember an
+occurrence → event log. Should something merely happen → handler.*
 
-### Das Event-Log
+### The event log
 
-1. **Eigene Tabelle**, gleiche Infrastruktur-Muster wie der Change Feed:
+1. **Its own table**, same infrastructure patterns as the change feed:
 
    ```sql
    CREATE TABLE papuma.event
@@ -39,49 +39,48 @@ ein Vorkommnis merken → Event-Log. Soll nur etwas passieren → Handler.*
        seq         bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
        tenant_id   text        NOT NULL,
        event_type  text        NOT NULL,
-       payload     jsonb       NOT NULL,   -- policy-bereinigt
-       metadata    jsonb       NOT NULL,   -- CorrelationId, Actor, ...
+       payload     jsonb       NOT NULL,   -- policy-applied
+       metadata    jsonb       NOT NULL,   -- correlationId, actor, ...
        occurred_at timestamptz NOT NULL DEFAULT now(),
        txid        xid8        NOT NULL DEFAULT pg_current_xact_id()
    );
    ```
 
-2. **Append läuft in der Session-Transaktion**: `session.Append(new UserLoggedIn(...))`
-   committet atomar mit etwaigen Saves/Patches derselben Session — Faktum und
-   Zustandsänderung (z. B. `lastLoginAt`-Patch) sind nie inkonsistent und teilen die
-   `correlationId`.
-3. **Event-Typen sind registrierte C#-Typen im Metamodell** — damit gelten die
-   Datenschutz-Policies (ADR-007) auch hier: `[SensitiveData]` auf einer IP-Adresse
-   wirkt im Payload genauso wie im Diff. Schema-Evolution folgt den additiven Regeln
-   aus ADR-005; transformierende Änderungen erfordern einen neuen Event-Typ
-   (Events sind unveränderliche Fakten, es gibt kein Upcasting beim Lesen alter Events).
-4. **Konsum über dieselbe Processing-Engine** (ADR-009/010): Handler abonnieren den
-   Change Feed, das Event-Log oder beides; Checkpoints, Retry, snapshot-basiertes
-   Polling und Wakeup funktionieren identisch (eigene Checkpoint-Position pro Feed).
-   Es gibt **keine globale Ordnung über beide Feeds hinweg** — wer Zusammenhänge
-   braucht, korreliert über `correlationId`.
-5. **Retention ist hier legitim**: Anders als ChangeRecords (an Dokumentversionen
-   gebunden) dürfen Events nach Typ-spezifischen Fristen gelöscht werden
-   (`UserLoggedIn` nach 90 Tagen). Das Event-Log ist Faktenspeicher, kein
-   Versionsspeicher.
+2. **Append runs in the session transaction**: `session.Append(new UserLoggedIn(...))`
+   commits atomically with any saves/patches of the same session — the fact and
+   the state change (e.g. a `lastLoginAt` patch) are never inconsistent and share
+   the `correlationId`.
+3. **Event types are registered C# types in the metamodel** — so the privacy
+   policies (ADR-007) apply here too: `[SensitiveData]` on an IP address acts on
+   the payload just as it does on a diff. Schema evolution follows the additive
+   rules of ADR-005; transforming changes require a new event type (events are
+   immutable facts; there is no upcasting when reading old events).
+4. **Consumption via the same processing engine** (ADR-009/010): handlers
+   subscribe to the change feed, the event log, or both; checkpoints, retry,
+   snapshot-based polling and wakeup work identically (own checkpoint position per
+   feed). There is **no global order across the two feeds** — whoever needs
+   relationships correlates via `correlationId`.
+5. **Retention is legitimate here**: unlike ChangeRecords (bound to document
+   versions), events may be deleted after type-specific periods (`UserLoggedIn`
+   after 90 days). The event log is a fact store, not a version store.
 
-### Die rote Linie
+### The red line
 
-Das Event-Log ist **niemals Replay-Quelle für Zustand**. Kein Dokument wird aus Events
-rekonstruiert; kein Upcaster, kein Aggregat-Rebuild hängt daran. Wer dorthin will,
-will Event Sourcing — und damit ein anderes Produkt (vgl. ADR-002).
+The event log is **never a replay source for state**. No document is
+reconstructed from events; no upcaster, no aggregate rebuild depends on it.
+Whoever wants to go there wants event sourcing — and with it a different product
+(cf. ADR-002).
 
-## Konsequenzen
+## Consequences
 
-- `UserLoggedIn`-artige Fakten haben einen first-class Platz, ohne das Dokumentmodell
-  zu verbiegen (kein Missbrauch von Dokumenten als Event-Container, keine
-  Version-Explosion durch hochfrequente Pseudo-Patches).
-- ADR-011 bleibt unangetastet: Der Kernel interpretiert weiterhin nichts — bei Fall 1
-  leitet die Processing-Schicht ab, bei Fall 2 spricht die Anwendung das Faktum
-  explizit aus.
-- Zwei Feeds bedeuten zwei Checkpoint-Räume; das ist bewusst einfacher als eine
-  vereinheitlichte Sequenz (v1s `kind`-Spalte im unified Feed), kostet aber globale
-  Ordnung zwischen Changes und Events — akzeptiert, Korrelation statt Ordnung.
-- Fall-1-Events bleiben die erste Wahl, wo immer ein Zustandsübergang existiert:
-  Sie sind rückwirkend erzeugbar und können nicht vergessen werden (der Diff entsteht
-  immer); `Append` dagegen kann ein Entwickler vergessen — Code-Review-Thema.
+- `UserLoggedIn`-style facts have a first-class place without bending the
+  document model (no abuse of documents as event containers, no version explosion
+  through high-frequency pseudo-patches).
+- ADR-011 stays untouched: the kernel still interprets nothing — in case 1 the
+  processing layer derives, in case 2 the application states the fact explicitly.
+- Two feeds mean two checkpoint spaces; that is deliberately simpler than a
+  unified sequence (v1's `kind` column in a unified feed), but costs global
+  ordering between changes and events — accepted, correlation over ordering.
+- Case-1 events remain the first choice wherever a state transition exists: they
+  are retroactively producible and cannot be forgotten (the diff always arises);
+  `Append`, by contrast, can be forgotten by a developer — a code-review topic.

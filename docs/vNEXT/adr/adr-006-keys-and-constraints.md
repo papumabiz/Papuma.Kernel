@@ -1,22 +1,23 @@
-# ADR-006: Keys und Constraints über Metamodell und Expression-Indizes
+# ADR-006: Keys and constraints via metamodel and expression indexes
 
 ## Status
 
 Accepted (2026-06-11)
 
-## Kontext
+## Context
 
-Der klassische Dokument-Store-Zyklus: "JSON ist flexibel → wo sind meine Constraints? →
-wir bauen relationale Strukturen nach." Ohne Plan passiert das ad-hoc und inkonsistent.
-Reale Anforderungen, die nicht wegdiskutierbar sind:
+The classic document-store cycle: "JSON is flexible → where are my constraints? →
+we rebuild relational structures." Without a plan this happens ad hoc and
+inconsistently. Real requirements that cannot be argued away:
 
-- **Uniqueness** (z. B. E-Mail pro Tenant eindeutig),
-- **Lookup-Queries** auf einzelne Felder (Login per E-Mail, Suche per Kundennummer),
-- **Referenzen zwischen Aggregaten** (Order → Customer).
+- **Uniqueness** (e.g. email unique per tenant),
+- **Lookup queries** on single fields (login by email, search by customer number),
+- **References between aggregates** (Order → Customer).
 
-## Entscheidung
+## Decision
 
-1. Keys werden **im Metamodell deklariert** (Attribut oder Fluent, vgl. ADR-007-Muster):
+1. Keys are **declared in the metamodel** (attribute or fluent, cf. the ADR-007
+   pattern):
 
    ```csharp
    builder.For<User>()
@@ -24,8 +25,8 @@ Reale Anforderungen, die nicht wegdiskutierbar sind:
        .LookupKey(x => x.CustomerNumber);
    ```
 
-2. Der Kernel materialisiert daraus **partielle Expression-Indizes** auf der
-   Dokumenttabelle:
+2. From this, the kernel materializes **partial expression indexes** on the
+   document table:
 
    ```sql
    CREATE UNIQUE INDEX ux_user_email
@@ -33,28 +34,30 @@ Reale Anforderungen, die nicht wegdiskutierbar sind:
        WHERE document_type = 'User';
    ```
 
-   Unique-Verletzungen werden als typisierte `UniqueKeyViolationException` (mit Key-Name)
-   an den Aufrufer gegeben.
-3. **Lookup-API** entlang der deklarierten Keys — bewusst kein LINQ-Provider:
+   Unique violations are surfaced to the caller as a typed
+   `UniqueKeyViolationException` (with the key name).
+3. **Lookup API** along the declared keys — deliberately no LINQ provider:
 
    ```csharp
    User? user = await session.LoadByKeyAsync<User>(x => x.Email, "harry@example.com");
    ```
 
-   Alles darüber hinaus (Ad-hoc-Queries, Reporting) gehört in Projektionen (ADR-009).
-4. **Referenzen zwischen Aggregaten** sind fachliche IDs ohne Foreign-Key-Erzwingung.
-   Referentielle Konsistenz ist Sache der Anwendung bzw. von Change Handlern
-   (z. B. ein Handler, der auf `Customer`-Delete reagiert). Der Kernel bietet dafür
-   keine Kaskaden — bewusst.
-5. Index-DDL ist Teil des Schema-Managements des Kernels (idempotentes
-   `EnsureSchemaAsync` beim Start bzw. explizites CLI/Setup), nicht manueller Wildwuchs.
+   Everything beyond that (ad-hoc queries, reporting) belongs in projections
+   (ADR-009).
+4. **References between aggregates** are domain ids without foreign-key
+   enforcement. Referential consistency is the application's business or that of
+   change handlers (e.g. a handler reacting to a `Customer` delete). The kernel
+   offers no cascades for this — deliberately.
+5. Index DDL is part of the kernel's schema management (idempotent
+   `EnsureSchemaAsync` at startup or explicit CLI/setup), not manual sprawl.
 
-## Konsequenzen
+## Consequences
 
-- Constraints existieren genau dort, wo sie deklariert sind — auffindbar, versioniert,
-  konsistent benannt.
-- Kein schleichender Rückbau zur relationalen Welt: Was kein Key ist, bekommt keinen
-  Index auf dem Write Store; Reporting-Bedürfnisse wandern in Projektionen.
-- Partielle Indizes pro Dokumenttyp halten die Indexmenge klein und treffsicher.
-- Cross-Aggregate-Integrität ist schwächer als bei Foreign Keys — akzeptierter Preis;
-  wo harte Konsistenz nötig ist, ist es ein Hinweis, dass die Aggregatgrenze falsch liegt.
+- Constraints exist exactly where they are declared — discoverable, versioned,
+  consistently named.
+- No creeping return to the relational world: what is not a key gets no index on
+  the write store; reporting needs move into projections.
+- Partial indexes per document type keep the index set small and precise.
+- Cross-aggregate integrity is weaker than with foreign keys — an accepted price;
+  where hard consistency is needed, that is a hint the aggregate boundary is in
+  the wrong place.

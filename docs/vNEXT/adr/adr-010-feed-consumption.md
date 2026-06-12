@@ -1,28 +1,29 @@
-# ADR-010: Feed-Konsum — snapshot-basiertes Polling mit LISTEN/NOTIFY-Wakeup
+# ADR-010: Feed consumption — snapshot-based polling with LISTEN/NOTIFY wakeup
 
 ## Status
 
 Accepted (2026-06-11)
 
-## Kontext
+## Context
 
-Der Change Feed wird über eine `seq`-Spalte (Identity) geordnet. Naives Polling mit
-`WHERE seq > @lastSeq` verliert Änderungen: Transaktion A zieht `seq = 100`, committet
-aber **nach** Transaktion B mit `seq = 101`. Ein Poller, der 101 bereits gesehen und
-seinen Checkpoint gesetzt hat, sieht 100 nie.
+The change feed is ordered by a `seq` column (identity). Naive polling with
+`WHERE seq > @lastSeq` loses changes: transaction A draws `seq = 100` but commits
+**after** transaction B with `seq = 101`. A poller that has already seen 101 and
+advanced its checkpoint never sees 100.
 
-Die v1-Analyse [polling-vs-listen-analysis.md](../../analyses/polling-vs-listen-analysis.md)
-hat bereits ergeben: LISTEN/NOTIFY allein ist als Wahrheitsquelle ungeeignet
-(Verbindungsabrisse, keine Persistenz), Polling allein ist träge oder teuer.
+The v1 analysis [polling-vs-listen-analysis.md](../../analyses/polling-vs-listen-analysis.md)
+already established: LISTEN/NOTIFY alone is unsuitable as the source of truth
+(connection drops, no persistence), polling alone is sluggish or expensive.
 
-## Entscheidung
+## Decision
 
-1. **Polling ist die Wahrheit, NOTIFY ist nur der Wecker.** Die Engine pollt den Feed;
-   ein `NOTIFY papuma_changes` am Ende jeder Save-Transaktion weckt wartende Poller
-   sofort auf. Verpasste Notifications kosten nur Latenz (max. Poll-Intervall), nie Daten.
-2. **Lückenloses Lesen über Transaktions-Snapshots.** Jeder ChangeRecord speichert
-   `txid = pg_current_xact_id()` (xid8). Der Poller liest nur Changes, deren Transaktion
-   sicher abgeschlossen und für alle sichtbar ist:
+1. **Polling is the truth, NOTIFY is only the alarm clock.** The engine polls the
+   feed; a `NOTIFY papuma_changes` at the end of every save transaction wakes
+   waiting pollers immediately. Missed notifications cost only latency (at most
+   one poll interval), never data.
+2. **Gapless reading via transaction snapshots.** Every ChangeRecord stores
+   `txid = pg_current_xact_id()` (xid8). The poller reads only changes whose
+   transaction is safely finished and visible to everyone:
 
    ```sql
    SELECT ...
@@ -33,21 +34,22 @@ hat bereits ergeben: LISTEN/NOTIFY allein ist als Wahrheitsquelle ungeeignet
    LIMIT @batchSize;
    ```
 
-   Damit kann keine noch offene Transaktion mit kleinerer `seq` mehr "hinter" dem
-   Checkpoint einschlagen — der Checkpoint darf gefahrlos auf die höchste gelesene
-   `seq` gesetzt werden.
-3. **Ein Poll-Zyklus pro Prozess**, Verteilung der Changes an Handler in-process.
-   Mehrere konkurrierende Konsumenten-Prozesse koordinieren sich über
-   `FOR UPDATE SKIP LOCKED` auf der Checkpoint-Tabelle (ein Leader pro Handler-Gruppe) —
-   kein verteilter Konsens im Kernel.
+   With this, no still-open transaction with a smaller `seq` can land "behind" the
+   checkpoint anymore — the checkpoint can safely be set to the highest `seq`
+   read.
+3. **One poll cycle per process**, distribution of changes to handlers in-process.
+   Multiple competing consumer processes coordinate via `FOR UPDATE SKIP LOCKED`
+   on the checkpoint table (one leader per handler group) — no distributed
+   consensus in the kernel.
 
-## Konsequenzen
+## Consequences
 
-- Keine verlorenen Changes bei normaler MVCC-Parallelität; das Verfahren braucht keine
-  künstlichen Lag-Fenster oder Heuristiken.
-- Sehr lange laufende Schreib-Transaktionen halten `pg_snapshot_xmin` und damit den
-  Feed-Fortschritt auf — akzeptiert und beobachtbar (Metrik "feed lag"); lange
-  Transaktionen sind ohnehin ein Anti-Pattern des Write-Pfads (ADR-003: ein Save, eine
-  kurze Transaktion).
-- Latenz im Normalfall ≈ NOTIFY-Roundtrip (Millisekunden), im Störungsfall ≤ Poll-Intervall.
-- `xid8` ist wraparound-sicher; keine Sonderbehandlung nötig.
+- No lost changes under normal MVCC parallelism; the approach needs no artificial
+  lag windows or heuristics.
+- Very long running write transactions hold back `pg_snapshot_xmin` and thus feed
+  progress — accepted and observable ("feed lag" metric); long transactions are an
+  anti-pattern of the write path anyway (ADR-003: one save, one short
+  transaction).
+- Latency in the normal case ≈ one NOTIFY roundtrip (milliseconds), in the failure
+  case ≤ the poll interval.
+- `xid8` is wraparound-safe; no special handling needed.

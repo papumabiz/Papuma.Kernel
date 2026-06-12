@@ -1,45 +1,47 @@
-# ADR-008: Rollback ist ein Update mit Metadata, kein eigener Operationstyp
+# ADR-008: Rollback is an update with metadata, not its own operation type
 
 ## Status
 
 Accepted (2026-06-11)
 
-## Kontext
+## Context
 
-Die Idee "Events: Insert / Update / Delete / Rollback" lag nahe. Aber: Ein Rollback auf
-Version n ist technisch eine Markierung, fachlich jedoch schlicht eine Zustandsänderung.
-Projektionen interessiert nur der State-Übergang — ein vierter Operationstyp würde jeden
-Handler zwingen, einen Sonderfall zu behandeln, der keiner ist.
+The idea "events: insert / update / delete / rollback" suggested itself. But: a
+rollback to version n is technically a marker, while in domain terms it is simply
+a state change. Projections only care about the state transition — a fourth
+operation type would force every handler to handle a special case that is not
+one.
 
-## Entscheidung
+## Decision
 
-1. `ChangeOperation` bleibt **Insert / Update / Delete**.
-2. Rollback ist eine Kernel-API, die den Zielzustand rekonstruiert (Diffs rückwärts
-   anwenden, ADR-004) und als **normales Update** speichert — mit Metadata:
+1. `ChangeOperation` stays **Insert / Update / Delete**.
+2. Rollback is a kernel API that reconstructs the target state (applying diffs
+   backwards, ADR-004) and stores it as a **normal update** — with metadata:
 
    ```csharp
    await session.RollbackAsync<User>(id, toVersion: 3, expectedVersion: 7);
    ```
 
-   erzeugt einen ChangeRecord mit `version = 8` und
+   produces a ChangeRecord with `version = 8` and
 
    ```json
    { "isRollback": true, "restoredVersion": 3 }
    ```
 
-3. Die Versionshistorie ist **append-only**: Ein Rollback löscht keine Changes, er fügt
-   einen hinzu. Version 8 hat denselben Inhalt wie Version 3 — das Log bleibt lückenlos
-   und auditierbar.
-4. Handler, die Rollbacks gesondert behandeln wollen, lesen `metadata.isRollback` —
-   müssen aber nicht.
+3. The version history is **append-only**: a rollback deletes no changes, it adds
+   one. Version 8 has the same content as version 3 — the log stays gapless and
+   auditable.
+4. Handlers that want to treat rollbacks specially read `metadata.isRollback` —
+   but they don't have to.
 
-## Konsequenzen
+## Consequences
 
-- Projektionen bleiben dumm: drei Operationen, fertig.
-- Audit bleibt vollständig: Wer wann worauf zurückgesetzt hat, steht im Feed.
-- Rollback über Schema-Versionen hinweg läuft durch die Upcaster-Pipeline (ADR-005),
-  bevor gespeichert wird — der rekonstruierte Zustand wird immer im aktuellen Schema
-  geschrieben.
-- Policy-redactete Felder (ADR-007) sind aus Diffs nicht rekonstruierbar; ein Rollback
-  stellt für solche Felder den Wert aus dem referenzierten Speicherort wieder her oder
-  schlägt typisiert fehl — stillschweigend falsche Werte gibt es nicht.
+- Projections stay dumb: three operations, done.
+- The audit trail stays complete: who rolled back what to where and when is in the
+  feed.
+- A rollback across schema versions runs through the upcaster pipeline (ADR-005)
+  before being stored — the reconstructed state is always written in the current
+  schema.
+- Policy-redacted fields (ADR-007) are not reconstructible from diffs; a rollback
+  either restores such fields from the referenced storage location or fails typed
+  — silently wrong values do not exist.

@@ -1,26 +1,26 @@
-# ADR-003: Atomarer Write-Pfad mit optimistischer Concurrency und RETURNING OLD/NEW
+# ADR-003: Atomic write path with optimistic concurrency and RETURNING OLD/NEW
 
 ## Status
 
 Accepted (2026-06-11)
 
-## Kontext
+## Context
 
-Der naive Ablauf "altes Dokument laden → diffen → schreiben" hat zwei Probleme:
+The naive flow "load old document → diff → write" has two problems:
 
-1. **Race Condition**: Zwischen Laden und Schreiben kann ein anderer Writer das Dokument
-   ändern — das Diff wäre dann gegen einen veralteten Zustand gerechnet.
-2. **Zwei Roundtrips** pro Save.
+1. **Race condition**: between loading and writing, another writer can change the
+   document — the diff would then be computed against a stale state.
+2. **Two roundtrips** per save.
 
-PostgreSQL 18 führt `RETURNING OLD/NEW` ein: ein einziges `UPDATE`/`DELETE` liefert
-atomar den Zustand vor und nach der Änderung.
+PostgreSQL 18 introduces `RETURNING OLD/NEW`: a single `UPDATE`/`DELETE` delivers
+the state before and after the change atomically.
 
-## Entscheidung
+## Decision
 
-1. **Optimistische Concurrency ist eine Kernel-Invariante.** Jedes Dokument trägt eine
-   `version` (bigint, startet bei 1). Updates und Deletes erfordern die erwartete
-   Version; ein Treffer von 0 Zeilen wirft `ConcurrencyException`.
-2. **Der Write-Pfad ist ein einziges Statement** pro Dokument:
+1. **Optimistic concurrency is a kernel invariant.** Every document carries a
+   `version` (bigint, starting at 1). Updates and deletes require the expected
+   version; a hit of 0 rows throws `ConcurrencyException`.
+2. **The write path is a single statement** per document:
 
    ```sql
    UPDATE papuma.document
@@ -30,42 +30,42 @@ atomar den Zustand vor und nach der Änderung.
    RETURNING old.data AS old_data, new.data AS new_data, new.version;
    ```
 
-   Insert: `INSERT ... RETURNING new.version` (old ist NULL).
+   Insert: `INSERT ... RETURNING new.version` (old is NULL).
    Delete: `DELETE ... WHERE ... AND version = @expectedVersion RETURNING old.data`.
 
-3. **Diff und ChangeRecord entstehen in derselben Transaktion**: Der Kernel diffed
-   `old_data`/`new_data` in C#, wendet Policies an (ADR-007) und schreibt den
-   `ChangeRecord` vor dem Commit. Dokument und Change sind nie inkonsistent.
-4. Die API macht die erwartete Version explizit:
+3. **Diff and ChangeRecord are created in the same transaction**: the kernel diffs
+   `old_data`/`new_data` in C#, applies policies (ADR-007) and writes the
+   `ChangeRecord` before commit. Document and change are never inconsistent.
+4. The API makes the expected version explicit:
 
    ```csharp
-   SaveResult<T> Save<T>(T document, long expectedVersion);   // 0 = Insert erwartet
+   SaveResult<T> Save<T>(T document, long expectedVersion);   // 0 = insert expected
    ```
 
-   Ein "Last-Writer-Wins"-Modus existiert bewusst nicht.
+   A "last-writer-wins" mode deliberately does not exist.
 
-## Konsequenzen
+## Consequences
 
-- Kein Zeitfenster zwischen Lesen und Schreiben; das Diff ist garantiert gegen den
-  tatsächlich ersetzten Zustand gerechnet.
-- Concurrency-Konflikte sind ein normaler, typisierter Fehlerfall, den Anwendungen
-  behandeln müssen (Reload + Retry oder Fehler an den Aufrufer).
-- **Erkennung ist Framework, Auflösung ist Anwendung.** Das deckt den
-  Mehrbenutzer-Fall vollständig ab: Zwei Benutzer laden Version 5; der zweite Save mit
-  `expectedVersion: 5` schlägt fehl — Lost Updates sind ausgeschlossen. Die `version`
-  wird dazu durch die Anwendung geschleift (Frontend-Feld, ETag, API-Response). Die
-  Version identifiziert den Dokumentinhalt eindeutig; ein separater Inhaltsvergleich
-  wäre redundant.
-- Die `ConcurrencyException` trägt erwartete und aktuelle Version. Damit kann die
-  Anwendung über den Change Feed die zwischenzeitlichen Diffs laden (ADR-004) und
-  präzise Konflikt-UIs bauen ("Feld X wurde zwischenzeitlich geändert") oder bei
-  disjunkten Feldmengen selbst mergen — automatisches Mergen ist bewusst keine
-  Kernel-Funktion (fachliche Entscheidung). Für konfliktarme Mehrbenutzer-Edits auf
-  verschiedenen Feldern ist Patch das passende Primitiv (ADR-012).
-- Die `version` im ChangeRecord ist lückenlos pro Dokument (Unique-Index
-  `(tenant, type, id, version)` erzwingt das zusätzlich).
-- **Neuanlage nach Delete setzt die Versionszählung fort** (Phase-2-Festlegung): Ein
-  Insert startet bei `max(change.version) + 1` derselben Dokument-ID, nicht bei 1 —
-  sonst würde die wiederverwendete ID mit der lückenlosen Change-Historie kollidieren.
-  `expectedVersion: 0` behält die Semantik "Dokument existiert nicht".
-- Bindung an PostgreSQL ≥ 18 (ADR-001) — gewollt.
+- No time window between reading and writing; the diff is guaranteed to be
+  computed against the state that was actually replaced.
+- Concurrency conflicts are a normal, typed failure case that applications must
+  handle (reload + retry, or surface the error to the caller).
+- **Detection is framework, resolution is application.** This fully covers the
+  multi-user case: two users load version 5; the second save with
+  `expectedVersion: 5` fails — lost updates are ruled out. The `version` is
+  threaded through the application for this (frontend field, ETag, API response).
+  The version uniquely identifies the document content; a separate content
+  comparison would be redundant.
+- The `ConcurrencyException` carries the expected and the actual version. With
+  that, the application can load the intermediate diffs via the change feed
+  (ADR-004) and build precise conflict UIs ("field X was changed in the
+  meantime") or merge itself for disjoint field sets — automatic merging is
+  deliberately not a kernel function (a domain decision). For low-conflict
+  multi-user edits on different fields, patch is the fitting primitive (ADR-012).
+- The `version` in the ChangeRecord is gapless per document (the unique index
+  `(tenant, type, id, version)` additionally enforces this).
+- **Re-creation after delete continues the version count** (phase-2 ruling): an
+  insert starts at `max(change.version) + 1` of the same document id, not at 1 —
+  otherwise the reused id would collide with the gapless change history.
+  `expectedVersion: 0` keeps the semantics "document does not exist".
+- Binding to PostgreSQL ≥ 18 (ADR-001) — intended.

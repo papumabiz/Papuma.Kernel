@@ -1,27 +1,27 @@
-# ADR-011: Keine fachlichen Events im Storage Layer
+# ADR-011: No domain events in the storage layer
 
 ## Status
 
 Accepted (2026-06-11)
 
-## Kontext
+## Context
 
-Ist `Status: Pending → Paid` ein `Update` oder ein `OrderPaid`? Beides — aber auf
-verschiedenen Ebenen. Würde der Storage Layer fachliche Events erzeugen, müsste das
-Datenmodell jede fachliche Interpretation vorwegnehmen, und der Kernel wäre wieder beim
-Event-Sourcing-Zwang, den vNEXT gerade vermeidet.
+Is `Status: Pending → Paid` an `Update` or an `OrderPaid`? Both — but on different
+levels. If the storage layer produced domain events, the data model would have to
+anticipate every domain interpretation, and the kernel would be back at the
+event-sourcing mandate vNEXT is trying to avoid.
 
-v1 trennte bereits `change_feed` (technisch) von `business_event_log` (fachlich) —
-diese Trennung bleibt, rückt aber vollständig aus dem Kernel heraus.
+v1 already separated `change_feed` (technical) from `business_event_log` (domain)
+— this separation remains, but moves entirely out of the kernel.
 
-## Entscheidung
+## Decision
 
-1. Der Kernel speichert ausschließlich **`DocumentChanged`** (Insert/Update/Delete mit
-   Diff, ADR-002/004). Es gibt keine Event-Typen, keine Event-Registry, kein
-   Event-Publishing im Storage Layer.
-2. **Fachliche Events sind ein Processing-Konzern**: Ein gewöhnlicher Change Handler
-   (ADR-009) übersetzt Zustandsübergänge in fachliche Events und publiziert sie wohin
-   auch immer (Tabelle, Bus, Webhook):
+1. The kernel stores exclusively **`DocumentChanged`** (insert/update/delete with
+   diff, ADR-002/004). There are no event types, no event registry, no event
+   publishing in the storage layer.
+2. **Domain events are a processing concern**: an ordinary change handler
+   (ADR-009) translates state transitions into domain events and publishes them
+   wherever (table, bus, webhook):
 
    ```csharp
    public sealed class OrderEventTranslator : IChangeHandler
@@ -34,16 +34,17 @@ diese Trennung bleibt, rückt aber vollständig aus dem Kernel heraus.
    }
    ```
 
-3. **Abgrenzung**: Dieses ADR betrifft Events, die Zustandsübergänge interpretieren.
-   Fachliche **Fakten ohne Zustandswahrheit** (`UserLoggedIn`) speichert die Anwendung
-   explizit über das append-only Event-Log — siehe ADR-013. Das ist keine Interpretation
-   durch den Kernel und daher kein Widerspruch.
+3. **Scope boundary**: this ADR concerns events that interpret state transitions.
+   Domain **facts without state truth** (`UserLoggedIn`) are stored explicitly by
+   the application via the append-only event log — see ADR-013. That is no
+   interpretation by the kernel and therefore no contradiction.
 
-## Konsequenzen
+## Consequences
 
-- Fachliche Events können nachträglich eingeführt, geändert und (per Rebuild) aus der
-  Change-Historie **rückwirkend erzeugt** werden — ein Vorteil, den Event-First-Systeme
-  nicht haben.
-- Die Schichtung ist sauber: Storage versteht Dokumente, Processing versteht Fachlichkeit.
-- Konsumenten, die "echte" Domain-Events erwarten, bekommen sie — nur eben aus der
-  Translator-Schicht, mit at-least-once-Semantik (Idempotenz beachten, ADR-009).
+- Domain events can be introduced later, changed, and (via rebuild)
+  **retroactively generated** from the change history — an advantage event-first
+  systems do not have.
+- The layering is clean: storage understands documents, processing understands
+  the domain.
+- Consumers expecting "real" domain events get them — just from the translator
+  layer, with at-least-once semantics (mind idempotency, ADR-009).

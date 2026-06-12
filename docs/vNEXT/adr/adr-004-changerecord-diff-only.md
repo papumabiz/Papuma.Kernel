@@ -1,28 +1,28 @@
-# ADR-004: ChangeRecord speichert reversibles Diff, keine Snapshots
+# ADR-004: ChangeRecord stores a reversible diff, no snapshots
 
 ## Status
 
 Accepted (2026-06-11)
 
-## Kontext
+## Context
 
-Der ursprüngliche Entwurf (chat-1.md) sah `Before`, `After` **und** `Diff` im
-ChangeRecord vor. Das verdreifacht den Storage pro Änderung — bei großen Aggregaten und
-hoher Änderungsfrequenz wird der Feed schnell schwerer als die Dokumente selbst.
-Gleichzeitig sind Before/After aus dem Diff rekonstruierbar, wenn das Diff beide
-Wertseiten enthält.
+The original draft (chat-1.md) had `Before`, `After` **and** `Diff` in the
+ChangeRecord. That triples the storage per change — with large aggregates and a
+high change frequency, the feed quickly becomes heavier than the documents
+themselves. At the same time, before/after are reconstructible from the diff if
+the diff carries both value sides.
 
-Kandidaten für das Diff-Format:
+Candidates for the diff format:
 
-- **RFC 6902 (JSON Patch)**: standardisiert, aber nur vorwärts anwendbar (kein `old`),
-  und für Projektionen unhandlich ("op/path/value"-Listen statt Feldsicht).
-- **Strukturiertes Feld-Diff** mit `old`/`new` pro Pfad: reversibel, direkt
-  projektionstauglich (`WhenFieldChanged`), pro Feld policy-fähig.
+- **RFC 6902 (JSON Patch)**: standardized, but only forward-applicable (no `old`),
+  and unwieldy for projections ("op/path/value" lists instead of a field view).
+- **Structured field diff** with `old`/`new` per path: reversible, directly
+  projection-friendly (`WhenFieldChanged`), policy-capable per field.
 
-## Entscheidung
+## Decision
 
-1. Der ChangeRecord enthält **nur das Diff**, keine Before/After-Snapshots.
-2. Format: **reversibles Feld-Diff** — eine JSONB-Map von JSON-Pfad auf Eintrag:
+1. The ChangeRecord contains **only the diff**, no before/after snapshots.
+2. Format: **reversible field diff** — a JSONB map from JSON path to entry:
 
    ```json
    {
@@ -32,52 +32,53 @@ Kandidaten für das Diff-Format:
    }
    ```
 
-   Bei `Insert` fehlt jede `old`-Seite, bei `Delete` jede `new`-Seite (das Delete-Diff
-   enthält damit den letzten Zustand — vorbehaltlich Policies, ADR-007).
+   On `Insert` every `old` side is absent, on `Delete` every `new` side (the
+   delete diff thus contains the last state — subject to policies, ADR-007).
 
-   **Festgelegt in Phase 2 (2026-06-11):**
-   - **Null ≠ Absent**: Ob ein Feld existierte, wird über die *Anwesenheit* der
-     `old`-/`new`-Schlüssel kodiert (Schlüssel weggelassen = Feld existierte nicht);
-     der *Wert* darf legitim JSON-`null` sein. "Feld hinzugefügt" und "Feld von null
-     geändert" sind damit unterscheidbar — Voraussetzung für Reversibilität.
-   - **Arrays sind atomare Blattwerte**: Unterscheiden sich Arrays, entsteht genau ein
-     Eintrag auf dem Array-Pfad mit altem und neuem Gesamtarray. Kein Index-Diffing
-     (`roles[2]`) — das vermeidet die Mehrdeutigkeit verschobener Indizes und hält
-     Apply/Reverse trivial korrekt. Element-Granularität ist eine spätere Optimierung.
-   - **Verschachtelte Objekte** werden rekursiv gedifft (`address.city`); Pfade sind
-     punkt-separiert. Schlüssel, die selbst '.' enthalten, werden nicht unterstützt
-     (bei serialisierten POCOs nicht erreichbar).
-3. **Historische Zustände** entstehen durch Rückwärts-Anwenden der Diffs vom aktuellen
-   Dokument aus (bzw. Vorwärts vom Insert). Das ist ein Audit-/Replay-Werkzeug, kein
-   Hot Path.
-4. Optionale **Snapshots** (z. B. alle n Versionen) sind eine spätere Optimierung, falls
-   Rekonstruktion zu teuer wird — kein Bestandteil von vNEXT-Start.
+   **Ruled in phase 2 (2026-06-11):**
+   - **Null ≠ absent**: whether a field existed is encoded via the *presence* of
+     the `old`/`new` keys (key omitted = field did not exist); the *value* may
+     legitimately be JSON `null`. "Field added" and "field changed from null" are
+     thus distinguishable — a prerequisite for reversibility.
+   - **Arrays are atomic leaf values**: if arrays differ, exactly one entry on the
+     array path is produced with the full old and new array. No index diffing
+     (`roles[2]`) — that avoids the ambiguity of shifted indices and keeps
+     Apply/Reverse trivially correct. Element granularity is a later optimization.
+   - **Nested objects** are diffed recursively (`address.city`); paths are
+     dot-separated. Keys that themselves contain '.' are not supported
+     (unreachable with serialized POCOs).
+3. **Historical states** are produced by applying diffs backwards from the current
+   document (or forwards from the insert). That is an audit/replay tool, not a hot
+   path.
+4. Optional **snapshots** (e.g. every n versions) are a later optimization should
+   reconstruction become too expensive — not part of the vNEXT start.
 
-## Verworfene Alternative: 3rd-Party-Diff-Libraries
+## Rejected alternative: third-party diff libraries
 
-Geprüft (2026-06-11): `SystemTextJson.JsonDiffPatch` (jsondiffpatch-Delta-Format auf
-`JsonNode`, reversibel, LCS-Array-Diffing), `JsonPatch.Net`/json-everything (RFC 6902)
-und `JsonDiffPatch.Net` (Newtonsoft). Entscheidung: **eigene Engine**, denn das
-Wire-Format ist hier das Produkt, nicht das Werkzeug:
+Evaluated (2026-06-11): `SystemTextJson.JsonDiffPatch` (jsondiffpatch delta format
+on `JsonNode`, reversible, LCS array diffing), `JsonPatch.Net`/json-everything
+(RFC 6902) and `JsonDiffPatch.Net` (Newtonsoft). Decision: **own engine**, because
+the wire format is the product here, not the tool:
 
-- **RFC 6902 ist nicht reversibel** (`replace` trägt keinen alten Wert) — disqualifiziert
-  für ADR-004.
-- **jsondiffpatch-Deltas** sind reversibel, aber verschachtelt und mit Magic-Markern
-  kodiert — die flachen Punkt-Pfade gingen verloren, auf denen Policy-Anwendung
-  (ADR-007, pro Feld genau ein Eintrag), `WhenFieldChanged`-Filter und
-  SQL-Abfragbarkeit des Diffs (`diff ? 'email'`) beruhen. Das LCS-Array-Diffing löst
-  zudem genau die Komplexität, die wir mit "Arrays atomar" bewusst ausgeschlossen haben.
-- Die eigene Engine ist ~150 Zeilen mit property-getesteten Roundtrip-Invarianten und
-  ohne Paketabhängigkeit (AGENTS.md: BCL bevorzugen).
+- **RFC 6902 is not reversible** (`replace` carries no old value) — disqualified
+  for ADR-004.
+- **jsondiffpatch deltas** are reversible but nested and encoded with magic
+  markers — the flat dot paths would be lost, on which policy application
+  (ADR-007, exactly one entry per field), `WhenFieldChanged` filters and SQL
+  queryability of the diff (`diff ? 'email'`) all rest. Its LCS array diffing also
+  solves exactly the complexity we deliberately excluded with "arrays atomic".
+- The own engine is ~150 lines with property-tested roundtrip invariants and no
+  package dependency (AGENTS.md: prefer the BCL).
 
-Falls Element-Granularität für Arrays später nötig wird, ist
-`SystemTextJson.JsonDiffPatch` der erste Kandidat — dann als interner Algorithmus
-hinter dem bestehenden Wire-Format, nicht als Formatwechsel.
+Should element granularity for arrays become necessary later,
+`SystemTextJson.JsonDiffPatch` is the first candidate — then as an internal
+algorithm behind the existing wire format, not as a format change.
 
-## Konsequenzen
+## Consequences
 
-- Feed bleibt schlank; Storage wächst mit der Größe der Änderung, nicht des Aggregats.
-- Rollback (ADR-008) ist trivial: Diff umdrehen, als Update anwenden.
-- Policies wirken pro Feld auf genau eine Stelle (den Diff-Eintrag), nicht auf drei.
-- Wer den vollen Zustand zu einem Zeitpunkt braucht, zahlt Replay-Kosten — akzeptiert,
-  da der häufige Fall (aktueller Zustand) immer ein direkter Dokument-Load ist.
+- The feed stays lean; storage grows with the size of the change, not of the
+  aggregate.
+- Rollback (ADR-008) is trivial: invert the diff, apply as an update.
+- Policies act per field on exactly one place (the diff entry), not on three.
+- Whoever needs the full state at a point in time pays replay costs — accepted,
+  since the common case (current state) is always a direct document load.
