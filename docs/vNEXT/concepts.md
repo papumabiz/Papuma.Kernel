@@ -659,6 +659,59 @@ aufbauen. At-least-once plus Idempotenz machen genau das gefahrlos.
 
 ---
 
+## 20. Snapshots: Das Konzept existiert — invertiert
+
+→ [ADR-002](adr/adr-002-derived-change-feed.md) (Dokument = Wahrheit),
+§6 (reversible Diffs), §19 (Rebuild)
+
+Eventsourcing-Systeme kennen **Snapshots**: periodisch persistierte
+Zwischenstände, damit ein Aggregat-Load nicht den gesamten Event-Stream
+replayen muss. Die Frage "gibt es das hier auch?" hat eine hübsche Antwort:
+Ja — aber invertiert. **`papuma.document` *ist* der Snapshot.**
+
+Im klassischen Event Sourcing sind die Events die Wahrheit und der Zustand ist
+abgeleitet; der Snapshot ist ein Cache, den ein Hintergrundprozess pflegt und
+der veralten kann. Document-Sourced CQRS dreht das Verhältnis um: Der Zustand
+ist die Wahrheit, der Feed ist abgeleitet (ADR-002). Der "Snapshot" wird damit
+in **derselben Transaktion** wie jeder Change geschrieben — er kann per
+Konstruktion weder veralten noch hinterherhinken, und das Problem, das
+Snapshots lösen, existiert an seiner Hauptstelle gar nicht. Im Einzelnen, an
+den drei Orten, wo klassische Systeme Snapshots brauchen:
+
+1. **Aggregat laden**: `LoadAsync` ist ein einzelner Zeilen-Read. Kein Replay,
+   nie — unabhängig davon, ob das Dokument 3 oder 30 000 Versionen hat.
+2. **Time-Travel** ("Dokument bei Version 12"): Weil Diffs reversibel sind
+   (§6), rekonstruiert man historische Zustände **rückwärts vom aktuellen
+   Dokument** statt vorwärts von Version 0. Der nächstgelegene Snapshot ist
+   immer der Kopf: Version 498 von 500 kostet zwei Reverse-Applies statt 498
+   Forward-Applies — und je näher die gesuchte Version an der Gegenwart liegt
+   (der häufige Fall: Konflikt-UIs, "was hat sich gerade geändert?"), desto
+   billiger. Caveat: redactete Felder blockieren die Rückwärtsreise (§8) —
+   gewollt, sonst wären Policies wertlos.
+3. **Projektions-Rebuild**: die einzige Stelle, an der "den ganzen Feed
+   durchlaufen" real existiert (§19). Aber Projektionen sind persistent und
+   gecheckpointet — sie rebuilden *nicht* beim Start, sondern nur bei
+   explizitem Reset. Und der Reset passiert fast immer, weil sich die
+   *Handler-Logik* geändert hat — genau dann wäre ein Projektion-Snapshot
+   **ohnehin ungültig**, weil mit alter Logik berechnet. Das ist die
+   klassische Snapshot-Falle im Event Sourcing (Snapshot-Invalidierung bei
+   Logikänderung wird gern vergessen); hier stellt sie sich nicht, weil der
+   Reset-auf-0-Fall der einzige verbleibende ist und der Snapshot dort nichts
+   Gültiges beitragen könnte.
+
+Bräuchte man je einen Zwischenstand für eine *sehr* teure Projektion mit
+*stabiler* Logik, ist er trivial: Die Projektion persistiert ihren eigenen
+Zustand — das tut sie als Read-Model sowieso — und ihr Checkpoint ist die
+zugehörige Position. "Projektion + Checkpoint" *ist* das Snapshot-Paar; es
+gibt nichts Zusätzliches zu erfinden.
+
+**Backup-Nebenfrage**: In klassischen Systemen sind Snapshots abgeleitet und
+damit optional im Backup (rebuildbar aus den Events — dieselbe
+Recovery-Time-Abwägung wie §19). Hier ist `papuma.document` die Wahrheit
+selbst und damit der Kern jedes Backups; die Frage löst sich auf.
+
+---
+
 *Pflegehinweis: Neue Erklärstücke aus späteren Phasen hier ergänzen — dieses
 Dokument ist der Sammelpunkt für das "Warum hinter dem Wie" und Rohstoff für die
 Tutorials (Phase 9).*
