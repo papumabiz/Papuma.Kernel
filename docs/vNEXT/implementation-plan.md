@@ -419,10 +419,14 @@ Skalierungsmodell und Begründung: [concepts.md §14](concepts.md).
       ✅ 2026-06-12: `InsertChangeRecordsAsync` (ein set-basiertes INSERT für alle
       ChangeRecords einer Bulk-Operation; text[]/bigint[]/int[]/jsonb[]-Arrays),
       genutzt von BulkPatch und BulkDelete; Verhalten unverändert (145 Tests grün)
-- [ ] Workflow-/Saga-Rezept (concepts §18): Human-in-the-Loop via Task-Dokument,
-      Zustandsmaschinen-Instanz mit `expectedVersion`-Transitionen, Timer-Poller
-      als Hosted Service (`dueAt` + Leader-Lock) — Rezept/Tutorial, kein
-      Kernel-Feature; ggf. später separates Paket oberhalb des Kernels
+- [x] Workflow-/Saga-Rezept (concepts §18) — ✅ 2026-06-12 als
+      [recipes/workflow-saga.md](recipes/workflow-saga.md) **plus lauffähige
+      Sample-App** [samples/Papuma.Kernel.Sample](../../samples/Papuma.Kernel.Sample/README.md):
+      Mini-Shop mit Bounded-Counter-Inventar, Order-Saga (Approval-Task als
+      Human-in-the-Loop, Rejection-Kompensation), `dueAt`-Eskalations-Poller,
+      SignalR-Push, Health-Check und MCP-Endpoint — End-to-End gegen PG 18
+      verifiziert (Oversell-409, Doppel-Entscheider-409, Actor-Audit-Trail,
+      Storno-Kompensation)
 
 ---
 

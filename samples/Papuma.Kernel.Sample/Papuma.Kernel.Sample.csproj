@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Papuma.Kernel\Papuma.Kernel.csproj" />
+    <ProjectReference Include="..\..\src\Papuma.Kernel.AspNetCore\Papuma.Kernel.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\src\Papuma.Kernel.Mcp\Papuma.Kernel.Mcp.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.4.0" />
+  </ItemGroup>
+
+</Project>
