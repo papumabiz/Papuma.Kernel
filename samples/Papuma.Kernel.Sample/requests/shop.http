@@ -1,0 +1,131 @@
+# Papuma.Kernel Sample — the shop walkthrough as httpYAC requests.
+#
+# Usage: start the sample (dotnet run --project samples/Papuma.Kernel.Sample),
+# then run the requests top to bottom (httpYAC: "send all" works — named
+# responses chain the ids automatically; @sleep gives the feed handlers a moment).
+# Environment: requests/http-client.env.json (host = http://localhost:5099).
+
+### 1. Create a product with stock 5 — three writes, ONE atomic commit
+# (product + inventory + StockReplenished fact share a correlationId)
+# @name createProduct
+POST {{host}}/products
+Content-Type: application/json
+
+{
+  "name": "Espresso Machine",
+  "price": 100,
+  "initialStock": 5
+}
+
+### 2. A small order (total 100 ≤ 500) auto-approves; stock 5 → 4
+# @name smallOrder
+POST {{host}}/orders
+Content-Type: application/json
+
+{
+  "productId": "{{createProduct.id}}",
+  "quantity": 1,
+  "customerEmail": "alice@example.com"
+}
+
+### 3. Oversell attempt → typed 409, stock untouched (the bounded counter, concepts §17)
+POST {{host}}/orders
+Content-Type: application/json
+
+{
+  "productId": "{{createProduct.id}}",
+  "quantity": 99,
+  "customerEmail": "greedy@example.com"
+}
+
+### 4. Check the stock: must be 4 (small order deducted, oversell rejected)
+GET {{host}}/products/{{createProduct.id}}/stock
+
+### 5. Replenish — Increment needs no expectedVersion; the delivery is a fact (event log)
+POST {{host}}/products/{{createProduct.id}}/replenish
+Content-Type: application/json
+
+{
+  "quantity": 10
+}
+
+### 6. An expensive order (total 600 > 500) → status "PendingApproval";
+# the workflow handler materializes ApprovalTask "approval-<orderId>" (concepts §18)
+# @name bigOrder
+POST {{host}}/orders
+Content-Type: application/json
+
+{
+  "productId": "{{createProduct.id}}",
+  "quantity": 6,
+  "customerEmail": "bob@example.com"
+}
+
+### 7. Approve — a normal write with expectedVersion. Run within 2 minutes,
+# otherwise the escalation poller flips the task to "Escalated" first (the dueAt timer).
+# @sleep 1500
+POST {{host}}/approvals/approval-{{bigOrder.id}}/decide
+Content-Type: application/json
+
+{
+  "decision": "Approved",
+  "decidedBy": "manager@example.com"
+}
+
+### 8. Decide again → 409 (two approvers serialize typed, ADR-003)
+POST {{host}}/approvals/approval-{{bigOrder.id}}/decide
+Content-Type: application/json
+
+{
+  "decision": "Rejected",
+  "decidedBy": "second-manager@example.com"
+}
+
+### 9. The order is now Approved (the workflow handler patched it)
+# @sleep 1500
+GET {{host}}/orders/{{bigOrder.id}}
+
+### 10. The history IS the workflow execution log: v1 Insert (actor=bob),
+# v2 Update PendingApproval→Approved (actor=manager) — and customerEmail
+# appears only as {"changed": true}: the privacy policy at work (ADR-007).
+GET {{host}}/orders/{{bigOrder.id}}/history
+
+### ─────────────────────────────────────────────────────────────────────────────
+### Rejection flow: the saga compensation gives the stock back (concepts §18)
+
+### 11. Another expensive order → PendingApproval, stock reserved
+# @name rejectOrder
+POST {{host}}/orders
+Content-Type: application/json
+
+{
+  "productId": "{{createProduct.id}}",
+  "quantity": 7,
+  "customerEmail": "eve@example.com"
+}
+
+### 12. Note the stock right after placing (reserved)
+GET {{host}}/products/{{createProduct.id}}/stock
+
+### 13. Reject the approval task
+# @sleep 1500
+POST {{host}}/approvals/approval-{{rejectOrder.id}}/decide
+Content-Type: application/json
+
+{
+  "decision": "Rejected",
+  "decidedBy": "manager@example.com"
+}
+
+### 14. Order is Rejected …
+# @sleep 1500
+GET {{host}}/orders/{{rejectOrder.id}}
+
+### 15. … and the stock came back (Increment(+quantity) compensation,
+# atomic with the order transition in one handler session)
+GET {{host}}/products/{{createProduct.id}}/stock
+
+### ─────────────────────────────────────────────────────────────────────────────
+### Escalation (the dueAt timer): place an order needing approval and simply
+### wait > 2 minutes without deciding — the poller patches the task to
+### "Escalated" (visible in the task history; deciding afterwards still works).

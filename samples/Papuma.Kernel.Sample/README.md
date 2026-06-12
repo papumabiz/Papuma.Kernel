@@ -38,8 +38,17 @@ idempotently at startup — there is no migration step.
 
 ## Walk the workflow
 
+Easiest: open [requests/shop.http](requests/shop.http) with
+[httpYAC](https://httpyac.github.io/) (VS Code extension or CLI) and send the
+requests top to bottom — named responses chain the ids automatically.
+[requests/diagnostics.http](requests/diagnostics.http) adds the health check
+and the full MCP handshake (initialize → session header → tools). Environment:
+`requests/http-client.env.json` (`dev`, port 5099 — fixed via launchSettings).
+
+The same flow with curl:
+
 ```bash
-BASE=http://localhost:5099   # check the launch output for the actual port
+BASE=http://localhost:5099
 
 # 1. A product with 5 in stock — three writes, ONE atomic commit.
 PRODUCT=$(curl -s -X POST $BASE/products -H 'content-type: application/json' \
