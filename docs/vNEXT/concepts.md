@@ -590,6 +590,75 @@ dieselbe wie bei DSGVO (ADR-015): Mechanismen unten, Entscheidungen oben.
 
 ---
 
+## 19. Checkpoints, Backup und Rebuild: Was ist Wahrheit, was ist ableitbar?
+
+→ [ADR-009](adr/adr-009-change-feed-consumption.md) (Checkpoints),
+[ADR-013](adr/adr-013-event-log.md) (Retention), §16 (Projektionen)
+
+**Woher weiß ein Prozessor nach dem Neustart, wo er war?** Aus
+`papuma.checkpoint`: eine Zeile pro Handler (`handler_name → last_seq`), in
+derselben Datenbank wie der Feed selbst. Nach jedem erfolgreich verarbeiteten
+Record schreibt der Prozessor `last_seq` fort; beim Start liest er die Zeile
+und setzt exakt dort fort — egal ob der Prozess sauber heruntergefahren wurde,
+gecrasht ist oder auf eine andere Maschine umgezogen ist. Event-Handler nutzen
+dieselbe Tabelle mit dem Präfix `event:`. Es gibt keinen In-Memory-Zustand,
+der verloren gehen könnte: Die Position *ist* eine Datenbankzeile.
+
+Daraus folgt die Garantie **at-least-once**: Der Checkpoint rückt erst vor,
+nachdem der Handler erfolgreich war. Crasht der Prozess dazwischen, wird der
+Record erneut zugestellt — deshalb die Idempotenz-Pflicht für Handler (und das
+deterministische-ID-Muster aus §18). Die Alternative — Checkpoint *vor* dem
+Handler — wäre at-most-once: kein Duplikat, aber stille Lücken in der
+Projektion. Für abgeleiteten Zustand ist "doppelt, aber idempotent" die einzig
+richtige Wahl.
+
+**Wann baut man eine Projektion neu auf?** Vier typische Situationen:
+
+1. **Bug in der Handler-Logik** — die Projektion ist falsch *berechnet*. Fix
+   deployen, `ResetCheckpointAsync(handlerName)`, Replay von seq 0.
+2. **Neue Projektion** — ein frisch registrierter Handler beginnt bei seq 0.
+   Der "Rebuild" ist also kein Spezialmodus, sondern der Normalfall des ersten
+   Starts: Jede Projektion entsteht als Replay der gesamten Historie.
+3. **Read-Model-Schemaänderung** — die neue Spalte braucht historische Werte,
+   die nur im Feed stehen.
+4. **Projektionsziel verloren** — Elasticsearch-Index gelöscht, Cache geleert,
+   externe Datenbank restauriert.
+
+Die harte Grenze: Reset nur für **Projektionen** (idempotent, ableitbar) —
+niemals für Effekt-Handler. Ein zurückgesetzter E-Mail-Handler verschickt die
+gesamte Mail-Historie erneut. Die Unterscheidung "Projektion vs. Effekt" ist
+eine Design-Entscheidung pro Handler, die man beim Schreiben trifft, nicht
+beim Reset.
+
+**Was gehört ins Backup?** Logisch nur die Wahrheit: `papuma.document` (der
+Zustand), `papuma.change` (die vollständige Historie) und `papuma.event` (die
+Fakten) — plus die trivialen Infrastrukturtabellen `checkpoint`/`failure`.
+Projektionen sind per Definition ableitbar. Aber zwei Einschränkungen machen
+die reine Lehre praxistauglich:
+
+1. **Events mit Retention sind die Ausnahme von der Ableitbarkeit.** Changes
+   werden nie gelöscht — die Versionshistorie ist vollständig, jede
+   Dokument-Projektion bleibt für immer rekonstruierbar (modulo
+   Redaction-Marker, §8). Gepurgte Events sind dagegen *weg* (ADR-013:
+   Faktenspeicher, kein Versionsspeicher). Eine Projektion über Events mit
+   Retention ist **nicht** aus dem Log rekonstruierbar: entweder ihren Zustand
+   mitsichern oder die Retention deutlich länger wählen als jedes denkbare
+   Rebuild-Bedürfnis.
+2. **Rebuild kostet Zeit.** Projektionen mitzusichern ist keine Korrektheits-,
+   sondern eine Recovery-Time-Entscheidung: Restore + Voll-Replay von Jahren
+   an Changes kann Stunden dauern, in denen Read-Models fehlen. Liegen die
+   Projektionen in derselben Postgres-Instanz, ist die Frage ohnehin müßig —
+   `pg_dump`/PITR sichern sie als konsistenten Snapshot mit, *inklusive der
+   exakt dazu passenden Checkpoints* (das ist der stille Vorteil davon, dass
+   Checkpoints in derselben Datenbank leben: Snapshot-Konsistenz gratis).
+
+Bei **externen Zielen** (Elasticsearch, Redis, Fremdsystem) gilt nach einem
+Restore die einfache Regel: nicht hoffen, dass externer Zustand und
+restaurierter Checkpoint zueinander passen — Checkpoint resetten und neu
+aufbauen. At-least-once plus Idempotenz machen genau das gefahrlos.
+
+---
+
 *Pflegehinweis: Neue Erklärstücke aus späteren Phasen hier ergänzen — dieses
 Dokument ist der Sammelpunkt für das "Warum hinter dem Wie" und Rohstoff für die
 Tutorials (Phase 9).*
