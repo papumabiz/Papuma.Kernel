@@ -76,3 +76,9 @@ gar nicht dieselben Felder berühren.
   schema-aktuelle Dokumente sind uneingeschränkt.
 - Die Grenze des Katalogs ist Disziplin gegen ORM-Drift: Sobald jemand "bedingte
   Patches" fordert, ist die Antwort Load + Save, nicht Katalog-Erweiterung.
+- **Klarstellung (2026-06-12):** Bedingte *Schreibsemantik* (Invarianten wie "Bestand
+  nie negativ") entsteht sanktioniert aus **`Increment` + Typ-Validator**: Der
+  Increment rechnet atomar im Statement, der Validator prüft das gespeicherte
+  Ergebnis vor dem Commit und lehnt per Savepoint-Rollback typisiert ab — der
+  atomare bedingte Dekrement ohne Retry-Schleifen (concepts §17). Das ist keine
+  Katalog-Erweiterung, sondern Komposition vorhandener Primitive.

@@ -457,6 +457,48 @@ Materialized Views sind die schlechteste der Welten: Sie holen die Staleness zur
 
 ---
 
+## 17. Der begrenzte Zähler: Lagerbestand ohne Überverkauf
+
+→ [ADR-012](adr/adr-012-partial-updates.md), §4 (Hot Document), §10 (Increment)
+
+Das Shop-Problem "nur N Stück auf Lager, niemals überverkaufen" hat zwei korrekte
+Lösungen — und eine klare Empfehlung:
+
+**Optimistisch (Load + Check + Save mit `expectedVersion`)** kann nie überverkaufen:
+Die Versionsprüfung macht Read-Check-Write effektiv atomar; der Verlierer bekommt
+die `ConcurrencyException` und versucht es erneut. Unter Flash-Sale-Last wird das
+aber zum Retry-Karussell am Hot Document — korrekt, aber verschwenderisch.
+
+**Der atomare bedingte Dekrement** komponiert zwei vorhandene Primitive:
+
+```csharp
+m.Document<Inventory>(d => d.Validate(inv =>
+{
+    if (inv.Stock < 0) throw new OutOfStockException(inv.Id);
+}));
+
+await session.PatchAsync<Inventory>(skuId, p => p.Increment(x => x.Stock, -1));
+// wirft OutOfStockException, wenn der Bestand negativ würde — nichts geschrieben
+```
+
+`Increment` rechnet im Statement auf dem aktuellen Wert (kein Konfliktfenster, kein
+`expectedVersion`), konkurrierende Käufer serialisiert Postgres kurz am Row-Lock,
+und der Validator prüft das *gespeicherte Ergebnis* vor dem Commit — wird der
+Bestand negativ, rollt der Savepoint das UPDATE zurück. Alle Käufer bis Bestand 0
+gehen ohne einen einzigen Retry durch, danach wird typisiert abgelehnt. ADR-012 hat
+"bedingte Patches" als Katalog-Feature abgelehnt — diese Komposition ist der
+sanktionierte Weg zu bedingter Schreibsemantik.
+
+Modellierung: Bestand als **eigenes kleines Dokument** pro SKU (entkoppelt
+Content-Pflege von Bestandsbewegungen — Field-Level-LWW hin oder her, die Historien
+bleiben sauber getrennt), Storno als `Increment(+1)`-Kompensation. Gratis-Bonus:
+Der Change Feed des Inventory-Dokuments ist ein lückenloses **Bestands-Ledger**
+(`stock: {old: 5, new: 4}` mit `correlationId` zur Bestellung). Für Extremfälle
+(zehntausende Käufer auf *einer* SKU) wird die Zeilen-Serialisierung selbst zur
+Decke → Bestand in Buckets sharden (Modellierungsthema, §14).
+
+---
+
 *Pflegehinweis: Neue Erklärstücke aus späteren Phasen hier ergänzen — dieses
 Dokument ist der Sammelpunkt für das "Warum hinter dem Wie" und Rohstoff für die
 Tutorials (Phase 9).*

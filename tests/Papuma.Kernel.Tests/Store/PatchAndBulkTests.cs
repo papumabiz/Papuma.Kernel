@@ -146,6 +146,41 @@ public sealed class PatchAndBulkTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task BoundedCounter_ConcurrentBuyers_NeverOversell()
+    {
+        // The inventory pattern (concepts §17): Increment + validator = atomic
+        // conditional decrement. 12 parallel buyers, 5 in stock — exactly 5 succeed,
+        // 7 are rejected typed, stock ends at 0, never negative.
+        var scope = NewTenant();
+        var skuId = NewId();
+        await using (var setup = _store.OpenSession(scope))
+        {
+            await setup.SaveAsync(new ValidatedDoc(skuId, Quantity: 5), 0);
+            await setup.CommitAsync();
+        }
+
+        var outcomes = await Task.WhenAll(Enumerable.Range(0, 12).Select(async _ =>
+        {
+            await using var buyer = _store.OpenSession(scope);
+            try
+            {
+                await buyer.PatchAsync<ValidatedDoc>(skuId, p => p.Increment(x => x.Quantity, -1));
+                await buyer.CommitAsync();
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                return false; // out of stock — validator rejected, nothing written
+            }
+        }));
+
+        Assert.Equal(5, outcomes.Count(success => success));
+
+        await using var verify = _store.OpenSession(scope);
+        Assert.Equal(0, (await verify.LoadAsync<ValidatedDoc>(skuId))!.Document.Quantity);
+    }
+
+    [Fact]
     public async Task Patch_ValidatorRejection_RollsBackTheWholeWrite()
     {
         await using var session = _store.OpenSession(NewTenant());
