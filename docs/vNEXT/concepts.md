@@ -362,11 +362,20 @@ The three real limits, in the order you hit them:
    call drags everyone into its latency.
 2. **Throughput per handler is single-threaded** — the architectural ceiling. A
    projecting handler (1 SQL write per change) realistically manages a few hundred
-   changes/s. If the application writes faster permanently, lag grows without
-   bound; more instances do not help.
+   to ~1,400 changes/s. If the application writes faster permanently, lag grows
+   without bound; more instances do not help.
 3. **Read amplification**: every handler reads the full feed (no type filter in
    SQL) — cheap thanks to a PK range scan from the checkpoint, but measurable at
    volume × handler count.
+
+**Measured baseline (2026-06-12, local PG-18 container — details and the
+reusable probe in `benchmarks/`):** the engine itself delivers ~27,000
+changes/s to a no-op handler (~37 µs overhead per delivery) — the limits above
+are entirely about handler work, never the engine loop. A realistic projection
+handler (one idempotent upsert per change) sustains ~1,400 changes/s; four such
+handlers drop to ~310/s *each* because cycles are sequential — limit 1 made
+visible. The write path manages ~900 saves/s across 4 parallel sessions
+(~1.1 ms per save including diff and change insert).
 
 **Not a problem**: NOTIFY storms (the processor drains until "empty" anyway),
 connections (1–2 + LISTEN per processor), the two processors side by side

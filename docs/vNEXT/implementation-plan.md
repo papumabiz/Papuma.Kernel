@@ -432,11 +432,13 @@ Reihenfolge 1 → 3 → 2.
       Schreibrate > Handler-Durchsatz, mehr Instanzen helfen nicht.
       Das größte Stück (Checkpoint pro Shard, Rebalancing, Poison pro Shard) —
       echte Feature-Arbeit, nur gegen nachgewiesenen Bedarf.
-- [ ] **Feed-Durchsatz-Baseline messen** (Vorarbeit für alle drei Trigger):
-      Benchmark/Probe gegen PG 18 — Changes/s pro Handler und Zyklus-Latenz bei
-      N Writern × M Handlern; ersetzt die §14-Schätzung "einige hundert
-      Changes/s" durch gemessene Zahlen, gegen die Anwendungen ihren Headroom
-      bestimmen können
+- [x] **Feed-Durchsatz-Baseline messen** — ✅ 2026-06-12
+      (`benchmarks/ -- feed`, wiederverwendbare Testcontainers-Probe):
+      Engine-Decke ~27.000 Deliveries/s (Noop, ~37 µs/Delivery — die Engine ist
+      nie die Grenze); realistischer Projektions-Handler ~1.400 Changes/s;
+      4 Projektions-Handler ~310/s *pro Handler* (Grenze 1 sichtbar gemacht);
+      Write-Pfad ~900 Saves/s über 4 parallele Sessions. Zahlen in concepts §14
+      und benchmarks/README inkl. Headroom-Rechnung
 - [x] Diff-Engine-Benchmark bei großen Dokumenten (Risiko #4) — ✅ 2026-06-12,
       siehe Risiko-Tabelle und ADR-004-Amendment
 - [x] Bulk-Change-Inserts via `unnest` statt Schleife (Phase-5-Notiz) —
