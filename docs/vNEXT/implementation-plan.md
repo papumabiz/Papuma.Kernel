@@ -389,6 +389,10 @@ dumme Handler als universeller Andockpunkt.
       `AllowMutations`-Opt-in; Registrierung `AddMcpServer().WithPapumaKernel()`;
       bewusst kein `gdpr_export`-Tool (Betroffenen-Export = Anwendungsworkflow);
       Doku in [observability.md](observability.md)
+- [x] **Doku reist mit dem Paket**: Playbook, Snippet, concepts, Guides, ADRs und
+      Rezepte liegen als `docs/` im `Papuma.Kernel`-nupkg (nach `dotnet restore`
+      lokal im Packages-Ordner des Konsumenten lesbar — kein Doku-Server nötig);
+      `llms.txt` im Repo-Root als Einstiegskarte mit Leseempfehlung und Raw-URLs
 - [x] **KI-Konsumenten-Rezepte**: [recipes/ai-consumers.md](recipes/ai-consumers.md) —
       pgvector-Embeddings-Projektion (Idempotenz via version-Prädikat),
       Natural-Language-Audit über `GetHistoryAsync` (Policy-Bereinigung als

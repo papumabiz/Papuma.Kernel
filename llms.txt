@@ -1,0 +1,34 @@
+# Papuma.Kernel
+
+> PostgreSQL-based document-sourced application kernel for .NET 10: JSON documents
+> as the source of truth, an automatically derived change feed with reversible
+> field diffs, privacy policies, schema evolution, an event log, and multi-tenancy.
+> Requires PostgreSQL >= 18. NOT an ORM, NOT event sourcing, NO query DSL.
+
+Reading order for coding agents: start with the playbook (mental model + binding
+rules), then getting-started (API), then concepts (the why), then the ADRs
+(decisions; deviations are bugs). All documents are German except this file and
+the code/XML docs.
+
+These files also ship inside the Papuma.Kernel NuGet package under `docs/` —
+after `dotnet restore` they are readable locally from the global packages folder
+(e.g. `~/.nuget/packages/papuma.kernel/<version>/docs/`).
+
+## Docs
+
+- [Agent playbook](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/ai/papuma-kernel-playbook.md): mental model in 4 sentences, binding ADR rules, API quick map, decision tree, troubleshooting
+- [AGENTS.md snippet](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/ai/papuma-kernel-agents-snippet.md): copy-paste block for AGENTS.md/CLAUDE.md of consuming applications
+- [Getting started](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/getting-started.md): bootstrap, write path, handlers, schema evolution in 5 minutes
+- [Concepts](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/concepts.md): 20 explanatory sections — the "why behind the how" (concurrency, feeds, checkpoints, snapshots, workflows, GDPR)
+- [Architecture](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/architecture.md): namespaces, SQL data model, write path, ADR index
+
+## Guides
+
+- [Observability](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/observability.md): metrics, tracing, diagnostics APIs, MCP server
+- [GDPR tooling](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/gdpr.md): data inventory, subject export, history redaction, per-tenant erasure-vs-restriction pattern
+- [Recipe: AI consumers](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/recipes/ai-consumers.md): pgvector embeddings projection, natural-language audit, anomaly detection
+- [Recipe: realtime UI notifications](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/recipes/realtime-ui-notifications.md): NOTIFY-driven UI updates
+
+## Decisions
+
+- [ADR index](https://github.com/papumabiz/Papuma.Kernel/tree/master/docs/vNEXT/adr): 15 ADRs — PostgreSQL-18-only, derived change feed, write path with mandatory expectedVersion, reversible diffs, schema evolution, keys, privacy policies, rollback, feed consumption, gapless reads, event translation, patch primitive, event log, bulk operations, GDPR tooling

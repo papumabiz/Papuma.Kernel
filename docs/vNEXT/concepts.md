@@ -501,8 +501,8 @@ Decke → Bestand in Buckets sharden (Modellierungsthema, §14).
 
 ## 18. Human-in-the-Loop und die Workflow-Frage: Warten ist Zustand, kein Thread
 
-→ §4 (Stop-the-line), [ADR-003](adr/adr-003-write-path.md) (expectedVersion),
-[ADR-013](adr/adr-013-event-log.md) (Events)
+→ §4 (Stop-the-line), [ADR-003](adr/adr-003-write-path-concurrency.md) (expectedVersion),
+[ADR-013](adr/adr-013-business-event-log.md) (Events)
 
 Zwei scheinbar verschiedene Fragen — "kann ein Mensch im Feed mitentscheiden?"
 und "kann ich darauf eine Workflow-Engine bauen?" — haben dieselbe Antwort,
@@ -592,8 +592,8 @@ dieselbe wie bei DSGVO (ADR-015): Mechanismen unten, Entscheidungen oben.
 
 ## 19. Checkpoints, Backup und Rebuild: Was ist Wahrheit, was ist ableitbar?
 
-→ [ADR-009](adr/adr-009-change-feed-consumption.md) (Checkpoints),
-[ADR-013](adr/adr-013-event-log.md) (Retention), §16 (Projektionen)
+→ [ADR-009](adr/adr-009-projections-as-dumb-handlers.md) (Checkpoints),
+[ADR-013](adr/adr-013-business-event-log.md) (Retention), §16 (Projektionen)
 
 **Woher weiß ein Prozessor nach dem Neustart, wo er war?** Aus
 `papuma.checkpoint`: eine Zeile pro Handler (`handler_name → last_seq`), in
@@ -661,7 +661,7 @@ aufbauen. At-least-once plus Idempotenz machen genau das gefahrlos.
 
 ## 20. Snapshots: Das Konzept existiert — invertiert
 
-→ [ADR-002](adr/adr-002-derived-change-feed.md) (Dokument = Wahrheit),
+→ [ADR-002](adr/adr-002-document-as-truth.md) (Dokument = Wahrheit),
 §6 (reversible Diffs), §19 (Rebuild)
 
 Eventsourcing-Systeme kennen **Snapshots**: periodisch persistierte

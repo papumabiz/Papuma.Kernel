@@ -12,6 +12,22 @@
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
+  <!-- Agent-readable documentation ships with the package (phase 13): after restore it
+       sits in the consumer's global packages folder, so coding agents can read the
+       playbook and concepts locally instead of guessing from compiled metadata.
+       PackagePaths mirror the repo layout so relative links keep working. -->
+  <ItemGroup>
+    <None Include="..\..\docs\ai\papuma-kernel-playbook.md" Pack="true" PackagePath="docs\ai\" />
+    <None Include="..\..\docs\ai\papuma-kernel-agents-snippet.md" Pack="true" PackagePath="docs\ai\" />
+    <None Include="..\..\docs\vNEXT\getting-started.md" Pack="true" PackagePath="docs\vNEXT\" />
+    <None Include="..\..\docs\vNEXT\concepts.md" Pack="true" PackagePath="docs\vNEXT\" />
+    <None Include="..\..\docs\vNEXT\architecture.md" Pack="true" PackagePath="docs\vNEXT\" />
+    <None Include="..\..\docs\vNEXT\observability.md" Pack="true" PackagePath="docs\vNEXT\" />
+    <None Include="..\..\docs\vNEXT\gdpr.md" Pack="true" PackagePath="docs\vNEXT\" />
+    <None Include="..\..\docs\vNEXT\adr\*.md" Pack="true" PackagePath="docs\vNEXT\adr\" />
+    <None Include="..\..\docs\vNEXT\recipes\*.md" Pack="true" PackagePath="docs\vNEXT\recipes\" />
+  </ItemGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="Papuma.Kernel.Tests" />
   </ItemGroup>
