@@ -299,7 +299,7 @@ grün unter den finalen Projektnamen; Paket packt.
 
 # 🏁 Plan abgeschlossen (2026-06-12)
 
-Alle 11 Phasen umgesetzt, alle 14 ADRs implementiert und durch Integrationstests
+Alle 12 Phasen umgesetzt, alle 15 ADRs implementiert und durch Integrationstests
 gegen echtes PostgreSQL 18 abgedeckt. Der Reboot ist vollständig.
 
 ## Phase 11 — Observability & Diagnostics ✅ (2026-06-12)
@@ -333,32 +333,38 @@ Trace-Test (Write-Span Kind des Request-Roots; Handler-Span-Link trägt dieselbe
 Trace-Id), `GetHistoryAsync`-Konfliktfenster (ADR-003-Szenario inkl. Diff-Werten),
 Failure-Inspektion + manueller Retry-Flow. 130 Tests grün.
 
-## Phase 12 — DSGVO-Werkzeuge (post-1.0, geplant)
+## Phase 12 — DSGVO-Werkzeuge ✅ (2026-06-12)
 
 ADRs: [015](adr/adr-015-gdpr-tooling.md) · Prinzip: Mechanismen im Kernel,
 Rechtsentscheidungen (Löschen vs. Einschränken vs. Aufbewahren pro Tenant) in der
-Anwendung. Ernte: konzeptionell v1 `redacted`-Flag + Sensitive-Data-ADR.
+Anwendung. Guide: [gdpr.md](gdpr.md).
 
-- [ ] **Export-Assembly** (Art. 15/20): `GdprExport.ExportAsync(scope, documentRefs,
-      eventSelectors)` → strukturiertes JSON (Zustand + Historie + Events);
-      Event-Selektion generisch über Payload-Pfad = Wert; Policy-Minimierung wirkt
-      automatisch (redactete Felder nur als Änderungsmarker)
-- [ ] **Daten-Inventar** (Art.-30-Unterstützung): Report aus dem Metamodell
-      (Typen, Felder, Policies, Event-Retentions) — auch als Review-Werkzeug
-      "welche Felder sind ungeschützt?"
-- [ ] **`RedactHistoryAsync(documentRef, paths?)`**: historische Diffs +
-      Event-Payload-Felder nachträglich auf Redacted-Marker umschreiben (schließt
-      die Lücke getrackter PII-Felder nach Dokument-Löschung); Audit-Metadaten
-      verpflichtend; irreversibel
-- [ ] Doku: DSGVO-Guide mit dem Tenant-Muster (Löschen in Scope A, Art.-18-
-      Einschränkung + Fristvormerkung in Scope B) und der PII-Policy-Disziplin
-      als erster Verteidigungslinie
+- [x] **Export-Assembly** (Art. 15/20): `GdprExport.ExportAsync(store, scope,
+      documentRefs, eventSelectors)` → strukturiertes JSON (Zustand + Historie +
+      Events) in **einer Transaktion** (konsistenter Snapshot); Event-Selektion
+      generisch über Payload-Pfad = Wert (`#>>`), Selektor-Überlappung dedupliziert;
+      gelöschte Dokumente liefern `exists: false` + volle Historie;
+      Policy-Minimierung wirkt automatisch (redactete Felder nur als Änderungsmarker)
+- [x] **Daten-Inventar** (Art.-30-Unterstützung): `DataInventory.Build(model)` →
+      reiner Metamodell-Report (Blatt-Pfade mit effektiver Policy inkl. Vererbung,
+      Keys, Schema-Versionen, Event-Retentions); `UnprotectedPaths` als
+      Review-Werkzeug, `ToJson()` für Verzeichnis-Anhänge/CI-Snapshots
+- [x] **`RedactHistoryAsync<T>(id, reason, paths?)`** auf der Session: historische
+      Diffs auf Redacted-Marker umschreiben (Pfade decken Nachfahren ab, `null` =
+      alles; idempotent; funktioniert nach Delete); **`RedactEventsAsync<TEvent>(
+      selectorPath, selectorValue, paths, reason)`** entfernt Payload-Felder
+      selektierter Events; beide irreversibel, Audit-Grund verpflichtend,
+      `redaction`-Block (wann/warum/Actor/Correlation) per `metadata || @audit`
+- [x] Doku: [gdpr.md](gdpr.md) (PII-Disziplin als erste Verteidigungslinie,
+      Tenant-Muster: Löschen in Scope A vs. Art.-18-Einschränkung + Fristvormerkung
+      in Scope B, Grenztabelle Kernel vs. Anwendung)
 
-**DoD:** Export-Test (Dokument + Historie + Events eines Subjekts, redactete Felder
-ohne Werte); Inventar-Test; Redaction-Test (getracktes PII-Feld nach Delete →
-RedactHistory → Klartext nachweislich aus Diff und Event-Payload entfernt, Audit-
-Metadaten gesetzt, Rollback darüber scheitert typisiert); Scope-Isolationstest
-(Erasure in Tenant A lässt Tenant B byte-identisch).
+**DoD erfüllt:** Export-Test (Subjekt-Dokument + -Events, IBAN nachweislich nie als
+Wert, Fremd-Events nicht selektiert); Inventar-Test (effektive Policies, nested
+Pfade, Keys, Retention); Redaction-Tests (Klartext aus Diffs und Event-Payloads
+entfernt, Audit-Metadaten gesetzt, Rollback scheitert typisiert, idempotent,
+Reason-Pflicht); Scope-Isolationstest (Erasure in Tenant A bei gleicher Dokument-Id
+lässt Tenant B unberührt). 141 Tests grün.
 
 ## Phase 13 — KI-Enablement (post-1.0, geplant; setzt Phase 11/12 voraus)
 

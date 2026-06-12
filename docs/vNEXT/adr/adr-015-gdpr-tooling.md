@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-06-12) · Umsetzung geplant als Phase 12
+Accepted (2026-06-12) · Umgesetzt in Phase 12 (Guide: [gdpr.md](../gdpr.md))
 
 ## Kontext
 

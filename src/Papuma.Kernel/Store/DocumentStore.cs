@@ -20,6 +20,9 @@ public sealed class DocumentStore
     /// <summary>Gets the kernel model this store operates on.</summary>
     public KernelModel Model { get; }
 
+    /// <summary>Gets the data source for kernel-internal tooling (e.g. <c>GdprExport</c>).</summary>
+    internal NpgsqlDataSource DataSource => _dataSource;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="DocumentStore"/> class.
     /// </summary>
