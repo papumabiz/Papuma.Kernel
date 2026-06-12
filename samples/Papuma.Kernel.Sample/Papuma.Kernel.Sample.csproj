@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.4.0" />
+    <PackageReference Include="NATS.Net" Version="2.8.1" />
   </ItemGroup>
 
 </Project>

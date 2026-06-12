@@ -18,6 +18,7 @@ and on the way through it you meet every concept the kernel ships:
 | Realtime UI push | [`OrderUiNotifier`](Handlers/OrderUiNotifier.cs) → SignalR `/hub/shop` | [recipe](../../docs/vNEXT/recipes/realtime-ui-notifications.md) |
 | Health check (feed lag) | `GET /health` | observability.md |
 | MCP server for AI agents | `/mcp` (read-only default) | observability.md |
+| NATS/JetStream bridge (optional) | [`NatsBridge.cs`](Handlers/NatsBridge.cs) — set `Nats:Url` | [recipe](../../docs/vNEXT/recipes/nats-bridge.md), concepts §22 |
 
 ## Run it
 

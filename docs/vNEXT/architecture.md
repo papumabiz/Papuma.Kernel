@@ -429,3 +429,6 @@ Application patterns on top of the ADRs, as drafts for later tutorials:
 - [Workflows and sagas on kernel primitives](recipes/workflow-saga.md)
   — human-in-the-loop, compensation, the dueAt timer; backed by the runnable
   [sample app](../../samples/Papuma.Kernel.Sample/README.md).
+- [The NATS bridge](recipes/nats-bridge.md)
+  — publishing both feeds to JetStream with seq-based dedup; runnable in the
+  sample via `Nats:Url`.
