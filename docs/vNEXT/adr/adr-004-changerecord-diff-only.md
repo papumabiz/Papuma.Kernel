@@ -82,3 +82,10 @@ algorithm behind the existing wire format, not as a format change.
 - Policies act per field on exactly one place (the diff entry), not on three.
 - Whoever needs the full state at a point in time pays replay costs — accepted,
   since the common case (current state) is always a direct document load.
+- **Measured (2026-06-12, closes plan risk #4):** the diff scales linearly with
+  the leaf count — ~2 µs at 10 leaves, ~16 µs at 100, ~0.3 ms at 1,000, ~4 ms
+  at 10,000 (details: `benchmarks/Papuma.Kernel.Benchmarks/README.md`).
+  Recommendation: up to ~1,000 leaf fields per document the diff is negligible
+  (cheaper than the accompanying Postgres roundtrip); beyond ~10,000 leaves the
+  cost is a symptom of an aggregate bundling independent lifecycles — remodel
+  rather than optimize.

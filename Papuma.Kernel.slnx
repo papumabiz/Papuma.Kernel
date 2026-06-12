@@ -10,4 +10,7 @@
   <Folder Name="/samples/">
     <Project Path="samples/Papuma.Kernel.Sample/Papuma.Kernel.Sample.csproj" />
   </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Papuma.Kernel.Benchmarks/Papuma.Kernel.Benchmarks.csproj" />
+  </Folder>
 </Solution>

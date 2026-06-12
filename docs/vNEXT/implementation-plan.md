@@ -414,7 +414,8 @@ Skalierungsmodell und Begründung: [concepts.md §14](concepts.md).
       Lese-Amplifikation und irrelevante Zustellungen)
 - [ ] Handler-Sharding per `document_id`-Hash (Durchsatz pro Handler über einen
       Konsumenten hinaus, Ordnung pro Dokument bleibt erhalten)
-- [ ] Diff-Engine-Benchmark bei großen Dokumenten (Risiko #4, bewusst offen)
+- [x] Diff-Engine-Benchmark bei großen Dokumenten (Risiko #4) — ✅ 2026-06-12,
+      siehe Risiko-Tabelle und ADR-004-Amendment
 - [x] Bulk-Change-Inserts via `unnest` statt Schleife (Phase-5-Notiz) —
       ✅ 2026-06-12: `InsertChangeRecordsAsync` (ein set-basiertes INSERT für alle
       ChangeRecords einer Bulk-Operation; text[]/bigint[]/int[]/jsonb[]-Arrays),
@@ -450,5 +451,5 @@ Skalierungsmodell und Begründung: [concepts.md §14](concepts.md).
 | 1 | ~~`RETURNING OLD/NEW`-Verhalten~~ | ✅ Phase 2: verifiziert für UPDATE/DELETE (Spike-Tests); Interaktion mit `jsonb_set` folgt in Phase 5 |
 | 2 | ~~PG-18-Image in CI~~ | ✅ Phase 0: `postgres:18-alpine` läuft lokal (Podman); CI-Lauf bestätigt sich beim ersten vnext-Push |
 | 3 | ~~Diff-Pfad-Syntax für Arrays~~ | ✅ Phase 2: Arrays atomar, in ADR-004 nachgetragen |
-| 4 | Performance der Diff-Engine bei großen Dokumenten | Benchmark in Phase 2; Limit-Empfehlung dokumentieren |
+| 4 | ~~Performance der Diff-Engine bei großen Dokumenten~~ | ✅ 2026-06-12: BenchmarkDotNet-Projekt (`benchmarks/`), linear skalierend — 2 µs @ 10 Blättern, 0,3 ms @ 1.000, 4 ms @ 10.000. Empfehlung in ADR-004: bis ~1.000 Blattfelder vernachlässigbar, ab ~10.000 ummodellieren (Aggregat bündelt unabhängige Lebenszyklen) |
 | 5 | ~~`Reference`-Policy: eigener Sensitive Store nötig?~~ | ✅ 2026-06-12 geschlossen: **bewusst nein** (ADR-007-Amendment). Referenzen lösen nur gegen den aktuellen Dokumentzustand auf; historische sensible Werte sind absichtlich unwiederbringlich (= Minimierung). Die v1-Motivation ist durch Phase 12 überholt (RedactHistoryAsync, Inventar, policy-bereinigter Export); legitimer Bedarf an versionierten sensiblen Werten ist Zustand → eigene Dokumente mit Policies/Retention |
