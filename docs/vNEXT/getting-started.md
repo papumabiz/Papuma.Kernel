@@ -6,6 +6,10 @@ Prerequisite: **PostgreSQL ≥ 18** ([ADR-001](adr/adr-001-postgresql-18-only.md
 The kernel in five minutes: define the model, bootstrap, write, react to changes.
 Background in [architecture.md](architecture.md) and [concepts.md](concepts.md).
 
+> Prefer to learn by building? The [tutorial](tutorial.md) walks one small app
+> from an empty folder to a feed-driven read model, step by step. This page is
+> the terse reference tour.
+
 ## 1. Define documents and events
 
 Ordinary C# classes. Convention: a `string Id` property (or `HasId(...)`).

@@ -20,6 +20,7 @@
     <None Include="..\..\docs\ai\papuma-kernel-playbook.md" Pack="true" PackagePath="docs\ai\" />
     <None Include="..\..\docs\ai\papuma-kernel-agents-snippet.md" Pack="true" PackagePath="docs\ai\" />
     <None Include="..\..\docs\ai\papuma-kernel-slice-conventions.md" Pack="true" PackagePath="docs\ai\" />
+    <None Include="..\..\docs\vNEXT\tutorial.md" Pack="true" PackagePath="docs\vNEXT\" />
     <None Include="..\..\docs\vNEXT\getting-started.md" Pack="true" PackagePath="docs\vNEXT\" />
     <None Include="..\..\docs\vNEXT\concepts.md" Pack="true" PackagePath="docs\vNEXT\" />
     <None Include="..\..\docs\vNEXT\architecture.md" Pack="true" PackagePath="docs\vNEXT\" />

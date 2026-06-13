@@ -21,6 +21,7 @@ after `dotnet restore` they are readable locally from the global packages folder
 - [Agent playbook](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/ai/papuma-kernel-playbook.md): mental model in 4 sentences, binding ADR rules, API quick map, decision tree, troubleshooting
 - [AGENTS.md snippet](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/ai/papuma-kernel-agents-snippet.md): copy-paste block for AGENTS.md/CLAUDE.md of consuming applications
 - [Slice conventions](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/ai/papuma-kernel-slice-conventions.md): canonical shape of command/view/automation/translation slices — drives scaffolding and code generators
+- [Tutorial](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/tutorial.md): learning-oriented, build one app from empty folder to a feed-driven read model (document → session → feed → handler), style-neutral
 - [Getting started](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/getting-started.md): bootstrap, write path, handlers, schema evolution in 5 minutes
 - [Concepts](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/concepts.md): 20 explanatory sections — the "why behind the how" (concurrency, feeds, checkpoints, snapshots, workflows, GDPR)
 - [Architecture](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/architecture.md): namespaces, SQL data model, write path, ADR index

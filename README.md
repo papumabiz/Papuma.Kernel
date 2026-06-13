@@ -57,7 +57,7 @@ dotnet build Papuma.Kernel.slnx
 dotnet test  Papuma.Kernel.slnx   # integration tests need Docker/Podman (PostgreSQL 18)
 ```
 
-Full API walkthrough: [docs/vNEXT/getting-started.md](docs/vNEXT/getting-started.md).
+Learn by building: [docs/vNEXT/tutorial.md](docs/vNEXT/tutorial.md) · terse API tour: [docs/vNEXT/getting-started.md](docs/vNEXT/getting-started.md).
 
 ## What ships in the box
 
@@ -114,7 +114,7 @@ Pattern guides on kernel primitives ([docs/vNEXT/recipes](docs/vNEXT/recipes)):
 
 ## Documentation map
 
-- **Start:** [getting-started.md](docs/vNEXT/getting-started.md) · marketing one-pager: [factsheet.md](docs/factsheet.md)
+- **Start:** [tutorial.md](docs/vNEXT/tutorial.md) — build one app end to end (guided) · [getting-started.md](docs/vNEXT/getting-started.md) — the five-minute API tour · marketing one-pager: [factsheet.md](docs/factsheet.md)
 - **Architecture:** [architecture.md](docs/vNEXT/architecture.md) · the *why* behind every decision: [concepts.md](docs/vNEXT/concepts.md)
 - **Decisions:** [16 ADRs](docs/vNEXT/adr) — each a single, dated, reversible choice
 - **Cross-language:** the [feed wire format](docs/vNEXT/feed-wire-format.md) consumers rely on
