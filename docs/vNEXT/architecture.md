@@ -439,6 +439,10 @@ Application patterns on top of the ADRs, as drafts for later tutorials:
 - [Field-level encryption](recipes/field-level-encryption.md)
   — storing values that must be decrypted at another trust boundary (bank
   accounts); ciphertext + Redact, envelope/KMS, and why the kernel stays out.
+- [Event Modeling slices](recipes/event-modeling-slices.md)
+  — building applications the Dymitruk/Dilger way (command/view/automation/
+  translation slices) on a document-sourced kernel; where it's even better and
+  where real Event Sourcing is the truer fit.
 
 The cross-language contract for consuming the feeds directly is specified in
 [feed-wire-format.md](feed-wire-format.md), with runnable Python/Go clients in
