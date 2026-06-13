@@ -15,9 +15,23 @@ privacy policies fit this — they are about the *feed*, and they are one-way:
 | Compare without content (password) | `Hash` (one-way) |
 | Value lives elsewhere in the same system | `Reference` |
 | **Recover the value at another trust boundary** | **application-level encryption (this recipe)** |
+| Show some characters, hide the rest (`DE****345`) | server-side presentation / a masked read-model — application territory |
 
 Encryption is the only option that allows *recovery elsewhere* — and that is
 exactly why it is application code, not a policy (concepts §27).
+
+A word on **partial masking** (`DE****345`), the last row: it is presentation,
+not persistence, so the kernel does not model it. The litmus test is *why* you
+mask. If the viewer may see the full value and you just want a tidy display, it
+is pure frontend formatting. If the viewer must **not** see the full value (a
+support agent seeing only the last digits), it is a confidentiality boundary —
+and then it must happen **server-side, before the value leaves the trusted tier**
+(CSS/JS masking over a full value in the JSON response is theatre — the value is
+in the browser's network tab). Build it as a read mapping in the application, or
+materialize a masked read-model (`ibanMasked: "DE****345"`) that never holds the
+full value; the client then receives only the masked form. The masking rule is
+format-specific (IBAN ≠ credit card ≠ email), which is the other reason it is
+domain code, not a generic kernel mechanism.
 
 ## The storage pattern
 
