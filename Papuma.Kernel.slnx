@@ -9,6 +9,8 @@
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/Papuma.Kernel.Sample/Papuma.Kernel.Sample.csproj" />
+    <Project Path="samples/event-modeled-slices/EventModeledSlices.csproj" />
+    <Project Path="samples/event-modeled-slices/tests/EventModeledSlices.Tests.csproj" />
   </Folder>
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks/Papuma.Kernel.Benchmarks/Papuma.Kernel.Benchmarks.csproj" />
