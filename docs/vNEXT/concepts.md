@@ -727,7 +727,10 @@ are two consumption paths, with a clear decision rule.
 **Path A: direct SQL from the foreign language.** A Python/Go/Node consumer
 replicates the poll loop in ~50 lines and may even keep its position in the
 same `papuma.checkpoint` table (`handler_name` is just text — pick a unique
-one). Three things it must take seriously:
+one). Runnable Python and Go clients live in
+[samples/polyglot-consumers](../../samples/polyglot-consumers/README.md),
+verified against the real feed. Three things such a consumer must take
+seriously:
 
 1. **The gapless predicate is mandatory, not an optimization**:
 

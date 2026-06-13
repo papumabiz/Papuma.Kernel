@@ -1,0 +1,6 @@
+# Go build output
+*.exe
+
+# Python virtualenv
+.venv/
+__pycache__/
