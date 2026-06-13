@@ -1,7 +1,8 @@
 # Polyglot feed consumers (Python & Go)
 
 The change feed is **not a .NET-private artifact** — it is two ordinary
-PostgreSQL tables with a documented, stable wire format (concepts §21, ADR-010).
+PostgreSQL tables with a documented, stable wire format (concepts §21, ADR-010;
+full contract in [feed-wire-format.md](../../docs/vNEXT/feed-wire-format.md)).
 Any language can consume it. These two clients prove the "~50 lines" claim: a
 [Python](python/consumer.py) and a [Go](go/main.go) consumer, each implementing
 the full pattern.

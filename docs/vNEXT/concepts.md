@@ -720,7 +720,8 @@ Can an application written in another language react to changes and events from
 a Papuma-based system? Yes — and by design. The feed is deliberately *not* a
 .NET-private artifact: it is two ordinary Postgres tables with a documented,
 stable wire format (the ADR-004 diffs are flat JSONB, queryable even from SQL:
-`diff ? 'email'`). Everything the .NET processor does is plain SQL — read the
+`diff ? 'email'`). The full contract is specified in
+[feed-wire-format.md](feed-wire-format.md). Everything the .NET processor does is plain SQL — read the
 checkpoint row, read gaplessly, advance the checkpoint, wait on NOTIFY. There
 are two consumption paths, with a clear decision rule.
 
@@ -991,6 +992,61 @@ warning when mapped without authorization metadata (security review M2) — beca
 a missing guard on an exposing endpoint is exactly the mistake worth shouting
 about. A warning respects the host's authority; opening a port behind its back
 would not.
+
+---
+
+## 26. The integration boundary: patterns, not packages
+
+→ §21 (polyglot consumers), §22 (event buses),
+[ADR-009](adr/adr-009-projections-as-dumb-handlers.md) (dumb handlers),
+[ADR-001](adr/adr-001-postgresql-18-only.md) (no provider matrix),
+[recipes/external-read-models.md](recipes/external-read-models.md),
+[feed-wire-format.md](feed-wire-format.md)
+
+Three recurring questions turn out to be one question: should the framework ship
+*client libraries* for polyglot consumers? a *bus integration package* (NATS,
+Kafka)? a *connector* for each search/vector/cache target? The answer is the same
+"no" each time, and the no is a deliberate design property, not a gap.
+
+**The shared principle: the framework provides mechanisms and patterns, never an
+integration package per target system.** What it does ship is the durable
+contract — the [feed wire format](feed-wire-format.md), two documented tables —
+plus runnable reference code (the polyglot samples, the recipes). Those are the
+"library": code you own and adapt, with no dependency to version, patch, and
+keep current.
+
+Why each "no" holds:
+
+- **Polyglot client libs (§21).** The database *is* the API. A per-language
+  library would be a second API surface to maintain across Python, Go, Node —
+  for code that is ~50 lines of poll loop, gapless predicate and checkpoint.
+  There is almost nothing to encapsulate, and the small friction of "write the
+  fifty lines or use a bus" is what steers consumers to the right architecture
+  instead of turning the database into a shared integration database.
+- **A bus integration package (§22).** A bus bridge *is* an `IChangeHandler` —
+  and handlers are application code by ADR-009, not a framework feature. Shipping
+  `Papuma.Kernel.Nats` would force `…Kafka`, `…RabbitMQ`, `…AzureServiceBus`: the
+  provider matrix ADR-001 rejected for the database, one layer up. The one real
+  subtlety (JetStream dedup via the feed `seq`, the duplicate-ack trap) lives in
+  the nats-bridge recipe, tested. The rest the engine already provides — the
+  handler is the relay, `IChangeHandler` + checkpoints + retry are the machinery.
+- **External read-model connectors.** Manticore, Qdrant, Redis are three
+  instances of one ~30-line projection pattern; what differs is only the client
+  SDK, which the kernel must not re-wrap. One recipe, a mapping table, done.
+
+The line is the same boundary drawn everywhere else (mechanisms in the kernel,
+decisions in the application — ADR-015; the kernel exposes only what it can
+police — §24; endpoint exposure is host territory — §25): at every seam where a
+library *could* helpfully reach across into a foreign system, the kernel stops at
+the contract and hands you the pattern. This keeps a one-maintainer project's
+surface small, avoids a combinatorial matrix of integration packages, and — not
+incidentally — produces *better* integrations, because the consumer keeps full
+control of code it owns rather than bending a generic wrapper to its
+environment.
+
+The one thing worth investing in instead of packages is the **precision of the
+contract**: a wire format spec sharp enough that a correct consumer in any
+language is an hour's work. That is the real polyglot product.
 
 ---
 

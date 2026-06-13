@@ -24,6 +24,7 @@
     <None Include="..\..\docs\vNEXT\architecture.md" Pack="true" PackagePath="docs\vNEXT\" />
     <None Include="..\..\docs\vNEXT\observability.md" Pack="true" PackagePath="docs\vNEXT\" />
     <None Include="..\..\docs\vNEXT\gdpr.md" Pack="true" PackagePath="docs\vNEXT\" />
+    <None Include="..\..\docs\vNEXT\feed-wire-format.md" Pack="true" PackagePath="docs\vNEXT\" />
     <None Include="..\..\docs\vNEXT\adr\*.md" Pack="true" PackagePath="docs\vNEXT\adr\" />
     <None Include="..\..\docs\vNEXT\recipes\*.md" Pack="true" PackagePath="docs\vNEXT\recipes\" />
   </ItemGroup>
