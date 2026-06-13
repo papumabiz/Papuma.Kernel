@@ -445,6 +445,11 @@ public sealed class KernelModelBuilder
 
         foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
+            if (JsonPathResolver.IsIgnored(property))
+            {
+                continue; // not serialized → no JSON path → no policy/key (review L7)
+            }
+
             var jsonName = JsonPathResolver.JsonNameOf(property);
             var path = prefix.Length == 0 ? jsonName : $"{prefix}.{jsonName}";
 

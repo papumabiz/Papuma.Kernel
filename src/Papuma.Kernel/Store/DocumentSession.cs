@@ -667,7 +667,11 @@ public sealed partial class DocumentSession : IAsyncDisposable
     }
 
     /// <summary>
-    /// Exception-filter helper: marks the span as failed without catching the exception.
+    /// Exception-filter helper for the <c>catch (Exception ex) when (RecordFailure(activity, ex))</c>
+    /// pattern: it tags the span as failed and then **always returns <c>false</c>**, so the
+    /// <c>when</c> guard never matches and the exception keeps propagating to the caller's
+    /// retry/rollback flow. This is a deliberate idiom (record-without-catch) — the
+    /// constant <c>false</c> is load-bearing and must not change (security review M5).
     /// </summary>
     private static bool RecordFailure(Activity? activity, Exception ex)
     {
@@ -688,7 +692,7 @@ public sealed partial class DocumentSession : IAsyncDisposable
         {
             _connection ??= await _dataSource.OpenConnectionAsync(ct);
             _transaction = await _connection.BeginTransactionAsync(ct);
-            await _connection.SetScopeAsync(Scope, ct);
+            await _connection.SetScopeAsync(_transaction, Scope, ct);
         }
 
         return (_connection!, _transaction);

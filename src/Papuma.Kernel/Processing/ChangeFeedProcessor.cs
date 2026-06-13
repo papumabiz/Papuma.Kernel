@@ -237,7 +237,7 @@ public sealed class ChangeFeedProcessor : IDisposable
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        await conn.SetAllScopesAsync(ct);
+        await conn.SetAllScopesAsync(tx, ct);
 
         long latestSeq;
         await using (var headCmd = conn.CreateCommand())
@@ -293,7 +293,7 @@ public sealed class ChangeFeedProcessor : IDisposable
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        await conn.SetAllScopesAsync(ct);
+        await conn.SetAllScopesAsync(tx, ct);
 
         // Leader coordination: skip the handler when another processor holds its checkpoint.
         long? checkpoint;
@@ -486,7 +486,7 @@ public sealed class ChangeFeedProcessor : IDisposable
             """;
         cmd.Parameters.AddWithValue("name", handlerName);
         cmd.Parameters.AddWithValue("seq", seq);
-        cmd.Parameters.AddWithValue("error", $"{ex.GetType().Name}: {ex.Message}");
+        cmd.Parameters.AddWithValue("error", FeedDiagnostics.SanitizeError(ex));
         cmd.Parameters.AddWithValue("baseDelay", _options.BaseRetryDelay.TotalSeconds);
         cmd.Parameters.AddWithValue("maxDelay", _options.MaxRetryDelay.TotalSeconds);
 

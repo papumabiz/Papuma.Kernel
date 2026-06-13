@@ -71,7 +71,7 @@ public static class GdprExport
 
         await using var conn = await store.DataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        await conn.SetScopeAsync(scope, ct);
+        await conn.SetScopeAsync(tx, scope, ct);
 
         var export = new JsonObject
         {

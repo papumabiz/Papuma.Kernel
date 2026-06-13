@@ -75,6 +75,11 @@ public static class DataInventory
 
         foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
+            if (JsonPathResolver.IsIgnored(property))
+            {
+                continue; // not serialized → not in the inventory (review L7)
+            }
+
             var jsonName = JsonPathResolver.JsonNameOf(property);
             var path = prefix.Length == 0 ? jsonName : $"{prefix}.{jsonName}";
 

@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
 using Npgsql;
 
@@ -14,8 +15,33 @@ namespace Papuma.Kernel.Processing;
 /// Shared diagnostics plumbing of the two feed engines (phase 11): handler spans with
 /// trace links, and the failure table as an API.
 /// </summary>
-internal static class FeedDiagnostics
+internal static partial class FeedDiagnostics
 {
+    private const int MaxStoredErrorLength = 200;
+
+    /// <summary>
+    /// Produces the value stored in <c>papuma.failure.last_error</c> from a handler
+    /// exception (security review M1): the exception type plus a length-bounded,
+    /// path-stripped message — never a stack trace. The full exception (incl. stack)
+    /// is preserved by the processor's structured logger, which the consumer governs.
+    /// </summary>
+    public static string SanitizeError(Exception ex)
+    {
+        var message = FileSystemPath().Replace(ex.Message, "<path>");
+        message = message.ReplaceLineEndings(" ").Trim();
+        if (message.Length > MaxStoredErrorLength)
+        {
+            message = message[..MaxStoredErrorLength] + "…";
+        }
+
+        return $"{ex.GetType().Name}: {message}";
+    }
+
+    // Windows (C:\…, \\server\share) and POSIX (/usr/…) absolute paths — stripped so
+    // file-system layout and incidentally-embedded data do not land in the feed table.
+    [GeneratedRegex(@"(?:[A-Za-z]:\\|\\\\|/)[^\s""']*", RegexOptions.None, matchTimeoutMilliseconds: 100)]
+    private static partial Regex FileSystemPath();
+
     /// <summary>
     /// Starts a handler span. When the record's metadata carries a <c>traceparent</c>
     /// (written by the session, phase 11), the span links to the originating trace —

@@ -24,6 +24,36 @@ generous than we ourselves would claim.**
 
 ---
 
+## 0a. Implemented in response (2026-06-13)
+
+The actionable items were addressed the same day (all 161 tests green, +14 new):
+
+- **M1** — `FeedDiagnostics.SanitizeError` now stores exception **type + a
+  path-stripped, newline-flattened, 200-char-bounded message** in
+  `papuma.failure`; both processors use it. Full detail stays in the logger.
+  (3 unit tests.)
+- **M4** — `SetScopeAsync`/`SetAllScopesAsync` now **require an
+  `NpgsqlTransaction`** parameter — the invariant is enforced by the type system,
+  not documentation. All callers updated. (Breaking change, appropriate at
+  `preview`.)
+- **M2** — `MapPapumaDashboard` emits a **startup warning** (via a `Finally`
+  endpoint convention) when mapped without authorization metadata.
+- **M5** — the exception-filter idiom now carries a load-bearing comment
+  documenting why the constant `false` must not change.
+- **L7** — `JsonPathResolver.IsIgnored` skips `[JsonIgnore]` properties in both
+  the model builder and the data inventory; no more phantom paths. (Test.)
+- **M6** — kept the validator as the (only feasible) defense for DDL identifiers
+  and added injection-rejection tests proving crafted type names are refused.
+- **Test gaps** — added `ScopeMiddleware` tests, change-feed-lag health-check
+  threshold tests (Healthy/Unhealthy), and removed the orphaned
+  `AspNetCore.Tests` artifact directory from §1.
+
+The remaining items (handler parallelization rec. 7, chaos/resilience tests
+rec. 9) stay deferred with the objective triggers already recorded in
+`docs/vNEXT/implementation-plan.md`.
+
+---
+
 ## 1. The one factual error: "empty `AspNetCore.Tests` project"
 
 The review's single **CRITICAL** test-coverage item, repeated in §2.3, §7.1

@@ -17,6 +17,11 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- The AspNetCore layer tests (middleware, dashboard) need the ASP.NET types directly. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\Papuma.Kernel\Papuma.Kernel.csproj" />
     <ProjectReference Include="..\..\src\Papuma.Kernel.AspNetCore\Papuma.Kernel.AspNetCore.csproj" />

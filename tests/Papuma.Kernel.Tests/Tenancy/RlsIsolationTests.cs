@@ -65,7 +65,7 @@ public sealed class RlsIsolationTests : IAsyncLifetime
 
         await using var conn = await _fixture.AppRoleDataSource.OpenConnectionAsync();
         await using var tx = await conn.BeginTransactionAsync();
-        await conn.SetAllScopesAsync();
+        await conn.SetAllScopesAsync(tx);
 
         var visible = await SelectAllIdsAsync(conn);
 
@@ -92,7 +92,7 @@ public sealed class RlsIsolationTests : IAsyncLifetime
     {
         await using var conn = await _fixture.AppRoleDataSource.OpenConnectionAsync();
         await using var tx = await conn.BeginTransactionAsync();
-        await conn.SetScopeAsync(ScopeContext.Tenant("rls_tenant_f"));
+        await conn.SetScopeAsync(tx, ScopeContext.Tenant("rls_tenant_f"));
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -108,7 +108,7 @@ public sealed class RlsIsolationTests : IAsyncLifetime
     {
         await using var conn = await _fixture.AppRoleDataSource.OpenConnectionAsync();
         await using var tx = await conn.BeginTransactionAsync();
-        await conn.SetScopeAsync(scope);
+        await conn.SetScopeAsync(tx, scope);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -129,7 +129,7 @@ public sealed class RlsIsolationTests : IAsyncLifetime
     {
         await using var conn = await _fixture.AppRoleDataSource.OpenConnectionAsync();
         await using var tx = await conn.BeginTransactionAsync();
-        await conn.SetScopeAsync(scope);
+        await conn.SetScopeAsync(tx, scope);
 
         return await SelectAllIdsAsync(conn);
     }

@@ -47,19 +47,28 @@ public static class ScopeConnectionExtensions
     /// </para>
     /// </remarks>
     /// <param name="connection">The open PostgreSQL connection.</param>
+    /// <param name="transaction">
+    /// The active transaction the scope is confined to. Required — the scope GUCs are
+    /// transaction-local (<c>set_config(..., true)</c>); without a transaction they would
+    /// silently degrade to session level and leak across pooled connections (security
+    /// review M4). Passing the transaction makes that invariant impossible to violate.
+    /// </param>
     /// <param name="scope">The scope context to apply.</param>
     /// <param name="ct">A cancellation token.</param>
     public static async Task SetScopeAsync(
         this NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
         ScopeContext scope,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(transaction);
         ArgumentNullException.ThrowIfNull(scope);
 
         // set_config(..., is_local: true) is the parameterizable equivalent of SET LOCAL;
         // plain SET LOCAL does not accept bind parameters in the extended protocol.
         await using var cmd = connection.CreateCommand();
+        cmd.Transaction = transaction;
         cmd.CommandText = """
             SELECT set_config('app.current_scope', @scope, true),
                    set_config('app.current_tenant', @tenantId, true)
@@ -86,14 +95,22 @@ public static class ScopeConnectionExtensions
     /// </para>
     /// </remarks>
     /// <param name="connection">The open PostgreSQL connection.</param>
+    /// <param name="transaction">
+    /// The active transaction the scope is confined to. Required for the same reason as
+    /// <see cref="SetScopeAsync"/>: <c>SET LOCAL</c> outside a transaction silently
+    /// degrades to session level (security review M4).
+    /// </param>
     /// <param name="ct">A cancellation token.</param>
     public static async Task SetAllScopesAsync(
         this NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(transaction);
 
         await using var cmd = connection.CreateCommand();
+        cmd.Transaction = transaction;
         cmd.CommandText = "SET LOCAL app.current_scope = 'All'";
         await cmd.ExecuteNonQueryAsync(ct);
     }

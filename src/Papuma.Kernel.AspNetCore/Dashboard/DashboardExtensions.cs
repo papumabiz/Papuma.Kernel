@@ -1,10 +1,12 @@
 // Copyright (c) 2026- by Harald Lapp.
 // Licensed under the MIT License. See LICENSE in the repository root for details.
 
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 using Papuma.Kernel.Events;
 using Papuma.Kernel.Processing;
@@ -66,6 +68,24 @@ public static class DashboardExtensions
         {
             var json = await DashboardDataBuilder.BuildAsync(changeProcessor, eventProcessor, collector, ct);
             return Results.Content(json.ToJsonString(), "application/json");
+        });
+
+        // Pit-of-success nudge (security review M2): the dashboard exposes operational
+        // metadata. A Finally convention runs after any chained .RequireAuthorization(),
+        // so if no authorization metadata is present we warn once at startup.
+        ((IEndpointConventionBuilder)group).Finally(builder =>
+        {
+            if (builder.Metadata.OfType<IAuthorizeData>().Any())
+            {
+                return;
+            }
+
+            endpoints.ServiceProvider.GetService<ILoggerFactory>()?
+                .CreateLogger("Papuma.Kernel.Dashboard")
+                .LogWarning(
+                    "Papuma dashboard mapped at '{Path}' without authorization. It exposes handler " +
+                    "names, lag, failures and error messages. Chain .RequireAuthorization() on " +
+                    "MapPapumaDashboard(...) or bind it to an internal-only endpoint.", path);
         });
 
         return group;

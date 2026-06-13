@@ -50,6 +50,15 @@ internal static class JsonPathResolver
     }
 
     /// <summary>
+    /// Returns whether a property is excluded from serialization via
+    /// <see cref="System.Text.Json.Serialization.JsonIgnoreAttribute"/>. Such properties
+    /// have no JSON path, so declaring a policy or key on them would be a no-op — the
+    /// metamodel scan skips them so the inventory lists no phantom paths (review L7).
+    /// </summary>
+    public static bool IsIgnored(PropertyInfo property) =>
+        property.GetCustomAttribute<System.Text.Json.Serialization.JsonIgnoreAttribute>() is not null;
+
+    /// <summary>
     /// Returns the serialized JSON name of a property (naming policy applied,
     /// <see cref="System.Text.Json.Serialization.JsonPropertyNameAttribute"/> respected).
     /// </summary>

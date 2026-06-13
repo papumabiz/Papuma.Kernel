@@ -56,7 +56,7 @@ public sealed class ApprovalEscalationService(
         await using (var conn = await dataSource.OpenConnectionAsync(ct))
         await using (var tx = await conn.BeginTransactionAsync(ct))
         {
-            await conn.SetScopeAsync(scope, ct);
+            await conn.SetScopeAsync(tx, scope, ct);
 
             await using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
