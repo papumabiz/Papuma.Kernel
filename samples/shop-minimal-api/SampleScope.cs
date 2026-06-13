@@ -4,7 +4,7 @@
 using Papuma.Kernel.AspNetCore.Tenancy;
 using Papuma.Kernel.Tenancy;
 
-namespace Papuma.Kernel.Sample;
+namespace ShopMinimalApi;
 
 /// <summary>
 /// The sample runs single-tenant for readability: every request and worker uses the

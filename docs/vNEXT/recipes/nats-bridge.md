@@ -1,7 +1,7 @@
 # Recipe: The NATS bridge — publishing the feeds to JetStream
 
 Status: verified against running code (2026-06-12) — the bridge lives in the
-sample ([NatsBridge.cs](../../samples/Papuma.Kernel.Sample/Handlers/NatsBridge.cs),
+sample ([NatsBridge.cs](../../../samples/shop-minimal-api/Handlers/NatsBridge.cs),
 NATS.Net 2.8.1) and was proven end-to-end including the dedup behavior below.
 Background: [concepts §22](../concepts.md) ("the feed is the outbox").
 
@@ -97,7 +97,7 @@ nats consumer add PAPUMA shop-sync --filter "papuma.change.demo.>" \
 
 ```bash
 docker run -d --name nats -p 4222:4222 -p 8222:8222 nats:latest -js -m 8222
-Nats__Url=nats://127.0.0.1:4222 dotnet run --project samples/Papuma.Kernel.Sample
+Nats__Url=nats://127.0.0.1:4222 dotnet run --project samples/shop-minimal-api
 # place orders, then inspect: curl -s localhost:8222/jsz?streams=true | jq
 ```
 

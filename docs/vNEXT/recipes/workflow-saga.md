@@ -2,7 +2,7 @@
 
 Status: verified against running code (2026-06-12) — everything in this recipe
 exists as an executable sample in
-[samples/Papuma.Kernel.Sample](../../samples/Papuma.Kernel.Sample/README.md).
+[samples/shop-minimal-api](../../../samples/shop-minimal-api/README.md).
 Background: [concepts §18](../concepts.md) ("waiting is state, not a thread").
 
 The kernel ships no workflow engine — deliberately. This recipe shows why it
@@ -14,8 +14,8 @@ transitions and a complete audit log are already primitives. The workflow
 
 | Workflow need | Kernel primitive | In the sample |
 |---|---|---|
-| Durable state machine per instance | a document (`status` + data) | [`Order`](../../samples/Papuma.Kernel.Sample/Domain.cs) |
-| React to facts | change/event feed handlers | [`OrderWorkflowHandler`](../../samples/Papuma.Kernel.Sample/Handlers/OrderWorkflowHandler.cs) |
+| Durable state machine per instance | a document (`status` + data) | [`Order`](../../../samples/shop-minimal-api/Domain.cs) |
+| React to facts | change/event feed handlers | [`OrderWorkflowHandler`](../../../samples/shop-minimal-api/Handlers/OrderWorkflowHandler.cs) |
 | Race-safe transitions | `expectedVersion` on the instance write | the decide endpoint + the handler |
 | Execution log | the instance's change feed | `GET /orders/{id}/history` |
 
@@ -84,7 +84,7 @@ gapless stock ledger.
 
 "Escalate if nobody decides in time" needs a clock — the kernel deliberately has
 none. The recipe is a `dueAt` field plus a small hosted service
-([`ApprovalEscalationService`](../../samples/Papuma.Kernel.Sample/Services/ApprovalEscalationService.cs)):
+([`ApprovalEscalationService`](../../../samples/shop-minimal-api/Services/ApprovalEscalationService.cs)):
 
 1. **Find due instances** with a read-only SQL lens over the store (explicit
    scope predicates; the caveats of concepts §16 apply):

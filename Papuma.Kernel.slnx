@@ -8,7 +8,7 @@
     <Project Path="tests/Papuma.Kernel.Tests/Papuma.Kernel.Tests.csproj" />
   </Folder>
   <Folder Name="/samples/">
-    <Project Path="samples/Papuma.Kernel.Sample/Papuma.Kernel.Sample.csproj" />
+    <Project Path="samples/shop-minimal-api/ShopMinimalApi.csproj" />
     <Project Path="samples/event-modeled-slices/EventModeledSlices.csproj" />
     <Project Path="samples/event-modeled-slices/tests/EventModeledSlices.Tests.csproj" />
   </Folder>

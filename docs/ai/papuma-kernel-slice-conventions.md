@@ -156,7 +156,7 @@ any business logic — it is not mechanical.
    file, concepts, ADRs, wire format). After `dotnet restore` they are on disk.
 2. **Copy the [AGENTS.md snippet](papuma-kernel-agents-snippet.md)** into the
    generator project's `AGENTS.md`/`CLAUDE.md` so the rules are always in context.
-3. **Read this file** as the slice spec and the [sample](../../samples/Papuma.Kernel.Sample/README.md)
+3. **Read this file** as the slice spec and the [sample](../../samples/shop-minimal-api/README.md)
    as the few-shot example.
 4. Optionally point an agent at the running app's **MCP** `get_model_inventory`
    for the live type/policy/key list.

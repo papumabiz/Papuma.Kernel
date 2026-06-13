@@ -10,7 +10,7 @@ using Papuma.Kernel.Changes;
 using Papuma.Kernel.Events;
 using Papuma.Kernel.Processing;
 
-namespace Papuma.Kernel.Sample.Handlers;
+namespace ShopMinimalApi.Handlers;
 
 // The NATS bridge (recipe: nats-bridge, concepts §22): the derived feed is already
 // a transactional outbox, so the bus attachment is just another dumb handler —

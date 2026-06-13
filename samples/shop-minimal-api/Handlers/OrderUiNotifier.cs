@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.SignalR;
 using Papuma.Kernel.Changes;
 using Papuma.Kernel.Processing;
 
-namespace Papuma.Kernel.Sample.Handlers;
+namespace ShopMinimalApi.Handlers;
 
 /// <summary>SignalR hub clients join to watch the shop (recipe: realtime-ui-notifications).</summary>
 public sealed class ShopHub : Hub;

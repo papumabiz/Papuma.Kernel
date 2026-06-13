@@ -1,6 +1,6 @@
 # Papuma.Kernel Sample — the shop walkthrough as httpYAC requests.
 #
-# Usage: start the sample (dotnet run --project samples/Papuma.Kernel.Sample),
+# Usage: start the sample (dotnet run --project samples/shop-minimal-api),
 # then run the requests top to bottom (httpYAC: "send all" works — named
 # responses chain the ids automatically; @sleep gives the feed handlers a moment).
 # Environment: requests/http-client.env.json (host = http://localhost:5099).

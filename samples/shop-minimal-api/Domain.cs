@@ -3,7 +3,7 @@
 
 using Papuma.Kernel.Model;
 
-namespace Papuma.Kernel.Sample;
+namespace ShopMinimalApi;
 
 // The domain of the sample shop. Plain records — the kernel needs nothing more
 // than a string Id (convention) and optional policy attributes (ADR-007).

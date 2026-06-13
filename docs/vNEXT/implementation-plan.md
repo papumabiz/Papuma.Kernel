@@ -447,7 +447,7 @@ Reihenfolge 1 → 3 → 2.
       genutzt von BulkPatch und BulkDelete; Verhalten unverändert (145 Tests grün)
 - [x] Workflow-/Saga-Rezept (concepts §18) — ✅ 2026-06-12 als
       [recipes/workflow-saga.md](recipes/workflow-saga.md) **plus lauffähige
-      Sample-App** [samples/Papuma.Kernel.Sample](../../samples/Papuma.Kernel.Sample/README.md):
+      Sample-App** [samples/shop-minimal-api](../../samples/shop-minimal-api/README.md):
       Mini-Shop mit Bounded-Counter-Inventar, Order-Saga (Approval-Task als
       Human-in-the-Loop, Rejection-Kompensation), `dueAt`-Eskalations-Poller,
       SignalR-Push, Health-Check und MCP-Endpoint — End-to-End gegen PG 18

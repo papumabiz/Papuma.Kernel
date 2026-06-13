@@ -1,6 +1,6 @@
 {
   "profiles": {
-    "Papuma.Kernel.Sample": {
+    "ShopMinimalApi": {
       "commandName": "Project",
       "applicationUrl": "http://localhost:5099",
       "environmentVariables": {

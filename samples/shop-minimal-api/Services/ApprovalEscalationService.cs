@@ -8,7 +8,7 @@ using Papuma.Kernel.Tenancy;
 
 using SessionOptions = Papuma.Kernel.Store.SessionOptions;
 
-namespace Papuma.Kernel.Sample.Services;
+namespace ShopMinimalApi.Services;
 
 /// <summary>
 /// The timer primitive of the workflow recipe (concepts §18): the kernel has

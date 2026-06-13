@@ -7,7 +7,7 @@ using Papuma.Kernel.Store;
 
 using SessionOptions = Papuma.Kernel.Store.SessionOptions;
 
-namespace Papuma.Kernel.Sample.Handlers;
+namespace ShopMinimalApi.Handlers;
 
 /// <summary>
 /// The saga / process manager of the sample (concepts §18, recipe: workflow-saga).

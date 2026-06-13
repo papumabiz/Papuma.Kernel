@@ -4,7 +4,7 @@
 namespace EventModeledSlices;
 
 // A deliberately tiny domain — just enough to show one slice of each type.
-// Compare the full Minimal-API sample (Papuma.Kernel.Sample) for the breadth of
+// Compare the full Minimal-API sample (shop-minimal-api) for the breadth of
 // features; this sample shows the *shape* of event-modeled vertical slices.
 
 public sealed record Product(string Id, string Name, decimal Price);

@@ -31,7 +31,7 @@ docker run -d --name papuma-sample-pg \
   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=papuma_sample \
   -p 5432:5432 postgres:18-alpine
 
-dotnet run --project samples/Papuma.Kernel.Sample
+dotnet run --project samples/shop-minimal-api
 ```
 
 (Podman works identically. A different port/credentials: override

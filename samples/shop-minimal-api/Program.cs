@@ -13,9 +13,9 @@ using Papuma.Kernel.AspNetCore.Processing;
 using Papuma.Kernel.AspNetCore.Tenancy;
 using Papuma.Kernel.Hosting;
 using Papuma.Kernel.Mcp;
-using Papuma.Kernel.Sample;
-using Papuma.Kernel.Sample.Handlers;
-using Papuma.Kernel.Sample.Services;
+using ShopMinimalApi;
+using ShopMinimalApi.Handlers;
+using ShopMinimalApi.Services;
 using Papuma.Kernel.Store;
 
 // ASP.NET Core has its own SessionOptions — the kernel's is meant everywhere here.
