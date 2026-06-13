@@ -23,6 +23,7 @@ Features/<SliceName>/
   <SliceName>Decider.cs   # pure business logic              [VARIABLE — the value]
   <SliceName>Handler.cs   # load → decide → write            [INVARIANT shape]
   <SliceName>Endpoint.cs  # IEndpointRouteBuilder mapping     [INVARIANT shape]
+  <SliceName>Registration.cs # model fragment + handler wiring [INVARIANT shape]
   <SliceName>Tests.cs     # GIVEN/WHEN/THEN                   [INVARIANT shape, VARIABLE asserts]
 ```
 
@@ -119,6 +120,56 @@ publishing to a bus (the [NATS bridge](../vNEXT/recipes/nats-bridge.md)).
 Inbound is a command slice whose DTO comes from the external contract; outbound
 is an automation slice whose action is a publish.
 
+## Registration: each slice wires itself
+
+The slice owns its endpoint (`MapPlaceOrder()`) — and, by the same logic, the
+documents/events it introduces and the handlers it registers. Both kernel
+builders are fluent (`KernelModelBuilder.Document<T>()` and
+`PapumaKernelBuilder.AddChangeHandler<T>()` return the builder), so a slice
+contributes via two small extension methods next to its code:
+
+```csharp
+// Features/PlaceOrder/PlaceOrderRegistration.cs — co-located with the slice.
+public static class PlaceOrderRegistration
+{
+    // the model fragment this slice owns (a generator emits this from the slice's types)
+    public static KernelModelBuilder AddOrdering(this KernelModelBuilder m) => m
+        .Document<Order>()
+        .Document<Inventory>(d => d.Validate(inv =>
+        {
+            if (inv.Stock < 0) throw new OutOfStockException(inv.Id);
+        }));
+
+    // the handlers this slice owns
+    public static PapumaKernelBuilder AddOrderingHandlers(this PapumaKernelBuilder k) => k
+        .AddChangeHandler<OnOrderPlaced>();
+}
+```
+
+`Program.cs` then reads as a table of contents — one line per slice, no growing
+blob:
+
+```csharp
+builder.Services
+    .AddPapumaKernel(o =>
+    {
+        o.ConnectionString = config.GetConnectionString("papuma");
+        o.Model(m => m.AddOrdering().AddCatalog().AddUsers());   // each slice's fragment
+    })
+    .AddOrderingHandlers()                                       // each slice's handlers
+    .AddCatalogHandlers();
+
+app.MapPlaceOrder();   // each slice's endpoint (already the convention above)
+app.MapOrderById();
+```
+
+Why this and not one central `AddMyApp()` extension: a monolith that relocates
+the same lines hides nothing — it only adds indirection. Co-locating keeps every
+definition with the feature that owns it, so adding or deleting a slice touches
+one folder, and the bootstrap file stays a readable index. (For a small, single-
+slice or non-slice app, inline registration is fine — extract only when the model
+block actually grows. Don't add the seam before there is bloat to absorb.)
+
 ## The GIVEN / WHEN / THEN test (per slice)
 
 Two layers (event-modeling-slices.md, "Testing without infrastructure"):
@@ -142,6 +193,7 @@ public async Task PlaceOrder_WithStock_ReservesAndApproves() { /* GIVEN docs, WH
 | DTO | slice name + selected model fields | — |
 | Handler | slice type template + document type | — |
 | Endpoint | slice name + route convention | — |
+| Registration | slice name + the documents/handlers it owns | — |
 | Test scaffold | slice type template | the assertions |
 | **Decider** | a stub signature | **the human/agent — the business rule** |
 
