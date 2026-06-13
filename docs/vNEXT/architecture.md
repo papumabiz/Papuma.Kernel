@@ -417,6 +417,7 @@ of documents and changes, the `DocumentSession` is always bound to a tenant, and
 | [013](adr/adr-013-business-event-log.md) | Domain events: translator, append-only event log and trigger handlers | Accepted |
 | [014](adr/adr-014-bulk-operations.md) | Bulk operations as set-based patch (key predicates or id lists, one ChangeRecord per document) | Accepted |
 | [015](adr/adr-015-gdpr-tooling.md) | GDPR tooling: export/inventory/redaction in the kernel, legal decisions per tenant in the application | Accepted (implemented: phase 12) |
+| [016](adr/adr-016-policy-projected-reads.md) | Policy-projected reads (masked load) + the content MCP boundary; no generic projection MCP | Accepted (implementation planned) |
 
 ## 13. Recipes (tutorial precursors)
 

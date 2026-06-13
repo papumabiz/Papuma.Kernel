@@ -903,6 +903,61 @@ fail-closed case is the worst case a caller can even reach.
 
 ---
 
+## 24. Policies as a projection, not just a diff transformation
+
+→ [ADR-016](adr/adr-016-policy-projected-reads.md), [ADR-007](adr/adr-007-privacy-policies.md),
+§21 (safe LLM reading), §23 (fail-closed isolation)
+
+The privacy policies started life as a *diff transformation*: when the feed is
+produced, a `[SensitiveData]` field becomes `{"changed": true}`, a `[TrackHash]`
+field becomes a hash, and so on (ADR-007). That framing quietly assumed policies
+are about the **feed**. The document store itself holds plain text — which is
+correct for `LoadAsync` in business logic (you often *need* the real email to log
+someone in), and safe because that path runs inside the application's own
+authorization boundary.
+
+The question "can an AI agent read documents over MCP?" exposed the hidden
+assumption. An agent reading the store directly would see the clear text — the
+exact opposite of the property that makes the *feed* safe to hand an LLM (§21).
+The realization: **a policy is not inherently about diffs. It is a statement about
+a field's sensitivity, and that statement should be enforceable wherever the
+field crosses a trust boundary — write-time feed *and* read-time projection.**
+
+So the same policy catalog is generalized to a **policy-projected read**: load a
+document, apply the field policies to its current values, and return the masked
+shape. The unifying invariant is deliberately simple and memorable:
+
+> A policy-projected read shows exactly what the feed shows — never more.
+
+Only `Track` fields survive in clear text; `Redact`/`Reference` are masked,
+`Hash` becomes the hash, `DoNotTrack` is omitted. One policy definition now has
+two enforcement sites (the diff at write time, the projection at read time), so a
+field's sensitivity can never drift between "how it looks in the feed" and "how it
+looks to an agent."
+
+Two boundaries keep this honest:
+
+- **Masking is minimization, not authorization.** It controls *what* of a
+  document an agent sees, never *whether* the agent may see that document at all —
+  that stays scope binding plus the host's auth (§23 is the isolation story;
+  this is the content-shape story). The two compose: scope decides the rows,
+  policy projection decides the columns.
+- **The clear-text path still exists, on purpose.** `LoadAsync` returns the full
+  document for in-process business logic. The masked read is the variant for
+  consumers you would not hand the raw store to — AI agents, support surfaces.
+  Choosing between them is choosing a trust level, and the type system makes that
+  choice explicit rather than accidental.
+
+The same reasoning draws the line at projections. A projection is application
+state in an application-owned store (ADR-009) — the kernel neither knows its shape
+nor controls its sensitivity, so it cannot project policies onto it. A generic
+"query my projections" MCP tool would therefore be both a query-DSL in disguise
+and an unpoliced read. Projection access is the application's tool to build; the
+kernel exposes only what it can police: documents (by declared key) and the
+already-minimized feed.
+
+---
+
 *Maintenance note: add new explainers from later phases here — this document is
 the collection point for the "why behind the how" and raw material for the
 tutorials (phase 9).*
