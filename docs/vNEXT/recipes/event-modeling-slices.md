@@ -38,6 +38,58 @@ aggregate rehydration — simply isn't there (concepts §20: the snapshot is
 inverted). Look at the PlaceOrder slice: it `LoadAsync<Product>`, decrements
 stock, writes the order — no rehydration, no fold-over-events.
 
+## What happens to the Decider?
+
+The functional Decider (Chassaing) is two pure functions, not one:
+`decide(command, state) → events` (the decision) and `evolve(state, event) →
+state` (the fold that rebuilds state from events). Document-sourcing changes only
+the second:
+
+- **`evolve` collapses.** In event sourcing you fold the stream to get the state
+  before deciding; in Papuma the state *is* the document (`LoadAsync`), so there
+  is nothing to fold. You do not write `evolve` — the database does (diff +
+  version on write).
+- **`decide` stays — and you should keep it pure.** The business rule ("may this
+  order be placed? if so, what is the result?") is the heart of every command
+  slice regardless of storage. Extract it as an I/O-free function
+  `(Order current, Command cmd) → Order` (or a typed rejection). The handler then
+  shrinks to `Load → decide(pure) → Save`.
+
+So the Decider does not vanish; it collapses from two functions to essentially
+one. Instead of `decide → events` then `evolve(state, events) → state'`, you
+write `decide(command, state) → state'` directly — the decision produces the new
+document state rather than events to be folded. That collapse is exactly why the
+command slice is simpler here: not because the decision logic disappears, but
+because its second half becomes the database's job.
+
+## Testing without infrastructure
+
+One of Event Modeling's best properties is that business logic is testable with
+no infrastructure. Papuma delivers that **on the level that matters**, with one
+honest caveat:
+
+- **The pure `decide` function: fully infrastructure-free.** If you extracted it
+  as above, you test it exactly like an event-sourced decider — GIVEN state, WHEN
+  `decide(command)`, THEN new state / expected rejection — in memory, no mock, no
+  database, milliseconds. This is the bulk of your business logic and the bulk of
+  your tests.
+- **The slice as a whole (Load → decide → Save): an integration test** against
+  real PostgreSQL (Testcontainers, the way the kernel tests itself). It verifies
+  the wiring and the derived change, not the business rule.
+
+Why this is not a step down from event sourcing: in ES you write `evolve`
+yourself and test it; in Papuma `evolve` is the database's job, already tested by
+the kernel — there is nothing of yours to unit-test there. The "missing"
+in-memory test is one you no longer need, not one you lost: less of your own
+mechanism means less to test, and the pure logic stays just as isolated.
+
+It only gets hard if you *don't* separate the logic — Load + decision + Save
+mashed into one endpoint method forces every logic test through the database.
+That is self-inflicted, not a Papuma constraint, and the cure is the Decider
+discipline above: keep the decision pure, keep the handler thin. Papuma does not
+push you there, but it rewards it — a thin handler is a pure `decide` plus a
+couple of slice integration tests, nothing more.
+
 ## The slice as a unit of code
 
 Vertical slices are orthogonal to storage — Papuma enforces no layering, so a
