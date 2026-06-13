@@ -847,6 +847,62 @@ get a stable, intention-revealing contract instead of your document shapes.
 
 ---
 
+## 23. Why tenant isolation fails closed (and why two layers, not one)
+
+→ [ADR-007](adr/adr-007-privacy-policies.md), architecture §4/§10,
+§11 (the same `set_config` mechanics)
+
+Every kernel query carries two independent isolation layers: explicit
+`WHERE scope = @scope AND tenant_id = @tenantId` predicates (layer 1) **and**
+PostgreSQL row-level security driven by per-transaction GUCs
+(`set_config('app.current_scope', …, is_local: true)`, layer 2). The obvious
+question is whether the second layer is just paranoia. It is not — the two cover
+*different failure modes*, and the decisive property is that the combination
+**fails closed**: a mistake makes data vanish from view, it does not leak.
+
+The instructive case is "what if the scope GUC is never set?" — for example a
+direct consumer who calls `SetScopeAsync` on a connection without a transaction
+(the foot-gun that the typed-transaction parameter now prevents, security review
+M4). Walk the mechanics:
+
+1. `set_config(…, is_local: true)` and `SET LOCAL` are **transaction-local**.
+   Outside a transaction they do *not* degrade to a session-level `SET` that
+   would stick on the pooled connection — the value applies only to the implicit
+   single-statement transaction and is gone immediately. There is no persistent
+   wrong-scope remnant. The failure is "no scope," not "stale scope."
+2. The RLS policy reads `current_setting('app.current_scope', true)` — the `true`
+   means "missing → NULL, don't error." With no scope set, every `OR` branch of
+   the policy evaluates against `NULL` and yields false. **No rows are visible.**
+   A missing scope locks out; it does not open up.
+3. Even then, layer 1 still holds: the explicit predicates bind to the *query
+   parameter*, not the GUC. The rows a query can return are bounded by what the
+   caller passed, independent of whether RLS is active.
+
+So the realistic outcome of the worst plausible misuse is **empty reads**
+(annoying — looks like "data gone"), never cross-tenant disclosure. That is why
+M4 was a Medium, not a Critical: the architecture converts a scope mistake into
+a fail-closed symptom.
+
+The two layers map onto two distinct threats, which is why neither is redundant:
+
+- **Layer 1 (explicit predicates)** defends against an *RLS gap* — a forgotten
+  policy on a new table, a `BYPASSRLS` role, a superuser connection. It is always
+  active and does not depend on session state.
+- **Layer 2 (RLS, `FORCE ROW LEVEL SECURITY`)** defends against an *application
+  bug* — a hand-written query that forgets its `WHERE tenant_id`, or raw SQL from
+  a consumer. It subjects even the table owner, so "we run as the owner" is not
+  an escape hatch.
+
+A leak needs **both** layers to fail at once *and* a persistent wrong-scope
+remnant to exist — and the transaction-local GUCs structurally prevent the third
+ingredient. Defense in depth here is not two locks on the same door; it is two
+doors that fail for different reasons, so a single mistake is never sufficient.
+The lesson generalizes: when isolation is unforgiving, design the *failure* to be
+fail-closed, then make the safe path the only typed path (the M4 fix) so the
+fail-closed case is the worst case a caller can even reach.
+
+---
+
 *Maintenance note: add new explainers from later phases here — this document is
 the collection point for the "why behind the how" and raw material for the
 tutorials (phase 9).*
