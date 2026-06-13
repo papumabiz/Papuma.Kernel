@@ -65,7 +65,7 @@ reversible field diff.
 | **Event log** | First-class facts (`UserLoggedIn`) next to state changes, same transaction, same policies, per-type retention |
 | **Schema evolution** | Lazy upcasting with version guards — class changes are a tested function, not a migration weekend |
 | **Observability** | BCL `Meter` + `ActivitySource` (zero vendor dependencies) · OpenTelemetry-ready · feed-lag health check · trace propagation from request to projection · **embedded live dashboard** (`MapPapumaDashboard()`) for the day before Prometheus exists |
-| **AI-ready** | MCP server over the diagnostics APIs (read-only by default) · agent playbook and docs shipped inside the NuGet package · the policy-minimized feed is safe LLM reading material by construction |
+| **AI-ready** | MCP server over the diagnostics APIs **and scope-bound, policy-masked reads** (read-only by default) · agent playbook and docs shipped inside the NuGet package · the policy-minimized feed is safe LLM reading material by construction |
 
 ---
 
@@ -80,8 +80,8 @@ Measured on commodity hardware (i7, local PG-18 container; reusable probes in
 | Feed engine ceiling (delivery overhead per change) | ~37 µs |
 | Realistic projection handler (1 SQL upsert per change) | ~1,400 changes/s |
 | Diff engine, 1,000-field document | ~0.3 ms |
-| Integration tests against real PostgreSQL 18 | 147, green |
-| Architecture decision records | 15 |
+| Integration tests against real PostgreSQL 18 | 167, green |
+| Architecture decision records | 16 |
 
 Scaling limits are not hidden — they are documented with the metric that
 detects them and the designed escape route for each
@@ -98,9 +98,12 @@ detects them and the designed escape route for each
   into exactly-once with one line of dedup.
 - **SQL stays a first-class citizen** — views over the JSONB store are a
   sanctioned read lens; reporting and BI need no export pipeline.
-- **A complete sample application** (mini shop) exercises every concept:
-  approval workflows with humans in the loop, saga compensation, inventory
-  that cannot oversell, realtime UI push, the MCP endpoint and the dashboard.
+- **Three runnable samples** carry it from breadth to shape to reach: a
+  mini-shop Minimal API exercising every concept (approval workflows with humans
+  in the loop, saga compensation, inventory that cannot oversell, realtime UI
+  push, the MCP endpoint and the dashboard); a set of event-modeled vertical
+  slices (one Command/View/Automation each, with an infrastructure-free Decider
+  test); and Python + Go feed consumers proving the cross-language wire format.
 
 ---
 
@@ -121,7 +124,7 @@ Honesty is cheaper than disappointment:
 
 ## Maturity, stated plainly
 
-`1.0.0-preview` — the design is complete (13 implementation phases, 15 ADRs,
+`1.0.0-preview` — the design is complete (13 implementation phases, 16 ADRs,
 every identified risk closed with tests or measurements), but it has **not yet
 carried production traffic**. Best fit today: internal line-of-business
 systems and new products built by teams that control their PostgreSQL version.
