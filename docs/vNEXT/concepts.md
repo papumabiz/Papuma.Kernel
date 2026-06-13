@@ -958,6 +958,39 @@ already-minimized feed.
 
 ---
 
+## 25. Endpoint exposure is host territory — the library only hands you the lever
+
+→ [observability.md](observability.md), [ADR-015](adr/adr-015-gdpr-tooling.md)
+(mechanisms vs. decisions), §24 (the same line, one layer up)
+
+The dashboard and the MCP server expose operational metadata and masked document
+data — they clearly should not sit on the public surface unguarded. The tempting
+"fix" is for the library to make that safe: open a dedicated internal port, or
+require auth by default. Both are wrong, for the same reason the kernel does not
+decide tenancy or workflow definitions: **which ports a process opens, and what
+guards a route carries, is the host's decision, not a library's.**
+
+A second Kestrel listener belongs in the application's `ConfigureKestrel`,
+entangled with how it is deployed — which ports the container publishes, the
+ingress rules, the health-probe port. A library that reached in and opened a port
+would collide with all of that. So `MapPapumaDashboard()` and `MapMcp()` do the
+restrained thing: they return an `IEndpointConventionBuilder` and stop there. The
+application then composes the guard it actually wants —
+`.RequireHost("*:9090")` to pin to a management port, `.RequireAuthorization(...)`,
+or nothing because an ingress already blocks it (observability.md lists the three
+layers).
+
+This is the same boundary as everywhere else in the kernel, one layer up: the
+library provides the *mechanism* (a route, and a builder to shape it), the
+application makes the *decision* (where it lives, who may reach it). The one
+nudge the library does allow itself is a fail-loud one — the dashboard logs a
+warning when mapped without authorization metadata (security review M2) — because
+a missing guard on an exposing endpoint is exactly the mistake worth shouting
+about. A warning respects the host's authority; opening a port behind its back
+would not.
+
+---
+
 *Maintenance note: add new explainers from later phases here — this document is
 the collection point for the "why behind the how" and raw material for the
 tutorials (phase 9).*

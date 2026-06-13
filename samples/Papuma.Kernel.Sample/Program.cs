@@ -23,6 +23,21 @@ using SessionOptions = Papuma.Kernel.Store.SessionOptions;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// ── Optional management port (concepts §25, observability.md) ───────────────────
+// Internal endpoints (dashboard, MCP) expose operational metadata; they should not
+// share the public surface. Set "ManagementPort" to bind them to a second,
+// localhost-only Kestrel listener — the library never opens a port itself (that is
+// host territory), it only returns endpoint builders we pin with RequireHost below.
+var managementPort = builder.Configuration.GetValue<int?>("ManagementPort");
+if (managementPort is int mgmtListenPort)
+{
+    builder.WebHost.ConfigureKestrel(k =>
+    {
+        k.ListenAnyIP(builder.Configuration.GetValue("MainPort", 5099)); // public API
+        k.ListenLocalhost(mgmtListenPort);                               // internal only
+    });
+}
+
 // ── Kernel bootstrap: model, schema, feed workers (getting-started §2) ─────────
 var kernel = builder.Services
     .AddPapumaKernel(o =>
@@ -216,9 +231,18 @@ app.MapGet("/products/{id}/stock", async (string id, DocumentStore store, HttpCo
 });
 
 app.MapHub<ShopHub>("/hub/shop");   // realtime push (recipe: realtime-ui-notifications)
-app.MapHealthChecks("/health");     // includes the change-feed lag check
-app.MapMcp("/mcp");                 // AI agents: get_feed_lag, get_document_history, …
-app.MapPapumaDashboard("/papuma");  // lag, failures, throughput — live in the browser
+app.MapHealthChecks("/health");     // public: load-balancer probes
+
+// Internal endpoints. They return IEndpointConventionBuilder, so we can pin them to
+// the management port when one is configured (concepts §25). In production, prefer
+// also .RequireAuthorization(...) and/or a network-level block (observability.md).
+var mcp = app.MapMcp("/mcp");                  // AI agents: get_document, get_feed_lag, …
+var dashboard = app.MapPapumaDashboard("/papuma"); // lag, failures, throughput in the browser
+if (managementPort is int mgmtBindPort)
+{
+    mcp.RequireHost($"*:{mgmtBindPort}");
+    dashboard.RequireHost($"*:{mgmtBindPort}");
+}
 
 app.Run();
 

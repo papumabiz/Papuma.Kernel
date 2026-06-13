@@ -19,6 +19,7 @@ and on the way through it you meet every concept the kernel ships:
 | Health check (feed lag) | `GET /health` | observability.md |
 | MCP server for AI agents | `/mcp` (read-only default) | observability.md |
 | Embedded dashboard (lag, failures, throughput) | open `/papuma` in a browser | observability.md |
+| Management port (keep dashboard/MCP off the public surface) | set `ManagementPort` (+ `MainPort`) — `/papuma` & `/mcp` move there, `RequireHost`-pinned | observability.md, concepts §25 |
 | NATS/JetStream bridge (optional) | [`NatsBridge.cs`](Handlers/NatsBridge.cs) — set `Nats:Url` | [recipe](../../docs/vNEXT/recipes/nats-bridge.md), concepts §22 |
 
 ## Run it

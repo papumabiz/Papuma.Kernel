@@ -139,3 +139,38 @@ The server runs **inside the application** (the metamodel only comes into being
 at app startup from CLR types + fluent config — an external process does not know
 it). Deliberately no `gdpr_export` tool: a data-subject export is an application
 workflow with delivery decisions, not an agent capability.
+
+## Exposing the dashboard and MCP safely
+
+Both `/papuma` and `/mcp` expose operational metadata (handler names, lag, error
+messages) and, for the content tools, masked document data. They must not sit on
+the public surface unguarded. The library never opens a port itself — that is
+host territory (concepts §25) — but `MapPapumaDashboard()` and `MapMcp()` return
+`IEndpointConventionBuilder`, so you pin them with the standard ASP.NET means.
+Three layers, from most robust to most convenient:
+
+1. **Network level (most robust, infrastructure).** A reverse proxy / ingress /
+   k8s NetworkPolicy blocks `/papuma` and `/mcp` from outside. Does not depend on
+   app code; the right answer for most production deployments.
+2. **A management port** — a second Kestrel listener for internal endpoints, the
+   ASP.NET equivalent of Spring Boot Actuator's management port:
+
+   ```csharp
+   builder.WebHost.ConfigureKestrel(k =>
+   {
+       k.ListenAnyIP(8080);        // public API + health (LB probes)
+       k.ListenLocalhost(9090);    // internal only
+   });
+   …
+   app.MapPapumaDashboard("/papuma").RequireHost("*:9090");
+   app.MapMcp("/mcp").RequireHost("*:9090");
+   ```
+
+   `RequireHost` is a built-in endpoint convention; on the public port these
+   endpoints then return 404. The sample shows this pattern, activated by a
+   `ManagementPort` setting.
+3. **Authorization.** `.RequireAuthorization(...)` on either builder. The
+   dashboard additionally logs a startup warning when mapped without it.
+
+Health (`/health`) is usually kept public for load-balancer probes — it carries
+no detail beyond healthy/unhealthy and the lag summary.
