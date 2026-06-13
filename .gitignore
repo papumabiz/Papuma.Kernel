@@ -133,3 +133,6 @@ x86/
 # Built Visual Studio Code Extensions
 *.vsix
 BenchmarkDotNet.Artifacts/
+
+# CommandCode tool artifacts
+.commandcode/
