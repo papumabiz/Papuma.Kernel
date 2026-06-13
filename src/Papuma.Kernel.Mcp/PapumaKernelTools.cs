@@ -128,6 +128,40 @@ public sealed class PapumaKernelTools
         return json.ToJsonString();
     }
 
+    [McpServerTool(Name = "get_document", ReadOnly = true)]
+    [Description("Loads the current state of one document by id, with privacy policies " +
+        "applied: sensitive fields are masked, hashed or omitted — never clear text " +
+        "(ADR-016). Scope-bound (pass tenantId for tenant data). Only document types " +
+        "opted in via ExposeToMcp() are readable; use get_model_inventory to discover types.")]
+    public async Task<string> GetDocumentAsync(
+        [Description("The logical document type name as registered in the model.")] string documentType,
+        [Description("The document identifier.")] string documentId,
+        [Description("The tenant id; omit for platform-scoped documents.")] string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var scope = tenantId is null ? ScopeContext.Platform() : ScopeContext.Tenant(tenantId);
+        await using var session = _store.OpenSession(scope);
+        var result = await session.LoadMaskedForMcpAsync(documentType, documentId, ct);
+        return MaskedToJson(result);
+    }
+
+    [McpServerTool(Name = "get_document_by_key", ReadOnly = true)]
+    [Description("Loads one document by a declared key (ADR-006), policy-masked like " +
+        "get_document. The key path must be a declared key — there is no free-form " +
+        "query. Scope-bound; only ExposeToMcp() types are readable.")]
+    public async Task<string> GetDocumentByKeyAsync(
+        [Description("The logical document type name.")] string documentType,
+        [Description("The declared key path (e.g. 'email').")] string keyPath,
+        [Description("The key value to match.")] string value,
+        [Description("The tenant id; omit for platform-scoped documents.")] string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var scope = tenantId is null ? ScopeContext.Platform() : ScopeContext.Tenant(tenantId);
+        await using var session = _store.OpenSession(scope);
+        var result = await session.LoadMaskedByKeyForMcpAsync(documentType, keyPath, value, ct);
+        return MaskedToJson(result);
+    }
+
     [McpServerTool(Name = "retry_feed_failure", ReadOnly = false, Destructive = false, Idempotent = true)]
     [Description("Clears one failure/poison entry so the record is retried. Requires " +
         "AllowMutations. If the checkpoint already passed the sequence, additionally " +
@@ -176,6 +210,15 @@ public sealed class PapumaKernelTools
     }
 
     // ── Internals ──────────────────────────────────────────────────────────────
+
+    private static string MaskedToJson(MaskedDocumentResult? result) =>
+        result is null
+            ? "null"
+            : new JsonObject
+            {
+                ["version"] = result.Version,
+                ["document"] = result.Document.DeepClone(),
+            }.ToJsonString();
 
     private void EnsureMutationsAllowed()
     {

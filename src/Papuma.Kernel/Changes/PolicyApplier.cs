@@ -1,9 +1,6 @@
 // Copyright (c) 2026- by Harald Lapp.
 // Licensed under the MIT License. See LICENSE in the repository root for details.
 
-using System.Security.Cryptography;
-using System.Text;
-
 using Papuma.Kernel.Model;
 
 namespace Papuma.Kernel.Changes;
@@ -56,14 +53,6 @@ internal static class PolicyApplier
         return new DocumentDiff(entries);
     }
 
-    private static string? HashOf(DiffEntry entry)
-    {
-        if (!entry.HasNew)
-        {
-            return null; // field removed — nothing to hash
-        }
-
-        var text = entry.New?.ToJsonString() ?? "null";
-        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
-    }
+    private static string? HashOf(DiffEntry entry) =>
+        entry.HasNew ? PolicyHash.Of(entry.New) : null; // field removed → nothing to hash
 }

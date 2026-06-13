@@ -124,8 +124,16 @@ builder.Services
 | `get_feed_lag` | `GetLagAsync()` of both processors | no |
 | `get_feed_failures` | `GetFailuresAsync()` of both processors | no |
 | `get_document_history` | `GetHistoryAsync` (scope-bound, policy-applied) | no |
+| `get_document` | `LoadMaskedAsync` by id (ADR-016: policy-masked, scope-bound, `ExposeToMcp()` types only) | no |
+| `get_document_by_key` | masked load by a **declared** key (no free-form query) | no |
 | `retry_feed_failure` | `RetryFailureAsync` | yes — only with `AllowMutations` |
 | `reset_feed_checkpoint` | `ResetCheckpointAsync` (projections only!) | yes — only with `AllowMutations` |
+
+The content tools (`get_document`, `get_document_by_key`) return **policy-masked**
+JSON: sensitive fields are masked, hashed or omitted exactly as in the feed
+(ADR-016, concepts §24). A type is only readable when the model opts in with
+`d.ExposeToMcp()` — the safe default is "not exposed." There is deliberately no
+`gdpr_export` and no generic projection-query tool.
 
 The server runs **inside the application** (the metamodel only comes into being
 at app startup from CLR types + fluent config — an external process does not know

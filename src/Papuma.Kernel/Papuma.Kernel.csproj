@@ -30,6 +30,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Papuma.Kernel.Tests" />
+    <InternalsVisibleTo Include="Papuma.Kernel.Mcp" />
   </ItemGroup>
 
   <ItemGroup>

@@ -225,9 +225,24 @@ public sealed class KernelModelBuilder
         private readonly Dictionary<int, Action<System.Text.Json.Nodes.JsonObject>> _upcasters = [];
         private LambdaExpression? _idExpression;
         private Action<object>? _validator;
+        private bool _exposeToMcp;
 
         internal DocumentTypeBuilder()
         {
+        }
+
+        /// <summary>
+        /// Allows this document type to be read over the MCP content tools as a
+        /// policy-projected (masked) document (ADR-016). Off by default — the safe
+        /// default is that no type is readable by an AI agent. Masking applies the
+        /// field policies on read, so sensitive fields never reach the agent in clear
+        /// text; this is data minimization, not authorization (that stays scope +
+        /// the MCP host's auth).
+        /// </summary>
+        public DocumentTypeBuilder<T> ExposeToMcp()
+        {
+            _exposeToMcp = true;
+            return this;
         }
 
         /// <summary>
@@ -362,7 +377,8 @@ public sealed class KernelModelBuilder
             }
 
             return new DocumentTypeMetadata(
-                name, clrType, policies, keyMetadata, BuildIdGetter(clrType), orderedUpcasters, _validator);
+                name, clrType, policies, keyMetadata, BuildIdGetter(clrType), orderedUpcasters, _validator,
+                _exposeToMcp);
         }
 
         internal void SetPolicy(string path, FieldPolicy policy) => _policyOverrides[path] = policy;

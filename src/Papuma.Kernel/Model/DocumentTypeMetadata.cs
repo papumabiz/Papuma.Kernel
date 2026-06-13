@@ -41,6 +41,13 @@ public sealed class DocumentTypeMetadata
     /// <summary>Gets the declared keys.</summary>
     public IReadOnlyList<KeyMetadata> Keys { get; }
 
+    /// <summary>
+    /// Gets whether this type may be read over the MCP content tools as a
+    /// policy-projected (masked) document (ADR-016). Default <c>false</c> — exposure is
+    /// opt-in via <c>ExposeToMcp()</c>; the safe default is "not exposed".
+    /// </summary>
+    public bool ExposedToMcp { get; }
+
     internal DocumentTypeMetadata(
         string name,
         Type clrType,
@@ -48,7 +55,8 @@ public sealed class DocumentTypeMetadata
         IReadOnlyList<KeyMetadata> keys,
         Func<object, string?> idGetter,
         IReadOnlyList<Action<JsonObject>> upcasters,
-        Action<object>? validator)
+        Action<object>? validator,
+        bool exposedToMcp)
     {
         Name = name;
         ClrType = clrType;
@@ -57,6 +65,7 @@ public sealed class DocumentTypeMetadata
         _idGetter = idGetter;
         _upcasters = upcasters;
         Validator = validator;
+        ExposedToMcp = exposedToMcp;
         SchemaVersion = upcasters.Count + 1;
     }
 
