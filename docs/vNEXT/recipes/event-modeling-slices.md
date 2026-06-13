@@ -196,3 +196,15 @@ The sample shop is already an event model; read it through this lens:
 
 Draw those six boxes on a wall, connect them along a time axis, and you have the
 event model the sample implements — built on documents, not an event store.
+
+## Scaffolding and generators
+
+Because slices are structurally uniform (only the Decider varies), the plumbing
+is a strong fit for scaffolding — `dotnet new` templates, a source generator, or
+an AI agent. The canonical shape of each slice type, with the invariant vs.
+variable parts marked, is specified in
+[papuma-kernel-slice-conventions.md](../../docs/ai/papuma-kernel-slice-conventions.md)
+— precise enough to drive a generator. The generator itself is an external tool
+that consumes that contract; it does not belong in the kernel (which stays
+AI-free), and it obtains its context by depending on the package (the docs ship
+inside it) and reading the conventions, not by being hand-fed.
