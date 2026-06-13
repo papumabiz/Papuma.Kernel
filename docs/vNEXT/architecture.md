@@ -436,6 +436,9 @@ Application patterns on top of the ADRs, as drafts for later tutorials:
 - [External read models](recipes/external-read-models.md)
   — the one projection pattern for search engines, vector stores and caches
   (Manticore, Qdrant, Redis), plus where DotNetCore.CAP does and does not fit.
+- [Field-level encryption](recipes/field-level-encryption.md)
+  — storing values that must be decrypted at another trust boundary (bank
+  accounts); ciphertext + Redact, envelope/KMS, and why the kernel stays out.
 
 The cross-language contract for consuming the feeds directly is specified in
 [feed-wire-format.md](feed-wire-format.md), with runnable Python/Go clients in

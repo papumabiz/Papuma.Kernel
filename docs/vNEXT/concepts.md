@@ -1050,6 +1050,45 @@ language is an hour's work. That is the real polyglot product.
 
 ---
 
+## 27. Encryption sits below the policies — and why the kernel must not do it
+
+→ [ADR-007](adr/adr-007-privacy-policies.md) (policies), §23 (the store is plain
+text), §24 (policies as projection),
+[recipes/field-level-encryption.md](recipes/field-level-encryption.md)
+
+The privacy policies cover three shapes of "don't expose this in the feed":
+forget it (`Redact`), prove it without showing it (`Hash`), point at it
+(`Reference`). All three are one-way — none lets you *recover* the value. But
+some data must be recovered, just **somewhere else**: a bank account is captured
+by the web tier and read in clear only by an isolated payout service. That is a
+different axis entirely, and it lives one layer *below* the policies.
+
+The reason it is below them: the policies act on the **feed**, while the document
+store holds plain text (§23). Field-level encryption changes the *stored* value —
+the field is ciphertext before it ever reaches the kernel. So the plaintext lives
+nowhere persistent (stronger than any policy), the ciphertext lives in the store,
+and a `Redact`/`DoNotTrack` policy keeps the ciphertext out of the versioned feed
+on top. Policy and encryption compose: encryption decides what the *store* holds,
+the policy decides what the *feed* shows.
+
+And here is the part that makes "the kernel should just offer an `[Encrypted]`
+policy" wrong — not merely undesirable, but self-defeating. Asymmetric encryption
+exists precisely so the *writing* system cannot read the value. The kernel runs
+on the writing system. A transparent encrypt-on-save/decrypt-on-load policy would
+have to put the private key there — exactly where the threat model forbids it.
+Framework-side decryption would not *support* the security goal, it would
+**dissolve** it. (Contrast the policies, which the kernel *can* enforce because
+minimization needs no secret — only omission.)
+
+So encryption is delegated for a sharper reason than the usual mechanism-vs-policy
+line: not just "key management is deployment-specific" (true — KMS/HSM/Vault, like
+auth), but "the kernel is on the wrong side of the trust boundary to hold the
+key." Encryption belongs where the key belongs, and only the application knows
+where that is. The kernel's contribution is to stay out of the way: a ciphertext
+field is just a string to it, and the policies handle the feed. That is enough.
+
+---
+
 *Maintenance note: add new explainers from later phases here — this document is
 the collection point for the "why behind the how" and raw material for the
 tutorials (phase 9).*
