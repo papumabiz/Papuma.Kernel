@@ -5,7 +5,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10" />
   <img src="https://img.shields.io/badge/PostgreSQL-%E2%89%A518-336791" alt="PostgreSQL 18+" />
-  <img src="https://img.shields.io/badge/version-1.0.0--preview-orange" alt="1.0.0-preview" />
+  <img src="https://img.shields.io/badge/version-1.0.1-blue" alt="1.0.1" />
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT" />
 </p>
 
@@ -123,7 +123,7 @@ Pattern guides on kernel primitives ([docs/vNEXT/recipes](docs/vNEXT/recipes)):
 
 ## Maturity, stated plainly
 
-`1.0.0-preview` — the design is complete (13 implementation phases, 16 ADRs,
+`1.0.1` — the design is complete (13 implementation phases, 16 ADRs,
 every identified risk closed with a test or a measurement; **167 integration
 tests against real PostgreSQL 18, green**), but it has **not yet carried
 production traffic**. Best fit today: internal line-of-business systems and new

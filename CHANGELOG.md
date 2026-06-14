@@ -1,13 +1,20 @@
 # Changelog
 
-## Unreleased
+## 1.0.1 (2026-06-14)
 
 - **License headers switched to SPDX** across all source files
   (`SPDX-License-Identifier: MIT` + `SPDX-FileCopyrightText: 2026 Harald Lapp`),
   replacing the prose copyright/license comment. Machine-readable for license
   scanners and SBOM tooling; no functional change.
+- **REUSE: added `LICENSES/MIT.txt`** with the full license text alongside the
+  SPDX headers.
+- **Docs** (shipped inside the package under `docs/`): added a learning-oriented
+  [tutorial](docs/vNEXT/tutorial.md) (empty folder → feed-driven read model,
+  verified end-to-end against PostgreSQL 18); the slice conventions now document
+  registration co-located with each slice; modernized the root README and
+  refreshed the factsheet.
 
-## 1.0.0-preview.1 (2026-06-12) — the vNEXT reboot
+## 1.0.0 (2026-06-12) — the vNEXT reboot
 
 **Complete rewrite. No migration path from 0.x — this is a different kernel under the
 same name.** The 0.x line (relational tables + outbox + explicitly raised events) is
