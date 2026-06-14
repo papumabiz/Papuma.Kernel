@@ -1,5 +1,5 @@
-// Copyright (c) 2026- by Harald Lapp.
-// Licensed under the MIT License. See LICENSE in the repository root for details.
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 Harald Lapp
 
 using Papuma.Kernel.Changes;
 using Papuma.Kernel.Model;

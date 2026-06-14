@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **License headers switched to SPDX** across all source files
+  (`SPDX-License-Identifier: MIT` + `SPDX-FileCopyrightText: 2026 Harald Lapp`),
+  replacing the prose copyright/license comment. Machine-readable for license
+  scanners and SBOM tooling; no functional change.
+
 ## 1.0.0-preview.1 (2026-06-12) — the vNEXT reboot
 
 **Complete rewrite. No migration path from 0.x — this is a different kernel under the

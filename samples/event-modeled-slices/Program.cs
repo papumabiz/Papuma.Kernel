@@ -1,5 +1,5 @@
-// Copyright (c) 2026- by Harald Lapp.
-// Licensed under the MIT License. See LICENSE in the repository root for details.
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 Harald Lapp
 
 // Event-modeled vertical slices on Papuma.Kernel — the *shape*, not the breadth.
 // See README.md; conventions in docs/ai/papuma-kernel-slice-conventions.md.

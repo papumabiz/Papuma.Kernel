@@ -1,5 +1,5 @@
-// Copyright (c) 2026- by Harald Lapp.
-// Licensed under the MIT License. See LICENSE in the repository root for details.
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 Harald Lapp
 
 // The Papuma.Kernel sample shop — every kernel concept as running code.
 // Walkthrough in README.md; the workflow story in docs/vNEXT/recipes/workflow-saga.md.
