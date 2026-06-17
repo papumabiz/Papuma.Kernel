@@ -56,7 +56,8 @@ idempotently at startup (tables, RLS, key indexes) and hosts the feed workers
 ## 3. Writing — the session as unit of work
 
 ```csharp
-await using var session = store.OpenSession(ScopeContext.Tenant("acme"));
+await using var session = store.OpenSession(ScopeContext.Tenant("acme"),
+    new SessionOptions { ActorId = userId, CausationType = "RegisterUser" });
 
 // Registration: document + fact, one atomic commit, shared correlationId
 await session.SaveAsync(user, expectedVersion: 0);          // 0 = insert expected
@@ -129,5 +130,6 @@ builder.Services.AddHealthChecks().AddPapumaChangeFeedLag(maxAllowedLag: 1000);
 app.UseScopeResolution();   // tenant middleware (implement IScopeResolver)
 ```
 
-Further reading: [recipe: realtime UI notifications](recipes/realtime-ui-notifications.md) ·
+Further reading: [recipe: causation tracking](recipes/causation-tracking.md) ·
+[recipe: realtime UI notifications](recipes/realtime-ui-notifications.md) ·
 [implementation plan](implementation-plan.md) · ADRs in [adr/](adr/)

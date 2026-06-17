@@ -159,6 +159,11 @@ which becomes the point of step 6. The session is a **unit of work**
 ([architecture §5](architecture.md)): you could save several documents and append
 facts, and `CommitAsync` makes them all visible together, atomically.
 
+> **Causation tracking.** In production you would pass `SessionOptions` with
+> `ActorId`, `CausationType` and `CausationId` so every change record carries
+> who did what and why. The tutorial omits this for brevity — see the
+> [causation tracking recipe](recipes/causation-tracking.md) for the full pattern.
+
 ```bash
 dotnet run &
 curl -s -X POST localhost:5000/tickets -H 'content-type: application/json' \

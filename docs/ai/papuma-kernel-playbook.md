@@ -52,7 +52,7 @@ services.AddPapumaKernel(o => { o.ConnectionString = …; o.Model(m => m
 
 // Writing (session = UoW; scope is mandatory)
 await using var s = store.OpenSession(ScopeContext.Tenant("acme"),
-    new SessionOptions { ActorId = "harry", CausationId = "cmd-42" });
+    new SessionOptions { ActorId = "harry", CausationId = "cmd-42", CausationType = "PlaceOrder" });
 await s.SaveAsync(doc, expectedVersion);            // 0 = insert
 await s.PatchAsync<User>(id, p => p.Set(x => x.Name, "H").Increment(x => x.LoginCount));
 await s.PatchWhereAsync<User>(x => x.Status, "old", p => p.Set(x => x.Status, "new"));
@@ -100,6 +100,7 @@ Typed errors you should handle (not swallow): `ConcurrencyException`,
 | …build a workflow/saga | workflow document + feed handlers + `expectedVersion`; timers = a `dueAt` poller (concepts §18) |
 | …update a UI live | the NOTIFY recipe ([realtime-ui-notifications](../vNEXT/recipes/realtime-ui-notifications.md)) |
 | …embeddings/RAG, NL audit, anomaly detection | the AI recipes ([ai-consumers](../vNEXT/recipes/ai-consumers.md)) — feed consumers, not kernel features |
+| …track who did what and why (audit) | `SessionOptions` with `ActorId`, `CausationType`, `CausationId` ([causation-tracking recipe](../vNEXT/recipes/causation-tracking.md)); ASP.NET Core: `GetSessionOptions()` with enricher |
 | …serve a GDPR access/erasure request | [gdpr.md](../vNEXT/gdpr.md) — export, inventory, redaction |
 | …inspect lag/failures of a running app | the diagnostics APIs ([observability.md](../vNEXT/observability.md)) or the MCP server (`Papuma.Kernel.Mcp`) |
 
