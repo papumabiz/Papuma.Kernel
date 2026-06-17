@@ -394,8 +394,8 @@ public sealed class EventFeedProcessor : IDisposable
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
-            SELECT e.seq, e.scope, e.tenant_id, e.event_type, e.payload::text, e.metadata::text,
-                   e.occurred_at, COALESCE(f.attempts, 0), f.next_retry_at
+            SELECT e.seq, e.scope, e.tenant_id, e.event_type, e.payload::text, e.actor_id,
+                   e.metadata::text, e.occurred_at, COALESCE(f.attempts, 0), f.next_retry_at
             FROM papuma.event e
             LEFT JOIN papuma.failure f
                    ON f.handler_name = @name AND f.seq = e.seq
@@ -422,13 +422,14 @@ public sealed class EventFeedProcessor : IDisposable
                 Scope: scope,
                 EventType: reader.GetString(3),
                 Payload: (JsonObject)JsonNode.Parse(reader.GetString(4))!,
-                Metadata: (JsonObject)JsonNode.Parse(reader.GetString(5))!,
-                OccurredAt: reader.GetFieldValue<DateTimeOffset>(6));
+                ActorId: reader.GetString(5),
+                Metadata: (JsonObject)JsonNode.Parse(reader.GetString(6))!,
+                OccurredAt: reader.GetFieldValue<DateTimeOffset>(7));
 
             batch.Add(new BatchItem(
                 record,
-                reader.GetInt32(7),
-                reader.IsDBNull(8) ? null : reader.GetFieldValue<DateTimeOffset>(8)));
+                reader.GetInt32(8),
+                reader.IsDBNull(9) ? null : reader.GetFieldValue<DateTimeOffset>(9)));
         }
 
         return batch;

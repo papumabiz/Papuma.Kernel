@@ -406,8 +406,8 @@ public sealed class ChangeFeedProcessor : IDisposable
         // could still commit an earlier seq (ADR-010).
         cmd.CommandText = """
             SELECT c.seq, c.scope, c.tenant_id, c.document_type, c.document_id, c.version,
-                   c.schema_version, c.operation, c.diff::text, c.metadata::text, c.occurred_at,
-                   COALESCE(f.attempts, 0), f.next_retry_at
+                   c.schema_version, c.operation, c.diff::text, c.actor_id, c.metadata::text,
+                   c.occurred_at, COALESCE(f.attempts, 0), f.next_retry_at
             FROM papuma.change c
             LEFT JOIN papuma.failure f
                    ON f.handler_name = @name AND f.seq = c.seq
@@ -438,13 +438,14 @@ public sealed class ChangeFeedProcessor : IDisposable
                 SchemaVersion: reader.GetInt32(6),
                 Operation: (ChangeOperation)reader.GetInt16(7),
                 Diff: DocumentDiff.FromJson((JsonObject)JsonNode.Parse(reader.GetString(8))!),
-                Metadata: (JsonObject)JsonNode.Parse(reader.GetString(9))!,
-                OccurredAt: reader.GetFieldValue<DateTimeOffset>(10));
+                ActorId: reader.GetString(9),
+                Metadata: (JsonObject)JsonNode.Parse(reader.GetString(10))!,
+                OccurredAt: reader.GetFieldValue<DateTimeOffset>(11));
 
             batch.Add(new BatchItem(
                 record,
-                reader.GetInt32(11),
-                reader.IsDBNull(12) ? null : reader.GetFieldValue<DateTimeOffset>(12)));
+                reader.GetInt32(12),
+                reader.IsDBNull(13) ? null : reader.GetFieldValue<DateTimeOffset>(13)));
         }
 
         return batch;

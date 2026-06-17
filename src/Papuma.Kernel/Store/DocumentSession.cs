@@ -55,6 +55,9 @@ public sealed partial class DocumentSession : IAsyncDisposable
     /// <summary>Gets the correlation id carried by all change records of this session.</summary>
     public Guid CorrelationId { get; }
 
+    /// <summary>Gets the actor id written to change/event records and the document (ADR-017).</summary>
+    internal string ActorId { get; }
+
     internal DocumentSession(NpgsqlDataSource dataSource, KernelModel model, ScopeContext scope, SessionOptions? options)
     {
         _dataSource = dataSource;
@@ -62,6 +65,7 @@ public sealed partial class DocumentSession : IAsyncDisposable
         Scope = scope;
         _options = options ?? new SessionOptions();
         CorrelationId = _options.CorrelationId ?? Guid.NewGuid();
+        ActorId = _options.ActorId ?? string.Empty;
     }
 
     /// <summary>
@@ -422,18 +426,19 @@ public sealed partial class DocumentSession : IAsyncDisposable
         // Version numbering continues after a delete (max change version + 1) so that
         // re-creating an id never collides with the gapless per-document change history.
         cmd.CommandText = """
-            INSERT INTO papuma.document (scope, tenant_id, document_type, id, version, schema_version, data)
+            INSERT INTO papuma.document (scope, tenant_id, document_type, id, version, schema_version, data, created_by, updated_by)
             SELECT @scope, @tenantId, @type, @id,
                    COALESCE((SELECT MAX(c.version)
                              FROM papuma.change c
                              WHERE c.scope = @scope AND c.tenant_id = @tenantId
                                AND c.document_type = @type AND c.document_id = @id), 0) + 1,
-                   @schemaVersion, @data
+                   @schemaVersion, @data, @actorId, @actorId
             ON CONFLICT (scope, tenant_id, document_type, id) DO NOTHING
             RETURNING version
             """;
         AddIdentityParameters(cmd, metadata.Name, id);
         cmd.Parameters.AddWithValue("schemaVersion", metadata.SchemaVersion);
+        cmd.Parameters.AddWithValue("actorId", ActorId);
         AddJsonbParameter(cmd, "data", newJson);
 
         var inserted = await ExecuteMappingKeyViolationsAsync(
@@ -469,6 +474,7 @@ public sealed partial class DocumentSession : IAsyncDisposable
             SET data = @data,
                 version = version + 1,
                 schema_version = @schemaVersion,
+                updated_by = @actorId,
                 updated_at = now()
             WHERE scope = @scope AND tenant_id = @tenantId
               AND document_type = @type AND id = @id
@@ -479,6 +485,7 @@ public sealed partial class DocumentSession : IAsyncDisposable
         AddIdentityParameters(cmd, metadata.Name, id);
         cmd.Parameters.AddWithValue("schemaVersion", metadata.SchemaVersion);
         cmd.Parameters.AddWithValue("expectedVersion", expectedVersion);
+        cmd.Parameters.AddWithValue("actorId", ActorId);
         AddJsonbParameter(cmd, "data", newJson);
 
         var row = await ExecuteMappingKeyViolationsAsync(
@@ -531,15 +538,16 @@ public sealed partial class DocumentSession : IAsyncDisposable
         cmd.Transaction = tx;
         cmd.CommandText = """
             INSERT INTO papuma.change
-                (scope, tenant_id, document_type, document_id, version, schema_version, operation, diff, metadata)
+                (scope, tenant_id, document_type, document_id, version, schema_version, operation, diff, actor_id, metadata)
             VALUES
-                (@scope, @tenantId, @type, @id, @version, @schemaVersion, @operation, @diff, @metadata)
+                (@scope, @tenantId, @type, @id, @version, @schemaVersion, @operation, @diff, @actorId, @metadata)
             """;
         AddIdentityParameters(cmd, metadata.Name, id);
         cmd.Parameters.AddWithValue("version", version);
         cmd.Parameters.AddWithValue("schemaVersion", schemaVersion);
         cmd.Parameters.AddWithValue("operation", (short)operation);
         AddJsonbParameter(cmd, "diff", diff.ToJson());
+        cmd.Parameters.AddWithValue("actorId", ActorId);
         AddJsonbParameter(cmd, "metadata", BuildChangeMetadata(extraMetadata));
 
         await cmd.ExecuteNonQueryAsync(ct);
@@ -584,12 +592,13 @@ public sealed partial class DocumentSession : IAsyncDisposable
         cmd.Transaction = tx;
         cmd.CommandText = """
             INSERT INTO papuma.change
-                (scope, tenant_id, document_type, document_id, version, schema_version, operation, diff, metadata)
-            SELECT @scope, @tenantId, @type, u.id, u.version, u.schema_version, @operation, u.diff, @metadata
+                (scope, tenant_id, document_type, document_id, version, schema_version, operation, diff, actor_id, metadata)
+            SELECT @scope, @tenantId, @type, u.id, u.version, u.schema_version, @operation, u.diff, @actorId, @metadata
             FROM unnest(@ids, @versions, @schemaVersions, @diffs) AS u(id, version, schema_version, diff)
             """;
         AddScopeParameters(cmd, metadata.Name);
         cmd.Parameters.AddWithValue("operation", (short)operation);
+        cmd.Parameters.AddWithValue("actorId", ActorId);
         AddJsonbParameter(cmd, "metadata", BuildChangeMetadata(null));
         cmd.Parameters.AddWithValue("ids", ids);
         cmd.Parameters.AddWithValue("versions", versions);

@@ -43,14 +43,15 @@ public sealed partial class DocumentSession
             await using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText = """
-                INSERT INTO papuma.event (scope, tenant_id, event_type, payload, metadata)
-                VALUES (@scope, @tenantId, @type, @payload, @metadata)
+                INSERT INTO papuma.event (scope, tenant_id, event_type, payload, actor_id, metadata)
+                VALUES (@scope, @tenantId, @type, @payload, @actorId, @metadata)
                 RETURNING seq
                 """;
             cmd.Parameters.AddWithValue("scope", Scope.Scope.ToString());
             cmd.Parameters.AddWithValue("tenantId", Scope.TenantId ?? string.Empty);
             cmd.Parameters.AddWithValue("type", metadata.Name);
             AddJsonbParameter(cmd, "payload", payload);
+            cmd.Parameters.AddWithValue("actorId", ActorId);
             AddJsonbParameter(cmd, "metadata", BuildChangeMetadata(null));
 
             var seq = (long)(await cmd.ExecuteScalarAsync(ct))!;

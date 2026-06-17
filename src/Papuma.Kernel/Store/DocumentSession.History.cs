@@ -45,7 +45,7 @@ public sealed partial class DocumentSession
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
-            SELECT seq, version, schema_version, operation, diff::text, metadata::text, occurred_at
+            SELECT seq, version, schema_version, operation, diff::text, actor_id, metadata::text, occurred_at
             FROM papuma.change
             WHERE scope = @scope AND tenant_id = @tenantId
               AND document_type = @type AND document_id = @id
@@ -76,8 +76,9 @@ public sealed partial class DocumentSession
                 SchemaVersion: reader.GetInt32(2),
                 Operation: (ChangeOperation)reader.GetInt16(3),
                 Diff: DocumentDiff.FromJson((JsonObject)JsonNode.Parse(reader.GetString(4))!),
-                Metadata: (JsonObject)JsonNode.Parse(reader.GetString(5))!,
-                OccurredAt: reader.GetFieldValue<DateTimeOffset>(6)));
+                ActorId: reader.GetString(5),
+                Metadata: (JsonObject)JsonNode.Parse(reader.GetString(6))!,
+                OccurredAt: reader.GetFieldValue<DateTimeOffset>(7)));
         }
 
         return history;

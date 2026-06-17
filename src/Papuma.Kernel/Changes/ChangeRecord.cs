@@ -18,7 +18,8 @@ namespace Papuma.Kernel.Changes;
 /// <param name="SchemaVersion">The schema version of the diff content (ADR-005).</param>
 /// <param name="Operation">The change operation.</param>
 /// <param name="Diff">The policy-applied reversible field diff (ADR-004/007).</param>
-/// <param name="Metadata">Correlation/causation/actor and operation-specific metadata.</param>
+/// <param name="ActorId">The actor who caused this change (ADR-017); empty when not provided.</param>
+/// <param name="Metadata">Correlation/causation and operation-specific metadata.</param>
 /// <param name="OccurredAt">When the change was recorded.</param>
 public sealed record ChangeRecord(
     long Seq,
@@ -29,6 +30,7 @@ public sealed record ChangeRecord(
     int SchemaVersion,
     ChangeOperation Operation,
     DocumentDiff Diff,
+    string ActorId,
     JsonObject Metadata,
     DateTimeOffset OccurredAt)
 {

@@ -62,6 +62,7 @@ public sealed partial class DocumentSession
                 UPDATE papuma.document
                 SET data = {dataExpression},
                     version = version + 1,
+                    updated_by = @actorId,
                     updated_at = now()
                 WHERE scope = @scope AND tenant_id = @tenantId
                   AND document_type = @type AND id = @id
@@ -69,6 +70,7 @@ public sealed partial class DocumentSession
                 RETURNING old.data::text, new.data::text, new.version, old.schema_version
                 """;
             AddIdentityParameters(cmd, metadata.Name, id);
+            cmd.Parameters.AddWithValue("actorId", ActorId);
             if (expectedVersion is not null)
             {
                 cmd.Parameters.AddWithValue("expectedVersion", expectedVersion.Value);
@@ -236,6 +238,7 @@ public sealed partial class DocumentSession
                 UPDATE papuma.document
                 SET data = {dataExpression},
                     version = version + 1,
+                    updated_by = @actorId,
                     updated_at = now()
                 WHERE scope = @scope AND tenant_id = @tenantId
                   AND document_type = @type
@@ -243,6 +246,7 @@ public sealed partial class DocumentSession
                 RETURNING id, old.data::text, new.data::text, new.version, old.schema_version
                 """;
             AddScopeParameters(cmd, metadata.Name);
+            cmd.Parameters.AddWithValue("actorId", ActorId);
             addPredicateParameters(cmd);
 
             var rows = await ExecuteMappingKeyViolationsAsync(

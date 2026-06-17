@@ -111,6 +111,8 @@ CREATE TABLE papuma.document
     version         bigint      NOT NULL,   -- optimistic concurrency, starts at 1
     schema_version  int         NOT NULL,   -- state of the C# class at the last write
     data            jsonb       NOT NULL,
+    created_by      text        NOT NULL DEFAULT '',  -- actor who created the document (ADR-017)
+    updated_by      text        NOT NULL DEFAULT '',  -- actor of the most recent write (ADR-017)
     created_at      timestamptz NOT NULL DEFAULT now(),
     updated_at      timestamptz NOT NULL DEFAULT now(),
 
@@ -128,7 +130,8 @@ CREATE TABLE papuma.change
     schema_version  int         NOT NULL,
     operation       smallint    NOT NULL,   -- 1=insert, 2=update, 3=delete
     diff            jsonb       NOT NULL,   -- see ADR-004 (reversible field diff)
-    metadata        jsonb       NOT NULL,   -- isRollback, restoredVersion, actor, correlationId, ...
+    actor_id        text        NOT NULL DEFAULT '',  -- who caused this change (ADR-017)
+    metadata        jsonb       NOT NULL,   -- isRollback, restoredVersion, correlationId, ...
     occurred_at     timestamptz NOT NULL DEFAULT now(),
     txid            xid8        NOT NULL DEFAULT pg_current_xact_id()  -- gapless reads, ADR-010
 );
@@ -418,6 +421,7 @@ of documents and changes, the `DocumentSession` is always bound to a tenant, and
 | [014](adr/adr-014-bulk-operations.md) | Bulk operations as set-based patch (key predicates or id lists, one ChangeRecord per document) | Accepted |
 | [015](adr/adr-015-gdpr-tooling.md) | GDPR tooling: export/inventory/redaction in the kernel, legal decisions per tenant in the application | Accepted (implemented: phase 12) |
 | [016](adr/adr-016-policy-projected-reads.md) | Policy-projected reads (masked load) + the content MCP boundary; no generic projection MCP | Accepted (implemented) |
+| [017](adr/adr-017-actor-id-column.md) | Actor identity as a first-class column (actor_id, created_by, updated_by) | Accepted |
 
 ## 13. Recipes (tutorial precursors)
 

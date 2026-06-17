@@ -16,13 +16,15 @@ namespace Papuma.Kernel.Events;
 /// <param name="Scope">The scope the event belongs to.</param>
 /// <param name="EventType">The logical event type name.</param>
 /// <param name="Payload">The policy-applied payload (redacted fields are absent, hashed fields are hex strings).</param>
-/// <param name="Metadata">Correlation/causation/actor metadata of the appending session.</param>
+/// <param name="ActorId">The actor who appended this event (ADR-017); empty when not provided.</param>
+/// <param name="Metadata">Correlation/causation metadata of the appending session.</param>
 /// <param name="OccurredAt">When the event was recorded.</param>
 public sealed record EventRecord(
     long Seq,
     ScopeContext Scope,
     string EventType,
     JsonObject Payload,
+    string ActorId,
     JsonObject Metadata,
     DateTimeOffset OccurredAt)
 {

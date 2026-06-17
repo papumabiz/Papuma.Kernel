@@ -38,6 +38,8 @@ internal static class SchemaDdl
             version         bigint      NOT NULL,
             schema_version  int         NOT NULL,
             data            jsonb       NOT NULL,
+            created_by      text        NOT NULL DEFAULT '',
+            updated_by      text        NOT NULL DEFAULT '',
             created_at      timestamptz NOT NULL DEFAULT now(),
             updated_at      timestamptz NOT NULL DEFAULT now(),
 
@@ -46,6 +48,10 @@ internal static class SchemaDdl
             CONSTRAINT ck_document_version CHECK (version >= 1),
             CONSTRAINT ck_document_schema_version CHECK (schema_version >= 1)
         );
+
+        -- ── Backfill columns added by ADR-017 (idempotent) ────────────────────────
+        ALTER TABLE papuma.document ADD COLUMN IF NOT EXISTS created_by text NOT NULL DEFAULT '';
+        ALTER TABLE papuma.document ADD COLUMN IF NOT EXISTS updated_by text NOT NULL DEFAULT '';
 
         -- ── Change feed: derived, diff-only (ADR-004), txid for gapless reads (ADR-010) ──
         CREATE TABLE IF NOT EXISTS papuma.change
@@ -59,6 +65,7 @@ internal static class SchemaDdl
             schema_version  int         NOT NULL,
             operation       smallint    NOT NULL,
             diff            jsonb       NOT NULL,
+            actor_id        text        NOT NULL DEFAULT '',
             metadata        jsonb       NOT NULL DEFAULT '{}'::jsonb,
             occurred_at     timestamptz NOT NULL DEFAULT now(),
             txid            xid8        NOT NULL DEFAULT pg_current_xact_id(),
@@ -66,6 +73,8 @@ internal static class SchemaDdl
             CONSTRAINT ck_change_scope CHECK (scope IN ('Platform', 'Tenant')),
             CONSTRAINT ck_change_operation CHECK (operation IN (1, 2, 3))
         );
+
+        ALTER TABLE papuma.change ADD COLUMN IF NOT EXISTS actor_id text NOT NULL DEFAULT '';
 
         CREATE UNIQUE INDEX IF NOT EXISTS ux_papuma_change_document_version
             ON papuma.change (scope, tenant_id, document_type, document_id, version);
@@ -78,12 +87,15 @@ internal static class SchemaDdl
             tenant_id       text        NOT NULL DEFAULT '',
             event_type      text        NOT NULL,
             payload         jsonb       NOT NULL,
+            actor_id        text        NOT NULL DEFAULT '',
             metadata        jsonb       NOT NULL DEFAULT '{}'::jsonb,
             occurred_at     timestamptz NOT NULL DEFAULT now(),
             txid            xid8        NOT NULL DEFAULT pg_current_xact_id(),
 
             CONSTRAINT ck_event_scope CHECK (scope IN ('Platform', 'Tenant'))
         );
+
+        ALTER TABLE papuma.event ADD COLUMN IF NOT EXISTS actor_id text NOT NULL DEFAULT '';
 
         CREATE INDEX IF NOT EXISTS ix_papuma_event_type_occurred
             ON papuma.event (event_type, occurred_at);
