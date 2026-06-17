@@ -1087,6 +1087,67 @@ key." Encryption belongs where the key belongs, and only the application knows
 where that is. The kernel's contribution is to stay out of the way: a ciphertext
 field is just a string to it, and the policies handle the feed. That is enough.
 
+## 28. Hard delete, soft delete — and why the kernel only provides the mechanism
+
+→ §9 (insert after delete), §19 (checkpoints, backup and rebuild),
+[ADR-008](adr/adr-008-rollback-is-update.md) (rollback is update)
+
+The kernel offers exactly one delete primitive: `DeleteAsync<T>(id, expectedVersion)`.
+It removes the row from `papuma.document`, writes a change record with
+`operation = 'delete'` and the **full old document** as the diff, and increments
+the version. That is a hard delete — the document is gone from the store, and
+subsequent `LoadAsync` calls return `null`.
+
+Why hard delete and not soft delete? Because the two serve different masters.
+Hard delete is a **storage-level fact**: the row no longer exists. Soft delete is
+a **domain-level decision**: the entity is logically inactive but still
+queryable, still subject to reactivation rules, still visible in admin views.
+The kernel cannot know which of those rules apply — "archived", "cancelled",
+"suspended", "tombstoned" are all domain vocabulary, not storage vocabulary.
+Pushing soft delete into the kernel would force a single boolean (`is_deleted`)
+onto every document type, which is both too little (no reason, no timestamp, no
+"who archived it") and too much (types that never need it still carry the
+column).
+
+The mechanism-vs-decision boundary is the same one that governs encryption (§27)
+and policies (§24): the kernel provides the **mechanism** (delete the row, record
+the change, keep the version counter ticking), and the application makes the
+**decision** (whether to delete at all, or to set an `archivedAt` field instead).
+
+### Restoring a deleted document
+
+Because the delete change record contains the complete old state, the data is
+never truly lost — it moves from the document table into the change feed. To
+restore a deleted document, the application re-inserts it:
+
+```csharp
+// The change feed recorded the full document at deletion time.
+// Re-insert with expectedVersion = 0 (new document) or with the
+// version from the last change record if version continuity matters.
+await session.SaveAsync(restoredDocument, 0);
+```
+
+`RollbackAsync` cannot be used here because it requires an existing document row
+as a base (it replays diffs backwards). A re-insert is the correct pattern, and
+§9 guarantees that the version counter keeps counting: if the document was at
+version 3 when deleted, the re-insert becomes version 4.
+
+### Soft delete as an application pattern
+
+A typical soft-delete pattern on top of the kernel looks like this:
+
+1. Add an `ArchivedAt` (or `DeletedAt`, `SuspendedAt`, …) field to the document.
+2. "Delete" means `PatchAsync` setting that field — the document stays in the
+   store, the change feed records the transition, and the `actor_id` column
+   captures *who* archived it.
+3. Queries filter on the field; admin views can show archived documents.
+4. True removal (GDPR, retention) uses `DeleteAsync` when the time comes.
+
+This keeps the domain vocabulary where it belongs (in the document schema) and
+the storage primitive where *it* belongs (in the kernel). The change feed sees
+both transitions — the soft-delete patch and the eventual hard delete — so
+projections and audit trails remain complete.
+
 ---
 
 *Maintenance note: add new explainers from later phases here — this document is
