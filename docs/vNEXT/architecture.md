@@ -397,6 +397,12 @@ of documents and changes, the `DocumentSession` is always bound to a tenant, and
   multi-document commits are atomic (section 5, "session = unit of work");
   cross-document *constraints* and distributed sagas are application business.
 - **Automatic domain events** — see ADR-011.
+- **`ReconstructAtVersionAsync<T>(id, version)`** — read-only time travel that
+  reconstructs a document's state at any historical version without persisting
+  it. The mechanism exists (`RollbackAsync` already replays diffs backwards,
+  §20), but the current API always writes the result as a new update. A
+  read-only variant would serve audit UIs and debugging. Candidate for a future
+  phase when the use case materialises.
 - **Migration code from v1** — the reboot is complete.
 
 ---
