@@ -422,6 +422,7 @@ of documents and changes, the `DocumentSession` is always bound to a tenant, and
 | [015](adr/adr-015-gdpr-tooling.md) | GDPR tooling: export/inventory/redaction in the kernel, legal decisions per tenant in the application | Accepted (implemented: phase 12) |
 | [016](adr/adr-016-policy-projected-reads.md) | Policy-projected reads (masked load) + the content MCP boundary; no generic projection MCP | Accepted (implemented) |
 | [017](adr/adr-017-actor-id-column.md) | Actor identity as a first-class column (actor_id, created_by, updated_by) | Accepted |
+| [018](adr/adr-018-causation-type-metadata.md) | Causation type as a metadata field (command name in JSONB, no schema change) | Accepted |
 
 ## 13. Recipes (tutorial precursors)
 
@@ -445,8 +446,11 @@ Application patterns on top of the ADRs, as drafts for later tutorials:
   accounts); ciphertext + Redact, envelope/KMS, and why the kernel stays out.
 - [Event Modeling slices](recipes/event-modeling-slices.md)
   — building applications the Dymitruk/Dilger way (command/view/automation/
-  translation slices) on a document-sourced kernel; where it's even better and
-  where real Event Sourcing is the truer fit.
+    translation slices) on a document-sourced kernel; where it's even better and
+    where real Event Sourcing is the truer fit.
+- [Causation tracking](recipes/causation-tracking.md)
+  — automatic enrichment of actor, causation type and causation id in ASP.NET
+  Core (enricher pattern) and manual setup for CLI applications (ADR-017/018).
 
 The cross-language contract for consuming the feeds directly is specified in
 [feed-wire-format.md](feed-wire-format.md), with runnable Python/Go clients in

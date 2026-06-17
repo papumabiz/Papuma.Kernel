@@ -636,6 +636,11 @@ public sealed partial class DocumentSession : IAsyncDisposable
             json["causationId"] = _options.CausationId;
         }
 
+        if (_options.CausationType is not null)
+        {
+            json["causationType"] = _options.CausationType;
+        }
+
         // Phase 11: propagate the active trace context through the feed so handler
         // spans can link back to the originating request.
         if (Activity.Current is { IdFormat: ActivityIdFormat.W3C, Id: { } traceparent })

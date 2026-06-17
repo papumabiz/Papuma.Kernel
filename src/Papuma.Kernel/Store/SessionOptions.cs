@@ -20,4 +20,11 @@ public sealed record SessionOptions
 
     /// <summary>Gets the optional actor id (who performed the change).</summary>
     public string? ActorId { get; init; }
+
+    /// <summary>
+    /// Gets the optional causation type — the name of the command or action that triggered
+    /// this session's writes (e.g. <c>"PlaceOrder"</c>, <c>"ImportBatch"</c>). Written into
+    /// the JSONB <c>metadata</c> of every change and event record (ADR-018).
+    /// </summary>
+    public string? CausationType { get; init; }
 }
