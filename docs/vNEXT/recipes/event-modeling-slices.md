@@ -203,7 +203,7 @@ Because slices are structurally uniform (only the Decider varies), the plumbing
 is a strong fit for scaffolding — `dotnet new` templates, a source generator, or
 an AI agent. The canonical shape of each slice type, with the invariant vs.
 variable parts marked, is specified in
-[papuma-kernel-slice-conventions.md](../../docs/ai/papuma-kernel-slice-conventions.md)
+[papuma-kernel-slice-conventions.md](../../ai/papuma-kernel-slice-conventions.md)
 — precise enough to drive a generator. A minimal, runnable example of all three
 slice types (one each, with the pure Decider tests) lives in
 [samples/event-modeled-slices](../../../samples/event-modeled-slices/README.md). The generator itself is an external tool

@@ -30,14 +30,14 @@ This document is the entry map. The truth lives in the reference chain:
 |---|---|
 | `SaveAsync` **always** with `expectedVersion` (`0` = insert expected). On `ConcurrencyException`: reload, re-decide — no blind retry loops. | ADR-003; conflict UI: `GetHistoryAsync(id, fromVersion: expected + 1)` |
 | **Put personal fields under a policy before the first save** (`[SensitiveData]`, `[TrackHash]`, `[DoNotTrack]` or fluent). Afterwards only `RedactHistoryAsync` helps (a sharp tool). | ADR-007/015; review: `DataInventory.Build(model).Documents[..].UnprotectedPaths` |
-| **Do not invent or wish for a query DSL.** Reading goes via `LoadAsync`/`LoadByKeyAsync` (declared keys), SQL views (`security_invoker = on`!) or your own projections. | ADR-009; concepts §16 |
+| **Reading has a default order, not a free menu** (and never a query DSL): one current document → `LoadAsync`/`LoadByKeyAsync` (declared keys); anything derived → a projection (**the default**); an SQL view (`security_invoker = on`!) only as the ad-hoc/BI exception. "Real-time" alone is not a reason — that is `LoadByKeyAsync`. | ADR-009; concepts §16 |
 | **Never simulate a transforming schema change additively** (no "new field + keep the old one" for a rename). Renames/restructurings = `Upcast(fromVersion, …)`. Additive changes (new optional field, removed field) need *no* upcaster. | ADR-005, point 7 |
 | **Handlers are idempotent** (at-least-once!) and **never block** — no waiting for humans/external answers inside a handler. Human-in-the-loop = write a task document, done. | ADR-009; concepts §18/§19 |
 | **Checkpoint reset only for projections, never for effect handlers** (emails would be re-sent). The distinction is made when writing the handler. | concepts §19 |
 | **Events only for facts without state truth** (`UserLoggedIn`). State transitions belong in the document; triggers in handlers. Events have no upcasting — a new shape = a new event type. | ADR-011/013 |
 | **Bounded counters** (stock, quotas): `Increment` + a type validator — not load-check-save loops. | ADR-012; concepts §17 |
 | **Conditional patches do not exist** and will not be added. Whoever needs conditions: load + save with `expectedVersion`. | ADR-012 |
-| **Never write directly into `papuma.*` tables.** Reading via a view is legitimate (with the 4 caveats from concepts §16). | ADR-002 |
+| **Never write directly into `papuma.*` tables.** Reading via a view is a deliberate exception (the 4 conditions from concepts §16) — the default derived read is a projection. | ADR-002 |
 | Mass updates via `PatchWhereAsync`/`PatchManyAsync`/`DeleteWhereAsync` — not N sessions in a loop. | ADR-014 |
 
 ## API quick map
@@ -90,9 +90,9 @@ Typed errors you should handle (not swallow): `ConcurrencyException`,
 
 | Need | Tool |
 |---|---|
-| …read with immediate consistency (login, business logic) | `LoadAsync` / `LoadByKeyAsync` |
-| …query current data via SQL/BI | view with `security_invoker = on` (concepts §16) |
-| …maintain a read model / search index | an `IChangeHandler` projection (eventual, lag observable) |
+| …read one current document (login, business logic) | `LoadAsync` / `LoadByKeyAsync` (immediately consistent) |
+| …**any derived read** — list, join, aggregation, search, external *(the default)* | an `IChangeHandler` projection (eventual, lag observable) |
+| …ad-hoc SQL/BI, all 4 conditions met *(the exception)* | view with `security_invoker = on` (concepts §16) |
 | …change a single field without loading | `PatchAsync` (field-level LWW is deliberate there) |
 | …bound a stock (never oversell) | `Increment(-1)` + `Validate` (concepts §17) |
 | …react to "field X went Y→Z" | `change.IsFieldTransition(path, from, to)` in a handler (ADR-011) |

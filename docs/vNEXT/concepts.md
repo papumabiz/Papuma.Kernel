@@ -434,33 +434,74 @@ classic "a password change must be readable immediately" is therefore the built-
 normal case: a login check via `LoadByKeyAsync` reads the state *now*, without
 feed, without lag, index-backed via the declared key.
 
-**SQL views over the JSONB store** are legitimate as an additional "read lens" —
-that is exactly why the truth lives as JSONB *in Postgres*. A view is guaranteed
-current (same MVCC snapshot), needs no sync machinery, and violates no ADR. Four
-caveats come with it:
+**The read path has a default, not a free choice.** Because the document store is
+the truth and the derived feed is policy-minimized and replayable, reach for the
+tools in this order and step down only when the one above genuinely does not fit:
+
+1. **A single document, current → `LoadAsync` / `LoadByKeyAsync`.** Reads the truth
+   *now*, index-backed via a declared key, no feed, no lag. The normal case (a
+   login check, business logic).
+2. **Anything derived — joins across documents, aggregations, alternative
+   sort/filter axes, search, caches, external targets → a projection** (a dumb
+   handler, ADR-009, §15). It owns its schema and query language, rebuilds from the
+   feed, and its lag is observable. **This is the default for every non-trivial
+   read.**
+3. **An SQL view over the JSONB store → a deliberate exception**, for genuinely
+   ad-hoc / reporting / BI reads, and only when all four conditions below hold. A
+   view *feels* cheaper than a projection — that is the trap: it buys immediate
+   consistency (same MVCC snapshot, no sync machinery) at the price of bypassing
+   what the feed gives you for free. It is the last lens to reach for, not the
+   first. **"I need it real-time" does not on its own send you here:** a single
+   current read is already strong-consistent via `LoadByKeyAsync` (step 1), and the
+   feed's lag is NOTIFY-driven (typically milliseconds, observable) — fine for
+   lists, dashboards and search. A view earns step 3 only when the read is *both*
+   multi-document *and* must be transactionally consistent with the committing
+   write.
+
+That views are *possible* at all is deliberate — the truth lives as JSONB *in
+Postgres* precisely so a read lens can exist. But a view over the store is
+admissible **only when every one of these holds** (if any fails, the answer is a
+projection, not a view):
 
 1. **Read only.** Writes always go through the session (diffs, policies,
    concurrency).
 2. **`security_invoker = on`** (PG ≥ 15) is mandatory — otherwise Postgres
    evaluates the RLS policies against the view owner instead of the caller, and
    tenant isolation is silently bypassed.
-3. **Views see the stored shape, not the upcast one.** The upcaster pipeline runs
-   in the kernel, not in SQL — after a rename, old documents still lie around in
-   the old shape thanks to lazy upcasting (`COALESCE(data->>'new', data->>'old')`
-   as a transition, or restrict views to schema-stable fields).
-4. **Policies do not apply** — the store contains plain text; keep grants on views
-   that expose sensitive fields correspondingly tight.
+3. **Schema-stable fields only.** Views see the stored shape, not the upcast one —
+   the upcaster pipeline runs in the kernel, not in SQL, so after a rename old
+   documents still lie around in the old shape (`COALESCE(data->>'new',
+   data->>'old')` as a transition, or restrict the view to stable fields).
+4. **No sensitive fields.** Policies do not apply to the store (plain text); a view
+   exposing `[SensitiveData]` / `[TrackHash]` fields hands an unmasked path around
+   the minimization the feed enforces. Keep grants tight — or it is a projection.
 
 The decision matrix:
 
 | Need | Tool | Consistency |
 |---|---|---|
-| Strong-consistency read in code (login, business logic) | `LoadAsync` / `LoadByKeyAsync` | immediate |
-| Ad-hoc SQL, reporting, BI on current data | View (with the 4 caveats) | immediate |
-| Heavy read models, aggregations, external targets | Projection via handler | eventual (lag observable) |
+| Single document, strong consistency (login, business logic) | `LoadAsync` / `LoadByKeyAsync` | immediate |
+| **Default** — anything derived (joins, aggregation, search, external) | Projection via handler (ADR-009) | eventual (lag observable) |
+| Exception — ad-hoc/reporting/BI, all four conditions met | View (read-only, `security_invoker`, schema-stable, non-sensitive) | immediate |
 
 Materialized views are the worst of both worlds: they bring staleness back
 (`REFRESH` cycle) without offering the freedom of a real projection.
+
+**If "discouraged" is not enough** — e.g. unattended agents write migrations and a
+policy-bypassing view is a real risk — the fourth condition can be enforced
+structurally instead of by convention: revoke direct `SELECT` on
+`papuma.document.data` from the application role and route reads that must be
+safe-for-untrusted-eyes through the **policy-projected read** (`LoadMaskedAsync`,
+[ADR-016](adr/adr-016-policy-projected-reads.md)), which applies the same field
+policies on read that the feed applies to diffs. A plain-text view over the store
+then simply cannot be built. (A migration lint gate flagging `CREATE VIEW` over
+`papuma.*` is the lighter-weight alternative.)
+
+For AI coding agents working in a *consumer* project (an app that uses the
+kernel), this rule is part of the copy-paste block in the
+[AGENTS.md snippet](../ai/papuma-kernel-agents-snippet.md) and the
+[playbook](../ai/papuma-kernel-playbook.md) — so the agent treats a projection as
+the default and a view as the justified exception.
 
 ---
 

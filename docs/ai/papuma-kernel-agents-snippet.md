@@ -23,9 +23,14 @@ derived automatically. NOT event sourcing, NOT an ORM, NO query DSL.
    `Increment` + a registered validator — never load-check-save loops.
 4. Personal fields ARE UNDER A POLICY before they are ever stored:
    `[SensitiveData]` / `[TrackHash]` / `[DoNotTrack]` or a fluent override.
-5. Reading: `LoadAsync`/`LoadByKeyAsync` (immediately consistent), declared keys
-   for lookups, SQL views only with `security_invoker = on`. Do not invent a
-   query DSL.
+5. Reading has a default order, not a free menu: one current document →
+   `LoadAsync`/`LoadByKeyAsync` (declared keys, immediately consistent); anything
+   derived — list, join, aggregation, search, external — → an `IChangeHandler`
+   projection, **THE DEFAULT**. A SQL view over `papuma.*` is the exception, not a
+   peer choice: only ad-hoc/reporting/BI, read-only, `security_invoker = on`,
+   schema-stable, non-sensitive fields. "Real-time / no lag" alone is not a reason
+   (a single current read is already strong-consistent via `LoadByKeyAsync`). Never
+   invent a query DSL.
 6. Reacting: `IChangeHandler`/`IEventHandler`. Handlers are IDEMPOTENT
    (at-least-once) and never block (no waiting for humans — write a task
    document instead). `Name` is the checkpoint identity: never rename it.
