@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.2 (2026-06-22)
+
+- **Docs** (shipped inside the package under `docs/`): reframed the read-path
+  guidance so a projection is the default derived read and a SQL view is a gated
+  exception, not a peer choice (concepts §16, the AI agent snippet and playbook).
+  Clarified that "real-time / no lag" alone points to `LoadByKeyAsync`, and added a
+  structural-hardening note (`LoadMaskedAsync` / ADR-016). No functional change.
+
 ## 1.0.1 (2026-06-14)
 
 - **License headers switched to SPDX** across all source files

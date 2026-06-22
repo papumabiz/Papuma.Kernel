@@ -3,7 +3,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Version>1.0.1</Version>
+    <Version>1.0.2</Version>
     <Authors>Harald Lapp</Authors>
     <Copyright>Copyright © 2026 Harald Lapp</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
