@@ -1,7 +1,9 @@
 # Exploration: a SQLite-backed sibling for desktop/local use
 
-Status: **idea / not decided** (2026-08-11). No implementation triggered by
-this document. Companion to
+Status: **exploration confirmed as worth pursuing** (2026-08-11, updated same
+day). Started as a pure idea; there is now a concrete desktop project that
+could use it, so this has moved from "captured for later" to "next up."
+Section 7 lays out the implementation sequencing. Companion to
 [offline-sync-and-projection-conflicts.md](offline-sync-and-projection-conflicts.md)
 (the sync/conflict side of the same question) and to
 [chat-2.md](../chats/chat-2.md) (the original brainstorm this grew out of).
@@ -39,10 +41,10 @@ What's proposed here is a different shape entirely:
 
 | | ADR-001's rejected proposal | This proposal |
 |---|---|---|
-| Code | One kernel, `IStorageProvider` branches inside | Two independent kernels |
+| Code | One kernel, `IStorageProvider` branches inside | Two independent kernels, one shared core library |
 | SQL | Shared/abstracted | Each engine's SQL is exactly as native as today's Postgres kernel |
-| What's shared | Storage implementation | Only the **data contract at the boundary** — the shape of a document, a version, a diff, a `ChangeRecord` |
-| Risk to Postgres kernel | Real — every abstraction leaks back | None — `Papuma.Kernel` is untouched |
+| What's shared | Storage implementation | The **data contract** (`ChangeRecord`, diff shape) *and* the storage-neutral business logic (diff engine, policies, upcasting) — see §3 |
+| Risk to Postgres kernel | Real — every abstraction leaks back | Low — `Papuma.Kernel`'s SQL/session code stays where it is; only the parts that are already storage-neutral move to a shared project |
 
 Sharing a *data contract* is not a new idea invented for this document — it's
 literally what [feed-wire-format.md](../vNEXT/feed-wire-format.md) already
@@ -65,23 +67,89 @@ and reversible), the contract a `Papuma.Kernel.Local` would need to speak is
 not hypothetical — it is what already ships today, just not yet pulled out
 as an artifact independent of the Postgres kernel's assembly.
 
-## 3. What's shared vs. what's deliberately not
+## 3. How much code would actually need to be duplicated
 
-| | Shared | Not shared |
+The worry ("won't this mean a ton of duplicate code?") is reasonable to raise
+and deserved a real answer instead of a hand-wave — so: measured against the
+current kernel, not guessed.
+
+```
+Total .cs files in src/Papuma.Kernel:        76
+Files that reference Npgsql at all:          18   (24%)
+```
+
+Broken down by folder, `Npgsql`-touching files vs. total:
+
+| Folder | Files | Touch `Npgsql` |
 |---|---|---|
-| Diff format (wire-format §3) | ✅ already storage-neutral | |
-| `ChangeRecord`/`DocumentDiff` shape | ✅ already a plain POCO | |
-| API verbs and their semantics (`Save(doc, expectedVersion)`, `Patch(...)`, `GetChanges(afterSeq)`) | ✅ same developer experience on both | |
-| Write-path SQL (`RETURNING OLD/NEW` vs. a trigger) | | ✅ each engine's native mechanism |
-| Concurrency/visibility mechanism (`txid8` + snapshot gap, ADR-010) | | ✅ see §4 — mostly doesn't apply to SQLite |
-| Multi-tenant scope / RLS | | ✅ a local desktop store has one user; this machinery would be dead weight |
-| Feed wakeup (LISTEN/NOTIFY) | | ✅ in-process events suffice in an embedded, single-process store |
-| Policies (redact/hash/reference, ADR-004/007) | Conceptually — a desktop app may still want e.g. `[Hash]` on a local field | Implementation, if needed, is separate |
+| `Changes/` (diff engine, `ChangeRecord`, policies) | 9 | **0** |
+| `Model/` | 10 | **0** |
+| `Validation/` | 1 | **0** |
+| `Store/` | 23 | 7 (the rest are exceptions/result types) |
+| `Events/` | 5 | 2 |
+| `Gdpr/` | 5 | 1 |
+| `Processing/` | 6 | 2 |
+| `Tenancy/` | 6 | 3 |
+| `Hosting/` | 4 | 3 |
+| `Diagnostics/` | 1 | 0 |
 
-The SQLite side should be **radically simpler** than the Postgres kernel, not
-a smaller copy of it. That was the original instinct in `chat-2.md`
-("Postgres is overkill for desktop") and it stays correct — it just applies
-to the storage engine, not to the conceptual model.
+Three folders are **100% storage-neutral today**: the diff engine, the
+policy engine, upcasting-relevant model types, and validation never touch
+Postgres. Even inside `Store/` — where the real write path lives — most files
+(`BulkResult`, `ConcurrencyException`, `DocumentResult`, `PatchBuilder`,
+`SaveResult`, the typed exceptions) are plain types. The `Npgsql` references
+concentrate almost entirely in the `DocumentSession.*` files — unsurprising,
+since that's literally the code that talks to the database.
+
+**Conclusion: the expensive, correctness-critical logic — diffing, policy
+application, schema upcasting, validation, the `ChangeRecord`/`DocumentDiff`
+types — is already shared by construction.** What's left over for
+`Papuma.Kernel.Local` to write natively is the narrow slice that has to
+differ by definition: connection/transaction handling, the atomic write
+mechanism (`RETURNING OLD/NEW` vs. an `AFTER UPDATE` trigger), the
+concurrency check, DDL. That slice isn't "duplication" in the bad sense
+(the same logic typed out twice) — it's two different, necessarily different
+implementations of a small write-path contract. No abstraction, however
+clever, makes that part smaller: even inside a shared `IStorageProvider` it
+would still be two full SQL implementations underneath, just addressed
+indirectly.
+
+### The narrow storage seam
+
+The refinement worth making explicit: rather than "two kernels that happen to
+produce the same JSON shape" (implying the session/orchestration layer above
+storage gets written twice too), the shared library should include the
+**orchestration**, not just the DTOs — "compute diff → apply policies →
+validate → hand off to storage → build `ChangeRecord`" is pure C# and belongs
+in one place. Only the actual persistence call is behind a small seam:
+
+```csharp
+// illustrative — not a proposal to design in the abstract, see §7
+internal interface IDocumentStorage
+{
+    Task<(JsonObject? Old, JsonObject New, long Version)> WriteAsync(
+        DocumentKey key, JsonObject data, long expectedVersion, ChangeOperation op, CancellationToken ct);
+
+    Task AppendChangeAsync(ChangeRecord record, CancellationToken ct);
+
+    IAsyncEnumerable<ChangeRecord> ReadChangesAsync(long afterSeq, CancellationToken ct);
+}
+```
+
+Three, maybe four methods. This is deliberately **not** the interface ADR-001
+rejected: it doesn't try to abstract "a document database" in general, it
+abstracts exactly the handful of operations that `DocumentSession` already
+performs against Postgres today — narrow enough that it can't flatten to a
+lowest common denominator, because there isn't much to flatten. And critically,
+it gets designed *from* a second real, working implementation (the SQLite one
+being built now), not guessed at in advance — which is exactly the order
+ADR-001's own consequence recommends: *"extracting an abstraction from a
+working Postgres implementation is easier than the reverse approach."*
+
+The SQLite side should still be **radically simpler** than the Postgres
+kernel where it's allowed to be — no RLS/scope machinery, no
+snapshot-visibility handling (§4), in-process notification instead of
+LISTEN/NOTIFY. Simpler storage adapter, same shared orchestration above it.
 
 ## 4. Why the hardest Postgres problem mostly disappears here
 
@@ -132,53 +200,74 @@ flowchart LR
     end
 ```
 
-## 6. Proposed shape (if this ever gets built)
+The sync bridge is deliberately **not** part of the first build — see §7.
+Nothing about it blocks shipping the local SQLite kernel standalone first.
 
-- **`Papuma.Kernel`** — unchanged. No provider switch, no conditional code
-  path, nothing added for this idea's sake.
-- **`Papuma.Kernel.Local`** (naming tentative — `.Desktop`/`.Embedded` also
-  read fine) — new, independent package. SQLite storage, trigger-based
-  old/new capture, single-writer feed reader, in-process change notification,
-  no RLS/scope machinery. Implements the same verb-level surface
-  (`Save`/`Patch`/`GetChanges`) so application code reads the same either way.
-- **The shared contract** — mostly already exists (`ChangeRecord`,
-  `DocumentDiff`, the wire-format diff shape). Whether it needs its own
-  package (`Papuma.Kernel.Contracts`) or can stay where it is and simply be
-  referenced is an implementation detail to decide when this is actually
-  built, not now.
-- **The sync bridge** — a consumer of `Papuma.Kernel.Local`'s feed and a
-  normal client of `Papuma.Kernel`'s API, per §5.
+## 6. Proposed shape
 
-## 7. What NOT to do now
+- **`Papuma.Kernel`** — Postgres session/storage code stays exactly where it
+  is; it starts referencing the new shared project instead of containing the
+  logic directly, but its public surface and behavior don't change.
+- **`Papuma.Kernel.Core`** (naming tentative) — new project holding what §3
+  already showed is storage-neutral: `Changes/`, `Model/`, `Validation/`,
+  the diff engine, policy engine, upcasting, `ChangeRecord`/`DocumentDiff`,
+  and the session-level orchestration (Save/Patch semantics) written once
+  against `IDocumentStorage`. This is a **refactor of existing code**, not
+  new code — moving files, not rewriting logic.
+- **`Papuma.Kernel.Local`** — new project. SQLite storage implementing
+  `IDocumentStorage`: trigger-based old/new capture, single-writer feed
+  reader, in-process change notification, no RLS/scope machinery.
+- **The sync bridge** — a later, separate package once the SQLite kernel
+  itself is proven; consumes `Papuma.Kernel.Local`'s feed, calls
+  `Papuma.Kernel`'s API like any client.
 
-- **Don't build `Papuma.Kernel.Local` speculatively.** It's a second product
-  with its own test matrix, its own edge cases (SQLite locking/WAL behavior,
-  file-based backup/migration story) — real, ongoing cost, not a one-off.
-- **Don't touch `Papuma.Kernel`** to prepare for this. There is nothing to
-  prepare — §2 already shows the contract is close to independent, and
-  ADR-001's own consequence applies directly: *"extracting an abstraction
-  from a working Postgres implementation is easier than the reverse
-  approach."* The Postgres kernel doesn't need to anticipate a sibling that
-  doesn't exist yet.
-- **Do treat the wire-format contract as worth keeping storage-neutral**
-  going forward (i.e. a habit, not a project) — cheap, already mostly true,
-  and pays for itself today via the existing polyglot-consumer goal
-  regardless of whether `Papuma.Kernel.Local` ever gets built.
+## 7. Implementation sequencing
 
-## 8. Trigger conditions
+This is confirmed as next-up work now (a live desktop project can use it),
+so the order matters:
 
-Same honest uncertainty as the companion document: this is currently a
-"could become relevant" idea, not a requirement. Worth revisiting when there
-is a concrete desktop deployment that must run fully standalone (no reachable
-Postgres at all, not even intermittently) — at that point this document and
-[offline-sync-and-projection-conflicts.md](offline-sync-and-projection-conflicts.md)
-combine into one build: local SQLite kernel + outbox sync + conflict
-resolution policy. If the desktop app turns out fine always talking to a
-reachable central Postgres (per the current default), this stays exactly
-what it is — an idea on file, not a gap.
+1. **Extract `Papuma.Kernel.Core`.** Move the already-storage-neutral code
+   (§3's zero-`Npgsql` folders plus the non-`Npgsql` files in `Store/`) into
+   its own project; `Papuma.Kernel` references it. This is pure refactor
+   risk (moving/renaming, adjusting namespaces and references), not design
+   risk — the boundary is already known from the file-level evidence above.
+   Verify with the existing test suite; behavior must not change.
+2. **Design `IDocumentStorage` from what `DocumentSession` already does.**
+   Don't design it in the abstract — read off the exact operations the
+   Postgres session performs (write+diff-capture, change append, checkpointed
+   read) and shape the seam to match, per §3.
+3. **Build `Papuma.Kernel.Local`** against that seam: SQLite schema (document
+   table + change table), `AFTER UPDATE/DELETE` triggers for old/new capture,
+   a feed reader without the snapshot-gap logic (§4), in-process change
+   notification.
+4. **Prove it standalone first** — no sync bridge yet. A desktop app that
+   only ever talks to its local SQLite store is already a complete, useful
+   product and the cleanest way to validate the seam and the SQLite session
+   without also debugging sync/conflict logic at the same time.
+5. **The sync bridge is a distinct, later step** (§5) — build it once there's
+   a concrete need to talk to a central Postgres, using
+   [offline-sync-and-projection-conflicts.md](offline-sync-and-projection-conflicts.md)'s
+   design. Don't pull it into step 1–4's scope.
 
-If it does get triggered, it deserves its own ADR at that point (a sibling
-to ADR-001, not an amendment — ADR-001's "PostgreSQL as the only target
-database" decision was and remains correct for the server; a second,
-independent decision for the desktop target is a different question, not a
-reversal).
+What stays true from the original version of this document: don't build
+speculative multi-tenancy, RLS, or Postgres-parity features into
+`Papuma.Kernel.Local` "just in case" — it earns its simplicity from the
+single-process, single-user topology (§3, §4). Keep it that simple until a
+concrete requirement says otherwise.
+
+## 8. Open questions for the extraction
+
+Worth pinning down before or during step 1, not left implicit:
+
+- **Project/package naming** — `Papuma.Kernel.Core` vs. folding the
+  shared code into `Papuma.Kernel` itself with `Papuma.Kernel.Local`
+  depending on it directly (skips one project, but then "the Postgres
+  package" and "the shared core" are the same NuGet package, which a future
+  third storage target would have to live with).
+- **`IDocumentStorage`'s exact shape** — the sketch in §3 is illustrative;
+  the real signature should fall out of reading `DocumentSession.cs`
+  directly, not be designed from this document.
+- **Whether policies (ADR-004/007) apply identically on the desktop side**,
+  or whether a single-user local store even needs redact/hash/reference —
+  plausibly needs less, but that's a product decision, not an architecture
+  one.
