@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **New package: `Papuma.Kernel.Local`** — a SQLite-backed sibling of
+  `Papuma.Kernel` for single-writer desktop/embedded use, at full parity with
+  the Postgres kernel's public API (Load/Save/Delete/versioning/diff/change
+  feed, Patch and bulk operations, GDPR redaction, masked reads, history,
+  rollback, feed processing, hosting via `AddPapumaKernelLocal`). Same
+  document-sourcing model, no server required. See
+  `docs/analyses/local-kernel-sqlite-sibling.md` for the design rationale
+  and what's deliberately different per engine (no RLS, no gapless-read
+  handling, in-process wakeup instead of LISTEN/NOTIFY — none of that
+  applies to a single writer).
 - **Internal restructuring**: extracted the storage-neutral diff engine, policy
   engine, model, and validation code (previously `Changes/`, `Model/`,
   `Validation/`, and the storage-neutral half of `Tenancy/`) into a new

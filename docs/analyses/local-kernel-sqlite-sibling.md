@@ -1,12 +1,16 @@
 # Exploration: a SQLite-backed sibling for desktop/local use
 
-Status: **exploration confirmed as worth pursuing** (2026-08-11, updated same
-day). Started as a pure idea; there is now a concrete desktop project that
-could use it, so this has moved from "captured for later" to "next up."
-Section 7 lays out the implementation sequencing. Companion to
+Status: **built** (2026-08-11). Started as a pure idea, confirmed worth
+pursuing the same day once a concrete desktop project needing it existed,
+then implemented end to end (Stages 0–5 of §7 all landed): `Papuma.Kernel.Core`
+extracted, `Papuma.Kernel.Local` at full parity with `Papuma.Kernel` (Load/
+Save/Delete/versioning/diff/change feed, Patch/bulk ops, GDPR redaction,
+masked reads, history, rollback, feed processing, hosting), 48 SQLite tests
+green alongside the existing 167 Postgres + 4 sample tests. Companion to
 [offline-sync-and-projection-conflicts.md](offline-sync-and-projection-conflicts.md)
-(the sync/conflict side of the same question) and to
-[chat-2.md](../chats/chat-2.md) (the original brainstorm this grew out of).
+(the sync/conflict side of the same question — not started, no live
+requirement yet) and to [chat-2.md](../chats/chat-2.md) (the original
+brainstorm this grew out of).
 
 Origin: while building a desktop application on Papuma Kernel, a Postgres
 server started to feel like overkill for a single-user local store —
@@ -163,13 +167,17 @@ ADR-010 solves essentially doesn't arise in that topology. A local feed
 reader can be close to `WHERE seq > @checkpoint ORDER BY seq` — no snapshot
 gymnastics needed.
 
-What SQLite *doesn't* give you natively (and `chat-2.md`'s own analysis
-already gets this right): no `RETURNING OLD/NEW` — old/new capture has to
-happen via `AFTER UPDATE/DELETE` triggers instead, writing into a
-`changefeed`/`change` table in the same SQLite transaction. Functionally
-equivalent (same atomicity guarantee: document write and change record commit
-or roll back together), mechanically different. That's fine — it's exactly
-the kind of difference this document says is okay to have per engine.
+What SQLite *doesn't* give you natively: no `RETURNING OLD/NEW`. `chat-2.md`'s
+original guess was DB triggers; what actually got built instead (simpler, no
+SQL-side logic to maintain) is a plain `SELECT` for the "old" state followed
+by a version-checked `UPDATE ... RETURNING` for the "new" state, both inside
+the same exclusive transaction — two application-level statements instead of
+one, same atomicity guarantee (nothing can change the row between them; the
+whole point of "single writer" is that there's no one else who could).
+Deletes stay a single statement (`DELETE ... RETURNING` naturally returns the
+deleted row — no old/new split needed there at all). Mechanically different
+from Postgres, functionally equivalent — exactly the kind of difference this
+document says is okay to have per engine.
 
 ## 5. The sync bridge
 
@@ -188,7 +196,7 @@ No exception to that rule needs inventing for this case.
 ```mermaid
 flowchart LR
     subgraph Desktop process
-        A[Papuma.Kernel.Local<br/>SQLite] -->|AFTER UPDATE trigger| B[(local change table)]
+        A[Papuma.Kernel.Local<br/>SQLite] -->|SELECT + UPDATE...RETURNING,<br/>same transaction| B[(local change table)]
     end
     subgraph Sync bridge
         B --> C[Outbox reader]
@@ -202,72 +210,99 @@ flowchart LR
 
 The sync bridge is deliberately **not** part of the first build — see §7.
 Nothing about it blocks shipping the local SQLite kernel standalone first.
+(Still true as of the build below: the sync bridge remains unbuilt, no live
+requirement for it yet.)
 
-## 6. Proposed shape
+## 6. Shape (as built)
 
-- **`Papuma.Kernel`** — Postgres session/storage code stays exactly where it
-  is; it starts referencing the new shared project instead of containing the
-  logic directly, but its public surface and behavior don't change.
-- **`Papuma.Kernel.Core`** (naming tentative) — new project holding what §3
-  already showed is storage-neutral: `Changes/`, `Model/`, `Validation/`,
-  the diff engine, policy engine, upcasting, `ChangeRecord`/`DocumentDiff`,
-  and the session-level orchestration (Save/Patch semantics) written once
-  against `IDocumentStorage`. This is a **refactor of existing code**, not
-  new code — moving files, not rewriting logic.
-- **`Papuma.Kernel.Local`** — new project. SQLite storage implementing
-  `IDocumentStorage`: trigger-based old/new capture, single-writer feed
-  reader, in-process change notification, no RLS/scope machinery.
-- **The sync bridge** — a later, separate package once the SQLite kernel
-  itself is proven; consumes `Papuma.Kernel.Local`'s feed, calls
-  `Papuma.Kernel`'s API like any client.
+- **`Papuma.Kernel`** — untouched behaviorally. Its session/storage code now
+  references `Papuma.Kernel.Core` instead of containing the moved logic
+  directly; public surface and behavior didn't change (proven by the full
+  existing Postgres test suite staying green throughout).
+- **`Papuma.Kernel.Core`** — holds everything storage-neutral: `Changes/`,
+  `Model/`, `Validation/`, the storage-neutral third of `Tenancy/`, the diff
+  engine, policy engine, upcasting, `ChangeRecord`/`DocumentDiff`, the 6
+  typed exceptions, `KernelDiagnostics`, `SessionOptions`/`DocumentResult<T>`/
+  `SaveResult`/`BulkResult`/`MaskedDocumentResult`, `PatchBuilder`, the
+  storage-neutral half of the feed engine (`IChangeHandler`/`IEventHandler`,
+  `ChangeFeedProcessorOptions`, `FeedFailure`, `ChangeFeedLagSnapshot`,
+  `EventRecord`, `EventPayloadPolicyApplier`, the storage-neutral half of
+  `FeedDiagnostics`), and a new `RedactionEngine` (GDPR decision logic,
+  extracted from private methods that used to live only in the Postgres
+  session). No `IDocumentStorage` interface — see below.
+- **`Papuma.Kernel.Local`** — **not** a seam implementation; an independent
+  `SqliteDocumentSession`/`SqliteDocumentStore` at full method-for-method
+  parity with the Postgres session, calling into Core's diff/policy/model
+  code directly. Patch application happens in-process
+  (`JsonPatchApplier`, replacing Postgres's generated `jsonb_set` SQL
+  expressions) rather than as generated SQL. Its own feed processors
+  (`SqliteChangeFeedProcessor`/`SqliteEventFeedProcessor`) and an in-process
+  `SqliteChangeNotifier` (replacing LISTEN/NOTIFY) round it out, plus
+  `AddPapumaKernelLocal` hosting that mirrors `AddPapumaKernel`'s shape.
+- **The sync bridge** — still not built. No live requirement for it yet
+  (unchanged from the original version of this document).
 
-## 7. Implementation sequencing
+## 7. Implementation sequencing (executed)
 
-This is confirmed as next-up work now (a live desktop project can use it),
-so the order matters:
+Landed as six stages, each verified (build + full test suite) before the
+next started — see the commit history for exact diffs:
 
-1. **Extract `Papuma.Kernel.Core`.** Move the already-storage-neutral code
-   (§3's zero-`Npgsql` folders plus the non-`Npgsql` files in `Store/`) into
-   its own project; `Papuma.Kernel` references it. This is pure refactor
-   risk (moving/renaming, adjusting namespaces and references), not design
-   risk — the boundary is already known from the file-level evidence above.
-   Verify with the existing test suite; behavior must not change.
-2. **Design `IDocumentStorage` from what `DocumentSession` already does.**
-   Don't design it in the abstract — read off the exact operations the
-   Postgres session performs (write+diff-capture, change append, checkpointed
-   read) and shape the seam to match, per §3.
-3. **Build `Papuma.Kernel.Local`** against that seam: SQLite schema (document
-   table + change table), `AFTER UPDATE/DELETE` triggers for old/new capture,
-   a feed reader without the snapshot-gap logic (§4), in-process change
-   notification.
-4. **Prove it standalone first** — no sync bridge yet. A desktop app that
-   only ever talks to its local SQLite store is already a complete, useful
-   product and the cleanest way to validate the seam and the SQLite session
-   without also debugging sync/conflict logic at the same time.
-5. **The sync bridge is a distinct, later step** (§5) — build it once there's
-   a concrete need to talk to a central Postgres, using
-   [offline-sync-and-projection-conflicts.md](offline-sync-and-projection-conflicts.md)'s
-   design. Don't pull it into step 1–4's scope.
+1. **Extracted `Papuma.Kernel.Core`** (two passes — the first extraction, plus
+   a second pass in Stage 2 that caught `SessionOptions`/`DocumentResult<T>`/
+   `SaveResult`/`BulkResult`/`MaskedDocumentResult`, missed the first time
+   despite being equally storage-neutral).
+2. **Confirmed no shared storage seam** — see §6's "not a seam
+   implementation." Investigated `DocumentSession.*` in full first (Explore +
+   Plan agent passes) and found the orchestration and the SQL are more
+   tightly interleaved than the folder-level heuristic suggested — building
+   `IDocumentStorage` upfront would have meant guessing its shape rather than
+   reading it off a second working implementation, the opposite of what
+   ADR-001's own consequence recommends.
+3. **`Papuma.Kernel.Local` project + SQLite schema + spikes** pinning down
+   `RETURNING` behavior, the exact `SqliteException` shape on a unique-index
+   violation, and that `SqliteTransaction` has no savepoint API (raw SQL
+   text needed) — all empirically verified before being relied on, not
+   assumed.
+4. **Core write path** (Load/Save/Delete/versioning/change records/commit).
+5. **Remaining surface**: Patch/bulk ops, GDPR redaction, masked reads,
+   history, rollback — full parity with the Postgres session's public API.
+6. **Feed processing + hosting**, then **closing test-suite gaps**
+   (schema evolution/upcasting, schema-manager idempotency, event retention)
+   that weren't yet covered by the stage-by-stage test additions.
 
-What stays true from the original version of this document: don't build
-speculative multi-tenancy, RLS, or Postgres-parity features into
-`Papuma.Kernel.Local` "just in case" — it earns its simplicity from the
-single-process, single-user topology (§3, §4). Keep it that simple until a
-concrete requirement says otherwise.
+What stayed true throughout: no speculative multi-tenancy, RLS, or
+Postgres-parity features went into `Papuma.Kernel.Local` "just in case" — it
+earns its simplicity from the single-process, single-user topology (§3, §4).
+The sync bridge from
+[offline-sync-and-projection-conflicts.md](offline-sync-and-projection-conflicts.md)
+stayed out of scope, exactly as planned — build it only once there's a
+concrete requirement for offline/multi-device work against a central
+Postgres.
 
-## 8. Open questions for the extraction
+## 8. Open questions from the original version — resolved
 
-Worth pinning down before or during step 1, not left implicit:
+- **Project/package naming** — settled as `Papuma.Kernel.Core` /
+  `Papuma.Kernel.Local`, kept throughout the build.
+- **A shared storage seam's exact shape** — resolved as "don't build one":
+  see §6/§7 point 2. `Papuma.Kernel.Local` is a fully independent
+  implementation, not a seam consumer.
+- **Whether policies (ADR-004/007) apply identically on the desktop side**
+  — yes, unchanged: `PolicyApplier`/`PolicyProjector`/`RedactionEngine` are
+  Core code, called identically from both sessions. No desktop-specific
+  policy behavior was needed or introduced.
 
-- **Project/package naming** — `Papuma.Kernel.Core` vs. folding the
-  shared code into `Papuma.Kernel` itself with `Papuma.Kernel.Local`
-  depending on it directly (skips one project, but then "the Postgres
-  package" and "the shared core" are the same NuGet package, which a future
-  third storage target would have to live with).
-- **`IDocumentStorage`'s exact shape** — the sketch in §3 is illustrative;
-  the real signature should fall out of reading `DocumentSession.cs`
-  directly, not be designed from this document.
-- **Whether policies (ADR-004/007) apply identically on the desktop side**,
-  or whether a single-user local store even needs redact/hash/reference —
-  plausibly needs less, but that's a product decision, not an architecture
-  one.
+## 9. What's next, if anything
+
+`Papuma.Kernel.Local` is built, tested, and packs correctly — it's usable
+today by the desktop project that motivated this. Nothing here requires
+further work unless a concrete need shows up:
+
+- **The sync bridge** (§5) — only if/when offline work against a central
+  Postgres becomes a real requirement, per
+  [offline-sync-and-projection-conflicts.md](offline-sync-and-projection-conflicts.md).
+- **A dedicated `Papuma.Kernel.Core.Tests` project** (DB-less unit tests
+  proving Core has zero storage dependency by construction) — mentioned as a
+  "later, once Local exists" idea in the Core-extraction plan; Local exists
+  now, but the existing test suites already exercise Core's logic twice
+  (once per kernel), which is coverage, just not the fastest possible
+  feedback loop. Worth doing when that loop starts to matter, not before.
