@@ -346,6 +346,94 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Rolls a document back to the state of <paramref name="toVersion"/> — recorded as
+    /// a normal update with <c>isRollback</c>/<c>restoredVersion</c> metadata, never as
+    /// a fourth operation; the history stays append-only (ADR-008).
+    /// </summary>
+    /// <typeparam name="T">The document CLR type.</typeparam>
+    /// <param name="id">The document identifier.</param>
+    /// <param name="toVersion">The version whose state is restored.</param>
+    /// <param name="expectedVersion">The expected current version (optimistic concurrency).</param>
+    /// <param name="ct">A cancellation token.</param>
+    /// <exception cref="RollbackNotPossibleException">
+    /// A diff on the way back contains policy entries without values (ADR-007).
+    /// </exception>
+    public async Task<SaveResult> RollbackAsync<T>(
+        string id,
+        long toVersion,
+        long expectedVersion,
+        CancellationToken ct = default)
+        where T : class
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(toVersion);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(expectedVersion, toVersion);
+        var metadata = _model.GetRequired<T>();
+        InputValidator.ValidateDocumentId(id);
+
+        using var activity = StartWriteActivity("rollback", metadata.Name, id);
+        activity?.SetTag("papuma.restored_version", toVersion);
+        try
+        {
+            return await ExecuteWriteAsync(async (conn, tx) =>
+            {
+                // 1. Current state (the concurrency guarantee comes from the final UPDATE's
+                //    version predicate; this read only provides the reconstruction base).
+                var current = await LoadRawAsync(conn, tx, metadata, id, ct)
+                    ?? throw new DocumentNotFoundException(metadata.Name, id);
+                if (current.Version != expectedVersion)
+                {
+                    throw new ConcurrencyException(metadata.Name, id, expectedVersion, current.Version);
+                }
+
+                EnsureSchemaNotNewer(metadata, id, current.SchemaVersion);
+
+                // 2. Target record: must exist and must not be a delete.
+                var target = await LoadChangeAsync(conn, tx, metadata, id, toVersion, ct)
+                    ?? throw new ArgumentException(
+                        $"No change record at version {toVersion} for {metadata.Name}/{id}.", nameof(toVersion));
+                if (target.Operation == ChangeOperation.Delete)
+                {
+                    throw new ArgumentException(
+                        $"Version {toVersion} of {metadata.Name}/{id} is a delete — " +
+                        "a rollback cannot restore non-existence.", nameof(toVersion));
+                }
+
+                // 3. Reconstruct: apply the diffs back from current down to toVersion (ADR-004).
+                var state = current.Data;
+                foreach (var change in await LoadChangesDescendingAsync(conn, tx, metadata, id, toVersion, current.Version, ct))
+                {
+                    var diff = DocumentDiff.FromJson(change);
+                    foreach (var (path, entry) in diff.Entries)
+                    {
+                        if (entry.Kind != DiffEntryKind.Tracked)
+                        {
+                            throw new RollbackNotPossibleException(metadata.Name, id, path, entry.Kind);
+                        }
+                    }
+
+                    state = JsonDiffEngine.ApplyReverse(state, diff);
+                }
+
+                // 4. Lift the reconstructed state through the upcaster chain (ADR-008) and validate.
+                metadata.Upcast(state, target.SchemaVersion);
+                RunValidator(metadata, state);
+
+                // 5. Persist as a normal update with rollback metadata.
+                var rollbackMetadata = new JsonObject
+                {
+                    ["isRollback"] = true,
+                    ["restoredVersion"] = toVersion,
+                };
+                return await UpdateAsync(conn, tx, metadata, id, state, expectedVersion, ct, rollbackMetadata);
+            }, ct);
+        }
+        catch (Exception ex) when (RecordFailure(activity, ex))
+        {
+            throw; // unreachable — the filter never catches
+        }
+    }
+
     // ── Write internals ────────────────────────────────────────────────────────
 
     private async Task<SaveResult> InsertAsync(
@@ -720,6 +808,89 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
         cmd.Transaction = tx;
         cmd.CommandText = sql;
         await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    // ── Rollback internals ─────────────────────────────────────────────────────
+
+    private sealed record RawDocument(JsonObject Data, long Version, int SchemaVersion);
+
+    private sealed record ChangeHead(ChangeOperation Operation, int SchemaVersion);
+
+    private async Task<RawDocument?> LoadRawAsync(
+        SqliteConnection conn, SqliteTransaction tx, DocumentTypeMetadata metadata, string id, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            SELECT data, version, schema_version
+            FROM document
+            WHERE scope = @scope AND tenant_id = @tenantId
+              AND document_type = @type AND id = @id
+            """;
+        AddIdentityParameters(cmd, metadata.Name, id);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+        {
+            return null;
+        }
+
+        return new RawDocument(
+            (JsonObject)JsonNode.Parse(reader.GetString(0))!,
+            reader.GetInt64(1),
+            reader.GetInt32(2));
+    }
+
+    private async Task<ChangeHead?> LoadChangeAsync(
+        SqliteConnection conn, SqliteTransaction tx, DocumentTypeMetadata metadata, string id,
+        long version, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            SELECT operation, schema_version
+            FROM change
+            WHERE scope = @scope AND tenant_id = @tenantId
+              AND document_type = @type AND document_id = @id AND version = @version
+            """;
+        AddIdentityParameters(cmd, metadata.Name, id);
+        cmd.Parameters.AddWithValue("version", version);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+        {
+            return null;
+        }
+
+        return new ChangeHead((ChangeOperation)reader.GetInt32(0), reader.GetInt32(1));
+    }
+
+    private async Task<IReadOnlyList<JsonObject>> LoadChangesDescendingAsync(
+        SqliteConnection conn, SqliteTransaction tx, DocumentTypeMetadata metadata, string id,
+        long toVersionExclusive, long fromVersionInclusive, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            SELECT diff
+            FROM change
+            WHERE scope = @scope AND tenant_id = @tenantId
+              AND document_type = @type AND document_id = @id
+              AND version > @toVersion AND version <= @fromVersion
+            ORDER BY version DESC
+            """;
+        AddIdentityParameters(cmd, metadata.Name, id);
+        cmd.Parameters.AddWithValue("toVersion", toVersionExclusive);
+        cmd.Parameters.AddWithValue("fromVersion", fromVersionInclusive);
+
+        var diffs = new List<JsonObject>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            diffs.Add((JsonObject)JsonNode.Parse(reader.GetString(0))!);
+        }
+
+        return diffs;
     }
 
     // ── Shared helpers ─────────────────────────────────────────────────────────
