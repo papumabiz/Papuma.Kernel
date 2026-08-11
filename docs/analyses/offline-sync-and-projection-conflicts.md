@@ -5,7 +5,10 @@ document — captured so the reasoning doesn't have to be redone if either quest
 becomes real. Written while designing a desktop application on top of Papuma
 Kernel with a central Postgres server; the baseline architecture is: desktop
 clients connect live to one shared Postgres, writes go through the kernel's
-`Save`/`Patch` API.
+`Save`/`Patch` API. Companion to
+[local-kernel-sqlite-sibling.md](local-kernel-sqlite-sibling.md) (the storage
+side of the same underlying question: what if a desktop client isn't always
+reachable to that Postgres at all).
 
 Two "what if" questions came up in that context:
 
