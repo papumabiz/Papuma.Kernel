@@ -11,7 +11,11 @@
   `docs/analyses/local-kernel-sqlite-sibling.md` for the design rationale
   and what's deliberately different per engine (no RLS, no gapless-read
   handling, in-process wakeup instead of LISTEN/NOTIFY — none of that
-  applies to a single writer).
+  applies to a single writer). Every connection now goes through a shared
+  `SqliteConnectionFactory` that enables WAL journal mode and a 5s busy
+  timeout, so a background feed processor writing doesn't block the UI
+  reading chat/document history (verified empirically, not assumed — see
+  `SqliteConnectionFactoryTests`).
 - **Internal restructuring**: extracted the storage-neutral diff engine, policy
   engine, model, and validation code (previously `Changes/`, `Model/`,
   `Validation/`, and the storage-neutral half of `Tenancy/`) into a new

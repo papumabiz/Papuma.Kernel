@@ -26,8 +26,8 @@ internal sealed class SqliteKernelSchemaInitializer(
     {
         if (options.EnsureSchema)
         {
-            await using var connection = new SqliteConnection(options.ResolveConnectionString());
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await SqliteConnectionFactory.OpenAsync(
+                options.ResolveConnectionString(), cancellationToken);
             await SqliteSchemaManager.EnsureSchemaAsync(connection, model, cancellationToken);
         }
     }

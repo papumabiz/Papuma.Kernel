@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 using Papuma.Kernel.Diagnostics;
 using Papuma.Kernel.Processing;
+using Papuma.Kernel.Store;
 using Papuma.Kernel.Tenancy;
 
 namespace Papuma.Kernel.Events;
@@ -173,8 +174,7 @@ public sealed class SqliteEventFeedProcessor : IDisposable
     {
         var keys = _handlers.Select(h => CheckpointPrefix + h.Name).ToArray();
 
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT handler_name, seq, attempts, last_error, next_retry_at, updated_at
@@ -207,8 +207,7 @@ public sealed class SqliteEventFeedProcessor : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(handlerName);
 
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM failure WHERE handler_name = @name AND seq = @seq";
         cmd.Parameters.AddWithValue("name", CheckpointPrefix + handlerName);
@@ -225,8 +224,7 @@ public sealed class SqliteEventFeedProcessor : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(handlerName);
         var key = CheckpointPrefix + handlerName;
 
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
         await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
 
         var now = DateTimeOffset.UtcNow.ToString("O");
@@ -261,8 +259,7 @@ public sealed class SqliteEventFeedProcessor : IDisposable
     {
         await EnsureRegisteredAsync(ct);
 
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
         await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
 
         long latestSeq;
@@ -295,8 +292,7 @@ public sealed class SqliteEventFeedProcessor : IDisposable
     {
         var key = CheckpointPrefix + handler.Name;
 
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
         await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
 
         long checkpoint;
@@ -500,8 +496,7 @@ public sealed class SqliteEventFeedProcessor : IDisposable
             return;
         }
 
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
         foreach (var handler in _handlers)
         {
             await using var cmd = conn.CreateCommand();

@@ -765,8 +765,7 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
         {
             if (_connection is null)
             {
-                _connection = new SqliteConnection(_connectionString);
-                await _connection.OpenAsync(ct);
+                _connection = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
             }
 
             _transaction = (SqliteTransaction)await _connection.BeginTransactionAsync(ct);

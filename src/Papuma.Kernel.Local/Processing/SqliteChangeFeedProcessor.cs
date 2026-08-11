@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 using Papuma.Kernel.Changes;
 using Papuma.Kernel.Diagnostics;
+using Papuma.Kernel.Store;
 using Papuma.Kernel.Tenancy;
 
 namespace Papuma.Kernel.Processing;
@@ -196,8 +197,7 @@ public sealed class SqliteChangeFeedProcessor : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(handlerName);
 
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
         await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
 
         var now = DateTimeOffset.UtcNow.ToString("O");
@@ -233,8 +233,7 @@ public sealed class SqliteChangeFeedProcessor : IDisposable
     {
         await EnsureRegisteredAsync(ct);
 
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
         await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
 
         long latestSeq;
@@ -271,8 +270,7 @@ public sealed class SqliteChangeFeedProcessor : IDisposable
     /// </summary>
     public async Task<IReadOnlyList<FeedFailure>> GetFailuresAsync(CancellationToken ct = default)
     {
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT handler_name, seq, attempts, last_error, next_retry_at, updated_at
@@ -305,8 +303,7 @@ public sealed class SqliteChangeFeedProcessor : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(handlerName);
 
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM failure WHERE handler_name = @name AND seq = @seq";
         cmd.Parameters.AddWithValue("name", handlerName);
@@ -317,8 +314,7 @@ public sealed class SqliteChangeFeedProcessor : IDisposable
 
     private async Task<int> ProcessHandlerBatchAsync(IChangeHandler handler, CancellationToken ct)
     {
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
         await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
 
         long checkpoint;
@@ -540,8 +536,7 @@ public sealed class SqliteChangeFeedProcessor : IDisposable
             return;
         }
 
-        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync(ct);
+        await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
         foreach (var handler in _handlers)
         {
             await using var cmd = conn.CreateCommand();

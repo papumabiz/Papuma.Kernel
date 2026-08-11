@@ -4,6 +4,7 @@
 using Microsoft.Data.Sqlite;
 
 using Papuma.Kernel.Model;
+using Papuma.Kernel.Store;
 
 namespace Papuma.Kernel.Events;
 
@@ -30,8 +31,7 @@ public static class SqliteEventRetention
         var deleted = 0;
         foreach (var eventType in model.EventTypes.Where(e => e.Retention is not null))
         {
-            await using var conn = new SqliteConnection(connectionString);
-            await conn.OpenAsync(ct);
+            await using var conn = await SqliteConnectionFactory.OpenAsync(connectionString, ct);
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = "DELETE FROM event WHERE event_type = @type AND occurred_at < @cutoff";
             cmd.Parameters.AddWithValue("type", eventType.Name);

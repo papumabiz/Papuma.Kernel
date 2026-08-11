@@ -55,9 +55,8 @@ public sealed class SqliteFixture : IAsyncLifetime
     /// </summary>
     public async Task<SqliteDocumentStore> CreateStoreAsync(KernelModel model, Action? notifyWaiters = null)
     {
-        await using (var connection = new SqliteConnection(ConnectionString))
+        await using (var connection = await SqliteConnectionFactory.OpenAsync(ConnectionString))
         {
-            await connection.OpenAsync();
             await SqliteSchemaManager.EnsureSchemaAsync(connection, model);
         }
 
