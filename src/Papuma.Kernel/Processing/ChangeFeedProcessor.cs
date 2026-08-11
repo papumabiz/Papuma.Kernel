@@ -276,7 +276,7 @@ public sealed class ChangeFeedProcessor : IDisposable
     /// </summary>
     /// <param name="ct">A cancellation token.</param>
     public Task<IReadOnlyList<FeedFailure>> GetFailuresAsync(CancellationToken ct = default) =>
-        FeedDiagnostics.GetFailuresAsync(_dataSource, _handlers.Select(h => h.Name), prefix: string.Empty, ct);
+        PostgresFeedDiagnostics.GetFailuresAsync(_dataSource, _handlers.Select(h => h.Name), prefix: string.Empty, ct);
 
     /// <summary>
     /// Removes a failure entry so the next cycle retries the record immediately —
@@ -287,7 +287,7 @@ public sealed class ChangeFeedProcessor : IDisposable
     /// <param name="ct">A cancellation token.</param>
     /// <returns><c>true</c> when a failure entry existed and was removed.</returns>
     public Task<bool> RetryFailureAsync(string handlerName, long seq, CancellationToken ct = default) =>
-        FeedDiagnostics.RetryFailureAsync(_dataSource, handlerName, prefix: string.Empty, seq, ct);
+        PostgresFeedDiagnostics.RetryFailureAsync(_dataSource, handlerName, prefix: string.Empty, seq, ct);
 
     private async Task<int> ProcessHandlerBatchAsync(IChangeHandler handler, CancellationToken ct)
     {

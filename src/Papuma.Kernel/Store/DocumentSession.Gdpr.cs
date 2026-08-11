@@ -7,6 +7,8 @@ using Npgsql;
 
 using NpgsqlTypes;
 
+using Papuma.Kernel.Changes;
+
 namespace Papuma.Kernel.Store;
 
 /// <summary>
@@ -72,14 +74,14 @@ public sealed partial class DocumentSession
                     while (await reader.ReadAsync(ct))
                     {
                         var diff = (JsonObject)JsonNode.Parse(reader.GetString(1))!;
-                        if (RedactDiffEntries(diff, paths))
+                        if (RedactionEngine.RedactDiffEntries(diff, paths))
                         {
                             dirty.Add((reader.GetInt64(0), diff));
                         }
                     }
                 }
 
-                var audit = BuildRedactionAudit(reason, paths);
+                var audit = RedactionEngine.BuildRedactionAudit(CorrelationId, _options.ActorId, reason, paths);
                 foreach (var (seq, diff) in dirty)
                 {
                     await using var update = conn.CreateCommand();
@@ -171,14 +173,14 @@ public sealed partial class DocumentSession
                     while (await reader.ReadAsync(ct))
                     {
                         var payload = (JsonObject)JsonNode.Parse(reader.GetString(1))!;
-                        if (RemovePayloadPaths(payload, paths))
+                        if (RedactionEngine.RemovePayloadPaths(payload, paths))
                         {
                             dirty.Add((reader.GetInt64(0), payload));
                         }
                     }
                 }
 
-                var audit = BuildRedactionAudit(reason, paths);
+                var audit = RedactionEngine.BuildRedactionAudit(CorrelationId, _options.ActorId, reason, paths);
                 foreach (var (seq, payload) in dirty)
                 {
                     await using var update = conn.CreateCommand();
@@ -204,95 +206,4 @@ public sealed partial class DocumentSession
         }
     }
 
-    // ── Redaction internals ────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Rewrites matching diff entries (wire format, ADR-004) to the redaction marker
-    /// <c>{"changed": true}</c>. Returns whether anything changed — already-redacted
-    /// entries make the operation idempotent.
-    /// </summary>
-    private static bool RedactDiffEntries(JsonObject diff, IReadOnlyCollection<string>? paths)
-    {
-        var changed = false;
-        foreach (var entryPath in diff.Select(e => e.Key).ToList())
-        {
-            if (paths is not null && !paths.Any(p => PathCovers(p, entryPath)))
-            {
-                continue;
-            }
-
-            // Idempotency: a pure {"changed": true} marker is already fully redacted.
-            if (diff[entryPath] is JsonObject { Count: 1 } existing && existing.ContainsKey("changed"))
-            {
-                continue;
-            }
-
-            diff[entryPath] = new JsonObject { ["changed"] = true };
-            changed = true;
-        }
-
-        return changed;
-    }
-
-    private static bool RemovePayloadPaths(JsonObject payload, IReadOnlyCollection<string> paths)
-    {
-        var changed = false;
-        foreach (var path in paths)
-        {
-            var segments = path.Split('.');
-            var current = payload;
-            for (var i = 0; i < segments.Length - 1 && current is not null; i++)
-            {
-                current = current[segments[i]] as JsonObject;
-            }
-
-            if (current is not null && current.Remove(segments[^1]))
-            {
-                changed = true;
-            }
-        }
-
-        return changed;
-    }
-
-    /// <summary>Returns whether <paramref name="declared"/> covers <paramref name="path"/> (self or descendant).</summary>
-    private static bool PathCovers(string declared, string path) =>
-        path == declared || (path.Length > declared.Length && path[declared.Length] == '.'
-            && path.StartsWith(declared, StringComparison.Ordinal));
-
-    /// <summary>
-    /// Builds the mandatory audit block merged into the metadata of every rewritten
-    /// record: when, why, who (when the session carries an actor), correlation.
-    /// </summary>
-    private JsonObject BuildRedactionAudit(string reason, IReadOnlyCollection<string>? paths)
-    {
-        var redaction = new JsonObject
-        {
-            ["redactedAt"] = DateTimeOffset.UtcNow.ToString("O"),
-            ["reason"] = reason,
-            ["correlationId"] = CorrelationId.ToString("N"),
-        };
-
-        if (_options.ActorId is not null)
-        {
-            redaction["actorId"] = _options.ActorId;
-        }
-
-        if (paths is null)
-        {
-            redaction["paths"] = "all";
-        }
-        else
-        {
-            var array = new JsonArray();
-            foreach (var path in paths)
-            {
-                array.Add(path);
-            }
-
-            redaction["paths"] = array;
-        }
-
-        return new JsonObject { ["redaction"] = redaction };
-    }
 }
