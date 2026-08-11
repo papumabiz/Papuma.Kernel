@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Papuma.Kernel.Local</PackageId>
+    <Description>SQLite-backed embedded sibling of Papuma.Kernel for single-writer desktop/local use — the same document-sourcing model (versioned documents, reversible diffs, change feed, GDPR redaction, privacy policies, schema evolution) without a server. See docs/analyses/local-kernel-sqlite-sibling.md.</Description>
+    <PackageTags>sqlite;documents;cqrs;change-feed;gdpr;embedded;offline</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Papuma.Kernel.Local.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
+    <!-- Microsoft.Data.Sqlite 10.0.10 transitively pulls SQLitePCLRaw 2.1.11, which has a
+         known high-severity advisory (GHSA-2m69-gcr7-jv3q). Pin the bundle directly to a
+         patched version — a direct reference wins over the transitive one. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
+  </ItemGroup>
+
+  <!-- Same embedding pattern as Papuma.Kernel.csproj: Papuma.Kernel.Core is not
+       independently published (IsPackable=false in its own csproj), so its assembly
+       must be embedded into this package explicitly. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Papuma.Kernel.Core\Papuma.Kernel.Core.csproj">
+      <PrivateAssets>all</PrivateAssets>
+    </ProjectReference>
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);CopyProjectReferencesToPackage</TargetsForTfmSpecificBuildOutput>
+  </PropertyGroup>
+  <Target Name="CopyProjectReferencesToPackage" DependsOnTargets="BuildOnlySettings;ResolveReferences">
+    <ItemGroup>
+      <BuildOutputInPackage Include="@(ReferenceCopyLocalPaths->WithMetadataValue('ReferenceSourceTarget', 'ProjectReference'))" />
+    </ItemGroup>
+  </Target>
+
+</Project>

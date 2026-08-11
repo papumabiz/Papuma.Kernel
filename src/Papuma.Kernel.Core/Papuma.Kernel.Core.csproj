@@ -7,6 +7,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Papuma.Kernel" />
     <InternalsVisibleTo Include="Papuma.Kernel.Tests" />
+    <InternalsVisibleTo Include="Papuma.Kernel.Local" />
+    <InternalsVisibleTo Include="Papuma.Kernel.Local.Tests" />
   </ItemGroup>
 
 </Project>
