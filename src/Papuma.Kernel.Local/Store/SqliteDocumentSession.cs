@@ -1,0 +1,889 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 Harald Lapp
+
+using System.Diagnostics;
+using System.Linq.Expressions;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
+
+using Microsoft.Data.Sqlite;
+
+using Papuma.Kernel.Changes;
+using Papuma.Kernel.Diagnostics;
+using Papuma.Kernel.Model;
+using Papuma.Kernel.Tenancy;
+using Papuma.Kernel.Validation;
+
+namespace Papuma.Kernel.Store;
+
+/// <summary>
+/// Scope-bound unit of work for loading and writing documents against SQLite — the
+/// <see cref="DocumentSession"/> (Postgres) counterpart for a single-writer embedded
+/// kernel (docs/analyses/local-kernel-sqlite-sibling.md).
+/// </summary>
+/// <remarks>
+/// <para>
+/// SQLite has no <c>RETURNING OLD/NEW</c> (Postgres 18 only). Writes that need the
+/// replaced state (<see cref="SaveAsync{T}"/>'s update path) run a plain <c>SELECT</c> for
+/// the "old" state, then a version-checked <c>UPDATE ... RETURNING</c> for the "new" state
+/// — two round-trips instead of Postgres's one. This is safe, not a race: the session's
+/// transaction is exclusive at the SQLite file level, so nothing can change the row
+/// between the two statements (verified empirically, see
+/// <c>SqliteSpikeTests.Update_ReturningNewState_WorksAsSingleStatement</c>).
+/// </para>
+/// <para>
+/// No Row Level Security, no <c>SET LOCAL</c> scope binding — isolation stays
+/// WHERE-predicate only (every query still filters on <c>scope</c>/<c>tenant_id</c>
+/// explicitly). No <c>txid</c>/gapless-read handling (ADR-010) — that problem only exists
+/// with concurrent writers, which a single-writer embedded store never has.
+/// </para>
+/// <para>
+/// <b>Session = Unit of Work:</b> all operations share one transaction, opened lazily on
+/// first use. Nothing is visible until <see cref="CommitAsync"/>; disposing without commit
+/// rolls everything back. Each write runs under a savepoint (raw <c>SAVEPOINT</c> SQL text
+/// — <c>Microsoft.Data.Sqlite</c>'s <see cref="SqliteTransaction"/> has no
+/// Save/Release/Rollback(string) API the way Npgsql's does), so a failed write leaves the
+/// session usable and earlier writes intact.
+/// </para>
+/// </remarks>
+public sealed partial class SqliteDocumentSession : IAsyncDisposable
+{
+    private const string WriteSavepoint = "papuma_write";
+
+    // Matches "index '<name>'" out of a SqliteException.Message on a unique-constraint
+    // violation — pinned empirically (SqliteSpikeTests.UniqueIndexViolation_ExceptionShape),
+    // since Microsoft.Data.Sqlite has no structured constraint-name property.
+    private static readonly Regex ViolatedIndexNamePattern = new(@"index '([^']+)'", RegexOptions.Compiled);
+
+    private readonly string _connectionString;
+    private readonly KernelModel _model;
+    private readonly SessionOptions _options;
+    private readonly Action? _notifyWaiters;
+
+    private SqliteConnection? _connection;
+    private SqliteTransaction? _transaction;
+    private bool _disposed;
+    private bool _hasWrites;
+
+    /// <summary>Gets the scope this session is bound to.</summary>
+    public ScopeContext Scope { get; }
+
+    /// <summary>Gets the correlation id carried by all change records of this session.</summary>
+    public Guid CorrelationId { get; }
+
+    /// <summary>Gets the actor id written to change/event records and the document (ADR-017).</summary>
+    internal string ActorId { get; }
+
+    internal SqliteDocumentSession(
+        string connectionString, KernelModel model, ScopeContext scope, SessionOptions? options, Action? notifyWaiters)
+    {
+        _connectionString = connectionString;
+        _model = model;
+        Scope = scope;
+        _options = options ?? new SessionOptions();
+        CorrelationId = _options.CorrelationId ?? Guid.NewGuid();
+        ActorId = _options.ActorId ?? string.Empty;
+        _notifyWaiters = notifyWaiters;
+    }
+
+    /// <summary>
+    /// Commits all writes performed since the session was opened (or since the last
+    /// commit). The next operation starts a fresh transaction.
+    /// </summary>
+    /// <param name="ct">A cancellation token.</param>
+    public async Task CommitAsync(CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (_transaction is null)
+        {
+            return; // nothing pending
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+
+        await _transaction.CommitAsync(ct);
+        await _transaction.DisposeAsync();
+        _transaction = null;
+
+        if (_hasWrites)
+        {
+            // In-process wakeup for feed processors — the LISTEN/NOTIFY replacement for a
+            // single-writer embedded store. Fired after commit (not "atomically with" it,
+            // since this is in-process signaling, not a database feature with its own
+            // delivery-ordering guarantee to uphold).
+            _notifyWaiters?.Invoke();
+        }
+
+        _hasWrites = false;
+
+        KernelDiagnostics.SessionCommits.Add(1);
+        KernelDiagnostics.CommitDuration.Record(stopwatch.Elapsed.TotalMilliseconds);
+    }
+
+    /// <summary>
+    /// Disposes the session. Uncommitted writes are rolled back.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+
+        if (_transaction is not null)
+        {
+            await _transaction.DisposeAsync(); // implicit rollback
+            _transaction = null;
+        }
+
+        if (_connection is not null)
+        {
+            await _connection.DisposeAsync();
+            _connection = null;
+        }
+    }
+
+    /// <summary>
+    /// Loads a document by id, or returns <c>null</c> when it does not exist in this
+    /// scope. Sees the session's own uncommitted writes.
+    /// </summary>
+    /// <typeparam name="T">The document CLR type.</typeparam>
+    /// <param name="id">The document identifier.</param>
+    /// <param name="ct">A cancellation token.</param>
+    public async Task<DocumentResult<T>?> LoadAsync<T>(string id, CancellationToken ct = default)
+        where T : class
+    {
+        var metadata = _model.GetRequired<T>();
+        InputValidator.ValidateDocumentId(id);
+
+        var (conn, tx) = await EnsureTransactionAsync(ct);
+
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            SELECT data, version, schema_version
+            FROM document
+            WHERE scope = @scope AND tenant_id = @tenantId
+              AND document_type = @type AND id = @id
+            """;
+        AddIdentityParameters(cmd, metadata.Name, id);
+
+        return await ReadSingleAsync<T>(cmd, metadata, id, ct);
+    }
+
+    /// <summary>
+    /// Loads a document by a declared key (ADR-006), or returns <c>null</c> when no
+    /// document matches. Throws when the key matches more than one document — declare
+    /// the key unique if single-match semantics are required.
+    /// </summary>
+    /// <typeparam name="T">The document CLR type.</typeparam>
+    /// <param name="key">The key property (must be declared via attribute or fluent config).</param>
+    /// <param name="value">The key value to match.</param>
+    /// <param name="ct">A cancellation token.</param>
+    public async Task<DocumentResult<T>?> LoadByKeyAsync<T>(
+        Expression<Func<T, object?>> key,
+        object value,
+        CancellationToken ct = default)
+        where T : class
+    {
+        ArgumentNullException.ThrowIfNull(value);
+
+        var metadata = _model.GetRequired<T>();
+        var keyMetadata = ResolveDeclaredKey(key);
+
+        var (conn, tx) = await EnsureTransactionAsync(ct);
+
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            SELECT id, data, version, schema_version
+            FROM document
+            WHERE scope = @scope AND tenant_id = @tenantId
+              AND document_type = @type
+              AND json_extract(data, @path) = @value
+            LIMIT 2
+            """;
+        AddScopeParameters(cmd, metadata.Name);
+        cmd.Parameters.AddWithValue("path", KeyJsonPath(keyMetadata));
+        cmd.Parameters.AddWithValue("value", ToKeyText(value));
+
+        var results = new List<DocumentResult<T>>();
+        await using (var reader = await cmd.ExecuteReaderAsync(ct))
+        {
+            while (await reader.ReadAsync(ct))
+            {
+                var document = DeserializeDocument<T>(
+                    metadata, reader.GetString(0), reader.GetString(1), reader.GetInt32(3));
+                results.Add(new DocumentResult<T>(document, reader.GetInt64(2)));
+            }
+        }
+
+        return results.Count switch
+        {
+            0 => null,
+            1 => results[0],
+            _ => throw new InvalidOperationException(
+                $"Key {metadata.Name}.{keyMetadata.Path} matched multiple documents. " +
+                "Use a unique key for single-match lookups."),
+        };
+    }
+
+    /// <summary>
+    /// Saves a document with optimistic concurrency. Pass <paramref name="expectedVersion"/> 0
+    /// to insert a new document; otherwise the stored version must match. The document id
+    /// is taken from the document itself (metamodel id property).
+    /// </summary>
+    /// <typeparam name="T">The document CLR type.</typeparam>
+    /// <param name="document">The document to persist.</param>
+    /// <param name="expectedVersion">The expected stored version (0 = insert).</param>
+    /// <param name="ct">A cancellation token.</param>
+    /// <exception cref="ConcurrencyException">The stored version does not match.</exception>
+    /// <exception cref="DocumentNotFoundException">An update targeted a missing document.</exception>
+    /// <exception cref="UniqueKeyViolationException">A declared unique key is violated.</exception>
+    public async Task<SaveResult> SaveAsync<T>(T document, long expectedVersion, CancellationToken ct = default)
+        where T : class
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentOutOfRangeException.ThrowIfNegative(expectedVersion);
+
+        var metadata = _model.GetRequired<T>();
+        var id = metadata.GetDocumentId(document);
+        InputValidator.ValidateDocumentId(id);
+
+        var newJson = JsonSerializer.SerializeToNode(document, KernelJson.Options) as JsonObject
+            ?? throw new ArgumentException(
+                $"Document of type {typeof(T).Name} must serialize to a JSON object.", nameof(document));
+
+        using var activity = StartWriteActivity("save", metadata.Name, id);
+        try
+        {
+            var result = await ExecuteWriteAsync(
+                (conn, tx) => expectedVersion == 0
+                    ? InsertAsync(conn, tx, metadata, id, newJson, ct)
+                    : UpdateAsync(conn, tx, metadata, id, newJson, expectedVersion, ct, extraMetadata: null),
+                ct);
+            activity?.SetTag("papuma.version", result.Version);
+            return result;
+        }
+        catch (Exception ex) when (RecordFailure(activity, ex))
+        {
+            throw; // unreachable — the filter never catches
+        }
+    }
+
+    /// <summary>
+    /// Deletes a document with optimistic concurrency.
+    /// </summary>
+    /// <typeparam name="T">The document CLR type.</typeparam>
+    /// <param name="id">The document identifier.</param>
+    /// <param name="expectedVersion">The expected stored version.</param>
+    /// <param name="ct">A cancellation token.</param>
+    /// <exception cref="ConcurrencyException">The stored version does not match.</exception>
+    /// <exception cref="DocumentNotFoundException">The document does not exist.</exception>
+    public async Task<SaveResult> DeleteAsync<T>(string id, long expectedVersion, CancellationToken ct = default)
+        where T : class
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(expectedVersion);
+        var metadata = _model.GetRequired<T>();
+        InputValidator.ValidateDocumentId(id);
+
+        using var activity = StartWriteActivity("delete", metadata.Name, id);
+        try
+        {
+            return await ExecuteWriteAsync(async (conn, tx) =>
+            {
+                // DELETE...RETURNING naturally returns the deleted ("old") row — unlike
+                // UPDATE there's no "new" state, so this ports as a single statement.
+                await using var cmd = conn.CreateCommand();
+                cmd.Transaction = tx;
+                cmd.CommandText = """
+                    DELETE FROM document
+                    WHERE scope = @scope AND tenant_id = @tenantId
+                      AND document_type = @type AND id = @id
+                      AND version = @expectedVersion
+                    RETURNING data, schema_version
+                    """;
+                AddIdentityParameters(cmd, metadata.Name, id);
+                cmd.Parameters.AddWithValue("expectedVersion", expectedVersion);
+
+                string? oldJsonText = null;
+                var oldSchemaVersion = 0;
+                await using (var reader = await cmd.ExecuteReaderAsync(ct))
+                {
+                    if (await reader.ReadAsync(ct))
+                    {
+                        oldJsonText = reader.GetString(0);
+                        oldSchemaVersion = reader.GetInt32(1);
+                    }
+                }
+
+                if (oldJsonText is null)
+                {
+                    throw await VersionConflictAsync(conn, tx, metadata.Name, id, expectedVersion, ct);
+                }
+
+                EnsureSchemaNotNewer(metadata, id, oldSchemaVersion);
+
+                var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
+                var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, after: null), metadata, id);
+                var deletedVersion = expectedVersion + 1;
+
+                // The delete diff carries the old state — record its schema version, not the model's (ADR-005).
+                await InsertChangeRecordAsync(
+                    conn, tx, metadata, id, deletedVersion, ChangeOperation.Delete, diff, oldSchemaVersion, ct);
+
+                return new SaveResult(deletedVersion, ChangeOperation.Delete, diff);
+            }, ct);
+        }
+        catch (Exception ex) when (RecordFailure(activity, ex))
+        {
+            throw; // unreachable — the filter never catches
+        }
+    }
+
+    // ── Write internals ────────────────────────────────────────────────────────
+
+    private async Task<SaveResult> InsertAsync(
+        SqliteConnection conn,
+        SqliteTransaction tx,
+        DocumentTypeMetadata metadata,
+        string id,
+        JsonObject newJson,
+        CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        // Version numbering continues after a delete (max change version + 1) so that
+        // re-creating an id never collides with the gapless per-document change history.
+        cmd.CommandText = """
+            INSERT INTO document (scope, tenant_id, document_type, id, version, schema_version, data, created_by, updated_by, created_at, updated_at)
+            SELECT @scope, @tenantId, @type, @id,
+                   COALESCE((SELECT MAX(c.version)
+                             FROM change c
+                             WHERE c.scope = @scope AND c.tenant_id = @tenantId
+                               AND c.document_type = @type AND c.document_id = @id), 0) + 1,
+                   @schemaVersion, @data, @actorId, @actorId, @now, @now
+            ON CONFLICT (scope, tenant_id, document_type, id) DO NOTHING
+            RETURNING version
+            """;
+        AddIdentityParameters(cmd, metadata.Name, id);
+        cmd.Parameters.AddWithValue("schemaVersion", metadata.SchemaVersion);
+        cmd.Parameters.AddWithValue("actorId", ActorId);
+        cmd.Parameters.AddWithValue("data", newJson.ToJsonString());
+        cmd.Parameters.AddWithValue("now", DateTimeOffset.UtcNow.ToString("O"));
+
+        var inserted = await ExecuteMappingKeyViolationsAsync(
+            () => cmd.ExecuteScalarAsync(ct), metadata.Name);
+        if (inserted is not long insertedVersion)
+        {
+            throw await VersionConflictAsync(conn, tx, metadata.Name, id, expectedVersion: 0, ct);
+        }
+
+        var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(before: null, newJson), metadata, id);
+        await InsertChangeRecordAsync(
+            conn, tx, metadata, id, insertedVersion, ChangeOperation.Insert, diff, metadata.SchemaVersion, ct);
+
+        return new SaveResult(insertedVersion, ChangeOperation.Insert, diff);
+    }
+
+    private async Task<SaveResult> UpdateAsync(
+        SqliteConnection conn,
+        SqliteTransaction tx,
+        DocumentTypeMetadata metadata,
+        string id,
+        JsonObject newJson,
+        long expectedVersion,
+        CancellationToken ct,
+        JsonObject? extraMetadata)
+    {
+        // No RETURNING OLD/NEW in SQLite — capture "old" state via a plain SELECT first,
+        // then run the version-checked UPDATE...RETURNING for "new" state. Safe: the
+        // session's transaction is exclusive, nothing can change the row between the two
+        // statements (SqliteSpikeTests.Update_ReturningNewState_WorksAsSingleStatement).
+        string oldJsonText;
+        int oldSchemaVersion;
+        await using (var selectCmd = conn.CreateCommand())
+        {
+            selectCmd.Transaction = tx;
+            selectCmd.CommandText = """
+                SELECT data, schema_version
+                FROM document
+                WHERE scope = @scope AND tenant_id = @tenantId AND document_type = @type AND id = @id
+                """;
+            AddIdentityParameters(selectCmd, metadata.Name, id);
+            await using var reader = await selectCmd.ExecuteReaderAsync(ct);
+            if (!await reader.ReadAsync(ct))
+            {
+                // Document doesn't exist at all — the UPDATE below would find nothing
+                // either; fail the same typed way without attempting it.
+                throw await VersionConflictAsync(conn, tx, metadata.Name, id, expectedVersion, ct);
+            }
+
+            oldJsonText = reader.GetString(0);
+            oldSchemaVersion = reader.GetInt32(1);
+        }
+
+        EnsureSchemaNotNewer(metadata, id, oldSchemaVersion);
+
+        await using var updateCmd = conn.CreateCommand();
+        updateCmd.Transaction = tx;
+        updateCmd.CommandText = """
+            UPDATE document
+            SET data = @data,
+                version = version + 1,
+                schema_version = @schemaVersion,
+                updated_by = @actorId,
+                updated_at = @now
+            WHERE scope = @scope AND tenant_id = @tenantId
+              AND document_type = @type AND id = @id
+              AND version = @expectedVersion
+            RETURNING data, version
+            """;
+        AddIdentityParameters(updateCmd, metadata.Name, id);
+        updateCmd.Parameters.AddWithValue("schemaVersion", metadata.SchemaVersion);
+        updateCmd.Parameters.AddWithValue("expectedVersion", expectedVersion);
+        updateCmd.Parameters.AddWithValue("actorId", ActorId);
+        updateCmd.Parameters.AddWithValue("data", newJson.ToJsonString());
+        updateCmd.Parameters.AddWithValue("now", DateTimeOffset.UtcNow.ToString("O"));
+
+        var row = await ExecuteMappingKeyViolationsAsync(
+            async () =>
+            {
+                await using var reader = await updateCmd.ExecuteReaderAsync(ct);
+                if (!await reader.ReadAsync(ct))
+                {
+                    return ((string, long)?)null;
+                }
+
+                return (reader.GetString(0), reader.GetInt64(1));
+            },
+            metadata.Name);
+
+        if (row is null)
+        {
+            // Would require another writer to have changed the row between our SELECT
+            // and this UPDATE — impossible within one exclusive SQLite transaction, but
+            // fail the same typed way if it somehow does (defence in depth).
+            throw await VersionConflictAsync(conn, tx, metadata.Name, id, expectedVersion, ct);
+        }
+
+        var (newJsonText, newVersion) = row.Value;
+
+        var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
+        var storedNewJson = (JsonObject)JsonNode.Parse(newJsonText)!;
+        var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, storedNewJson), metadata, id);
+
+        await InsertChangeRecordAsync(
+            conn, tx, metadata, id, newVersion, ChangeOperation.Update, diff,
+            metadata.SchemaVersion, ct, extraMetadata);
+
+        return new SaveResult(newVersion, ChangeOperation.Update, diff);
+    }
+
+    private async Task InsertChangeRecordAsync(
+        SqliteConnection conn,
+        SqliteTransaction tx,
+        DocumentTypeMetadata metadata,
+        string id,
+        long version,
+        ChangeOperation operation,
+        DocumentDiff diff,
+        int schemaVersion,
+        CancellationToken ct,
+        JsonObject? extraMetadata = null)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            INSERT INTO change
+                (scope, tenant_id, document_type, document_id, version, schema_version, operation, diff, actor_id, metadata, occurred_at)
+            VALUES
+                (@scope, @tenantId, @type, @id, @version, @schemaVersion, @operation, @diff, @actorId, @metadata, @occurredAt)
+            """;
+        AddIdentityParameters(cmd, metadata.Name, id);
+        cmd.Parameters.AddWithValue("version", version);
+        cmd.Parameters.AddWithValue("schemaVersion", schemaVersion);
+        cmd.Parameters.AddWithValue("operation", (int)operation);
+        cmd.Parameters.AddWithValue("diff", diff.ToJson().ToJsonString());
+        cmd.Parameters.AddWithValue("actorId", ActorId);
+        cmd.Parameters.AddWithValue("metadata", BuildChangeMetadata(extraMetadata).ToJsonString());
+        cmd.Parameters.AddWithValue("occurredAt", DateTimeOffset.UtcNow.ToString("O"));
+
+        await cmd.ExecuteNonQueryAsync(ct);
+        _hasWrites = true;
+
+        KernelDiagnostics.Writes.Add(1,
+            new KeyValuePair<string, object?>("papuma.operation", operation.ToString()),
+            new KeyValuePair<string, object?>("papuma.document_type", metadata.Name));
+    }
+
+    /// <summary>
+    /// Inserts the change records of one bulk operation as one or more multi-row
+    /// <c>INSERT ... VALUES</c> statements (SQLite has no <c>unnest</c>; multi-row
+    /// <c>VALUES</c> is the equivalent set-based insert). Chunked to stay under SQLite's
+    /// bound-parameter limit (default 999) on very large batches. All records share the
+    /// operation and the session metadata (common correlation id).
+    /// </summary>
+    private async Task InsertChangeRecordsAsync(
+        SqliteConnection conn,
+        SqliteTransaction tx,
+        DocumentTypeMetadata metadata,
+        IReadOnlyList<(string Id, long Version, int SchemaVersion, DocumentDiff Diff)> records,
+        ChangeOperation operation,
+        CancellationToken ct)
+    {
+        if (records.Count == 0)
+        {
+            return;
+        }
+
+        const int maxRowsPerStatement = 200; // 4 params/row + 7 shared params, well under 999
+
+        var scope = Scope.Scope.ToString();
+        var tenantId = Scope.TenantId ?? string.Empty;
+        var metadataJson = BuildChangeMetadata(null).ToJsonString();
+        var occurredAt = DateTimeOffset.UtcNow.ToString("O");
+
+        for (var offset = 0; offset < records.Count; offset += maxRowsPerStatement)
+        {
+            var batch = records.Skip(offset).Take(maxRowsPerStatement).ToList();
+
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+
+            var values = new StringBuilder();
+            for (var i = 0; i < batch.Count; i++)
+            {
+                if (i > 0)
+                {
+                    values.Append(", ");
+                }
+
+                values.Append(
+                    $"(@scope, @tenantId, @type, @id{i}, @version{i}, @schemaVersion{i}, @operation, @diff{i}, @actorId, @metadata, @occurredAt)");
+                cmd.Parameters.AddWithValue($"id{i}", batch[i].Id);
+                cmd.Parameters.AddWithValue($"version{i}", batch[i].Version);
+                cmd.Parameters.AddWithValue($"schemaVersion{i}", batch[i].SchemaVersion);
+                cmd.Parameters.AddWithValue($"diff{i}", batch[i].Diff.ToJson().ToJsonString());
+            }
+
+            cmd.CommandText = $"""
+                INSERT INTO change
+                    (scope, tenant_id, document_type, document_id, version, schema_version, operation, diff, actor_id, metadata, occurred_at)
+                VALUES {values}
+                """;
+            cmd.Parameters.AddWithValue("scope", scope);
+            cmd.Parameters.AddWithValue("tenantId", tenantId);
+            cmd.Parameters.AddWithValue("type", metadata.Name);
+            cmd.Parameters.AddWithValue("operation", (int)operation);
+            cmd.Parameters.AddWithValue("actorId", ActorId);
+            cmd.Parameters.AddWithValue("metadata", metadataJson);
+            cmd.Parameters.AddWithValue("occurredAt", occurredAt);
+
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+
+        _hasWrites = true;
+
+        KernelDiagnostics.Writes.Add(records.Count,
+            new KeyValuePair<string, object?>("papuma.operation", operation.ToString()),
+            new KeyValuePair<string, object?>("papuma.document_type", metadata.Name));
+    }
+
+    /// <summary>
+    /// Builds the change metadata for this session: correlation id always, actor and
+    /// causation when configured, plus operation-specific extras (e.g. rollback markers).
+    /// </summary>
+    private JsonObject BuildChangeMetadata(JsonObject? extra)
+    {
+        var json = new JsonObject { ["correlationId"] = CorrelationId.ToString("N") };
+        if (_options.ActorId is not null)
+        {
+            json["actorId"] = _options.ActorId;
+        }
+
+        if (_options.CausationId is not null)
+        {
+            json["causationId"] = _options.CausationId;
+        }
+
+        if (_options.CausationType is not null)
+        {
+            json["causationType"] = _options.CausationType;
+        }
+
+        if (Activity.Current is { IdFormat: ActivityIdFormat.W3C, Id: { } traceparent })
+        {
+            json["traceparent"] = traceparent;
+        }
+
+        if (extra is not null)
+        {
+            foreach (var (key, node) in extra)
+            {
+                json[key] = node?.DeepClone();
+            }
+        }
+
+        return json;
+    }
+
+    // ── Transaction plumbing ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Starts a write span. Null when no listener is attached — near-zero cost.
+    /// </summary>
+    private Activity? StartWriteActivity(string operation, string documentType, string? documentId)
+    {
+        var activity = KernelDiagnostics.ActivitySource.StartActivity($"papuma.session.{operation}");
+        if (activity is not null)
+        {
+            activity.SetTag("papuma.document_type", documentType);
+            activity.SetTag("papuma.tenant", Scope.TenantId);
+            if (documentId is not null)
+            {
+                activity.SetTag("papuma.document_id", documentId);
+            }
+        }
+
+        return activity;
+    }
+
+    /// <summary>
+    /// Exception-filter helper for the <c>catch (Exception ex) when (RecordFailure(activity, ex))</c>
+    /// pattern: it tags the span as failed and then **always returns <c>false</c>**, so the
+    /// <c>when</c> guard never matches and the exception keeps propagating.
+    /// </summary>
+    private static bool RecordFailure(Activity? activity, Exception ex)
+    {
+        activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+        return false;
+    }
+
+    /// <summary>
+    /// Opens the session transaction lazily.
+    /// </summary>
+    private async Task<(SqliteConnection Connection, SqliteTransaction Transaction)> EnsureTransactionAsync(
+        CancellationToken ct)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (_transaction is null)
+        {
+            if (_connection is null)
+            {
+                _connection = new SqliteConnection(_connectionString);
+                await _connection.OpenAsync(ct);
+            }
+
+            _transaction = (SqliteTransaction)await _connection.BeginTransactionAsync(ct);
+        }
+
+        return (_connection!, _transaction);
+    }
+
+    /// <summary>
+    /// Runs a write under a savepoint: a failing write (typed conflict, unique violation,
+    /// rejected validator) rolls back only itself — earlier session writes stay intact
+    /// and the session remains usable. Raw <c>SAVEPOINT</c>/<c>RELEASE</c>/<c>ROLLBACK TO</c>
+    /// SQL text — <see cref="SqliteTransaction"/> has no savepoint API
+    /// (SqliteSpikeTests.Savepoint_RawSqlText_RollsBackOnlyItsOwnEffects).
+    /// </summary>
+    private async Task<TResult> ExecuteWriteAsync<TResult>(
+        Func<SqliteConnection, SqliteTransaction, Task<TResult>> write,
+        CancellationToken ct)
+    {
+        var (conn, tx) = await EnsureTransactionAsync(ct);
+        await ExecuteSavepointCommandAsync(conn, tx, $"SAVEPOINT {WriteSavepoint};", ct);
+        try
+        {
+            var result = await write(conn, tx);
+            await ExecuteSavepointCommandAsync(conn, tx, $"RELEASE {WriteSavepoint};", ct);
+            return result;
+        }
+        catch
+        {
+            await ExecuteSavepointCommandAsync(conn, tx, $"ROLLBACK TO {WriteSavepoint};", ct);
+            throw;
+        }
+    }
+
+    private static async Task ExecuteSavepointCommandAsync(
+        SqliteConnection conn, SqliteTransaction tx, string sql, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = sql;
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    // ── Shared helpers ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Builds the precise failure for a zero-row write: not found vs. version conflict
+    /// (with the actual stored version, queried in the same transaction).
+    /// </summary>
+    private async Task<Exception> VersionConflictAsync(
+        SqliteConnection conn,
+        SqliteTransaction tx,
+        string documentType,
+        string id,
+        long expectedVersion,
+        CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            SELECT version
+            FROM document
+            WHERE scope = @scope AND tenant_id = @tenantId
+              AND document_type = @type AND id = @id
+            """;
+        AddIdentityParameters(cmd, documentType, id);
+
+        var actual = await cmd.ExecuteScalarAsync(ct);
+        if (actual is long actualVersion)
+        {
+            KernelDiagnostics.Conflicts.Add(1,
+                new KeyValuePair<string, object?>("papuma.kind", "concurrency"),
+                new KeyValuePair<string, object?>("papuma.document_type", documentType));
+            return new ConcurrencyException(documentType, id, expectedVersion, actualVersion);
+        }
+
+        return new DocumentNotFoundException(documentType, id);
+    }
+
+    /// <summary>
+    /// Executes a write and maps SQLite unique-constraint violations (SQLITE_CONSTRAINT,
+    /// error code 19) on declared key indexes to <see cref="UniqueKeyViolationException"/>.
+    /// Other violations bubble up.
+    /// </summary>
+    private async Task<TResult> ExecuteMappingKeyViolationsAsync<TResult>(
+        Func<Task<TResult>> execute,
+        string documentType)
+    {
+        try
+        {
+            return await execute();
+        }
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 19)
+        {
+            var indexNameMatch = ViolatedIndexNamePattern.Match(ex.Message);
+            var match = indexNameMatch.Success
+                ? _model.FindKeyByIndexName(indexNameMatch.Groups[1].Value)
+                : null;
+            if (match is not null)
+            {
+                KernelDiagnostics.Conflicts.Add(1,
+                    new KeyValuePair<string, object?>("papuma.kind", "unique_key"),
+                    new KeyValuePair<string, object?>("papuma.document_type", documentType));
+                throw new UniqueKeyViolationException(documentType, match.Value.Key.Path, ex);
+            }
+
+            throw;
+        }
+    }
+
+    private static async Task<DocumentResult<T>?> ReadSingleAsync<T>(
+        SqliteCommand cmd, DocumentTypeMetadata metadata, string id, CancellationToken ct)
+        where T : class
+    {
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+        {
+            return null;
+        }
+
+        var json = reader.GetString(0);
+        var version = reader.GetInt64(1);
+        var schemaVersion = reader.GetInt32(2);
+        var document = DeserializeDocument<T>(metadata, id, json, schemaVersion);
+
+        return new DocumentResult<T>(document, version);
+    }
+
+    /// <summary>
+    /// Deserializes a stored document, running the upcaster chain when the stored
+    /// schema version is older than the model's (lazy upcasting, ADR-005). The stored
+    /// row is not rewritten — persistence of the lifted state happens on the next save.
+    /// </summary>
+    private static T DeserializeDocument<T>(
+        DocumentTypeMetadata metadata, string id, string json, int storedSchemaVersion)
+        where T : class
+    {
+        EnsureSchemaNotNewer(metadata, id, storedSchemaVersion);
+
+        T? document;
+        if (storedSchemaVersion < metadata.SchemaVersion)
+        {
+            var raw = (JsonObject)JsonNode.Parse(json)!;
+            metadata.Upcast(raw, storedSchemaVersion);
+            document = raw.Deserialize<T>(KernelJson.Options);
+        }
+        else
+        {
+            document = JsonSerializer.Deserialize<T>(json, KernelJson.Options);
+        }
+
+        return document
+            ?? throw new InvalidOperationException($"Document of type {metadata.Name} deserialized to null.");
+    }
+
+    private static void EnsureSchemaNotNewer(DocumentTypeMetadata metadata, string id, int storedSchemaVersion)
+    {
+        if (storedSchemaVersion > metadata.SchemaVersion)
+        {
+            throw new SchemaVersionConflictException(metadata.Name, id, storedSchemaVersion, metadata.SchemaVersion);
+        }
+    }
+
+    private void AddIdentityParameters(SqliteCommand cmd, string documentType, string id)
+    {
+        AddScopeParameters(cmd, documentType);
+        cmd.Parameters.AddWithValue("id", id);
+    }
+
+    private void AddScopeParameters(SqliteCommand cmd, string documentType)
+    {
+        cmd.Parameters.AddWithValue("scope", Scope.Scope.ToString());
+        cmd.Parameters.AddWithValue("tenantId", Scope.TenantId ?? string.Empty);
+        cmd.Parameters.AddWithValue("type", documentType);
+    }
+
+    private KeyMetadata ResolveDeclaredKey<T>(Expression<Func<T, object?>> key)
+        where T : class
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        var metadata = _model.GetRequired<T>();
+        var path = JsonPathResolver.Resolve(key);
+
+        return metadata.Keys.FirstOrDefault(k => k.Path == path)
+            ?? throw new ArgumentException(
+                $"'{path}' is not a declared key on {metadata.Name}. " +
+                "Declare it via [UniqueKey]/[LookupKey] or UniqueKey()/LookupKey() (ADR-006).",
+                nameof(key));
+    }
+
+    /// <summary>Converts a declared key's dot-separated path into a SQLite JSONPath string.</summary>
+    private static string KeyJsonPath(KeyMetadata key) => "$." + string.Join('.', key.PathSegments);
+
+    /// <summary>
+    /// Converts a key value to the text form comparable against <c>json_extract</c>'s result.
+    /// </summary>
+    private static string ToKeyText(object value)
+    {
+        if (value is string s)
+        {
+            return s;
+        }
+
+        var node = JsonSerializer.SerializeToNode(value, KernelJson.Options)
+            ?? throw new ArgumentException("Key value serialized to null.", nameof(value));
+        return node is JsonValue jv && jv.TryGetValue<string>(out var text) ? text : node.ToJsonString();
+    }
+}
