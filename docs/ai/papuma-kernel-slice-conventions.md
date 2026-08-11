@@ -12,8 +12,10 @@ repeats per slice type, only the business decision varies. That uniformity is
 what makes scaffolding (template- or agent-based) viable. A generator is an
 **external tool that consumes this contract**; it does not belong in the kernel
 (which stays AI-free). The generator gets its context by depending on the
-`Papuma.Kernel` package (the docs ship inside it under `docs/`), copying the
-[AGENTS.md snippet](papuma-kernel-agents-snippet.md), and reading this file.
+`Papuma.Kernel` or `Papuma.Kernel.Local` package (the docs ship inside either
+under `docs/`), copying the relevant block of the
+[AGENTS.md snippet](papuma-kernel-agents-snippet.md), and reading this file —
+the slice shape below is storage-neutral, the same on both kernels.
 
 ## Slice anatomy
 
@@ -181,7 +183,8 @@ public void PlaceOrder_OverStock_Rejected() =>
     Assert.Throws<OutOfStockException>(() =>
         PlaceOrderDecider.Decide(product, new Inventory(sku, 0), new PlaceOrder(sku, 1, null)));
 
-// Layer 2 — the slice end-to-end against PostgreSQL (Testcontainers). A few.
+// Layer 2 — the slice end-to-end against PostgreSQL (Testcontainers) or a
+// temp-file SQLite DB for Papuma.Kernel.Local apps. A few.
 [Fact]
 public async Task PlaceOrder_WithStock_ReservesAndApproves() { /* GIVEN docs, WHEN Handle, THEN state + change */ }
 ```

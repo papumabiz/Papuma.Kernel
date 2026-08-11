@@ -1,7 +1,9 @@
 # Papuma.Kernel — Playbook for AI Agents
 
 Status: verified against the implemented API (phase 13, 2026-06-12) ·
-Audience: coding agents that **build applications using Papuma.Kernel**.
+Audience: coding agents that **build applications using Papuma.Kernel** (this
+page is Postgres-framed by default; the SQLite sibling's differences are
+called out separately below).
 
 This document is the entry map. The truth lives in the reference chain:
 [getting-started.md](../vNEXT/getting-started.md) (the API in 5 minutes) →
@@ -14,7 +16,8 @@ This document is the entry map. The truth lives in the reference chain:
 1. **The JSON document is the truth.** No event sourcing: state is stored
    directly (`papuma.document`), and the change feed is *derived* as a reversible
    field diff — atomically in the same statement (PostgreSQL ≥ 18,
-   `RETURNING OLD/NEW`).
+   `RETURNING OLD/NEW`). On `Papuma.Kernel.Local` (SQLite) the same guarantee
+   holds via a different mechanism — see "Differences" below.
 2. **The session is a unit of work.** All writes of a session commit atomically
    (`CommitAsync`) or not at all (dispose without commit = rollback).
 3. **Reacting happens via feeds.** Change and event handlers consume strictly
@@ -120,6 +123,41 @@ Typed errors you should handle (not swallow): `ConcurrencyException`,
 - **Rollback fails typed**: diffs on the way back contain policy entries without
   values — that is intended (concepts §8); rethink the use case instead of
   removing the policy.
+
+## Differences when using `Papuma.Kernel.Local` (SQLite, embedded)
+
+Same model, same API shape (`SqliteDocumentSession` mirrors `DocumentSession`),
+same hard rules above — with these engine-specific adjustments:
+
+- **No PostgreSQL, no `papuma.*` schema.** Tables are unprefixed
+  (`document`/`change`/`event`/`checkpoint`/`failure`); `RETURNING OLD/NEW`
+  doesn't exist in SQLite — the session does a version-checked `SELECT` +
+  `UPDATE...RETURNING` instead (two statements, still atomic — the
+  transaction is exclusive, nothing can interleave).
+- **No row-level security.** Isolation is explicit scope predicates only — a
+  single-writer, single-process store has no second tenant's process to
+  defend against. Still fail-closed: a missing scope yields empty reads.
+- **No SQL-view read lens.** The Postgres exception ("ad-hoc/BI view with
+  `security_invoker = on`") doesn't apply on SQLite — every derived read is a
+  projection, no exception, ever.
+- **No `FOR UPDATE SKIP LOCKED` leader election.** A single-writer store never
+  runs concurrent processor instances, so there's nothing to elect a leader
+  for.
+- **Feed wakeup is in-process** (`SqliteChangeNotifier`, a bounded channel),
+  not `LISTEN`/`NOTIFY` — the realtime-UI-notifications recipe's *pattern*
+  still applies, its Postgres-specific wiring doesn't.
+- **One writer, one file, one process.** Don't open the same `.db` file from
+  two processes — that's an OS file-lock violation, not a kernel concern to
+  code around.
+- **No embedded dashboard, no feed-lag health check, no MCP surface (yet).**
+  Those live in `Papuma.Kernel.AspNetCore`/`Papuma.Kernel.Mcp`, which have no
+  SQLite counterpart. `KernelDiagnostics` (`Meter`/`ActivitySource`) *is*
+  shared — both kernels' metrics/traces land in the same OTel pipeline.
+
+Everything else on this page — `SaveAsync`/`PatchAsync`/`Increment`/handlers/
+GDPR/schema evolution/scope-binding — applies unchanged; it's the same code,
+shared via `Papuma.Kernel.Core`. Full reasoning for every difference above:
+[docs/analyses/local-kernel-sqlite-sibling.md](../analyses/local-kernel-sqlite-sibling.md).
 
 ## What the kernel deliberately is NOT
 

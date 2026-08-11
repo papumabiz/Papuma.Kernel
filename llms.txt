@@ -1,25 +1,33 @@
 # Papuma.Kernel
 
-> PostgreSQL-based document-sourced application kernel for .NET 10: JSON documents
-> as the source of truth, an automatically derived change feed with reversible
-> field diffs, privacy policies, schema evolution, an event log, and multi-tenancy.
-> Requires PostgreSQL >= 18. NOT an ORM, NOT event sourcing, NO query DSL.
+> Document-sourced CQRS kernel for .NET 10, shipped as two independent products
+> sharing one model: `Papuma.Kernel` (PostgreSQL >= 18, for servers) and
+> `Papuma.Kernel.Local` (SQLite, embedded, no server). JSON documents are the
+> source of truth; both derive a reversible change feed automatically, apply
+> privacy policies before anything is recorded, support schema evolution and an
+> event log. Multi-tenancy is two-layer (predicates + row-level security) on
+> Postgres, predicates-only on SQLite (single writer, nothing else to defend
+> against). NOT an ORM, NOT event sourcing, NO query DSL.
 
 Reading order for coding agents: start with the playbook (mental model + binding
-rules), then getting-started (API), then concepts (the why), then the ADRs
-(decisions; deviations are bugs). All canonical documents are English; the
+rules — includes a `Papuma.Kernel.Local` differences section), then
+getting-started (API), then concepts (the why), then the ADRs (decisions;
+deviations are bugs). The AGENTS.md snippet has one block per kernel — copy the
+one matching the consuming application. All canonical documents are English; the
 implementation plan and the original design chat remain German (historical
 project records), and `docs/vNEXT/concepts.de.md` is a frozen German snapshot of
 the concepts document (not maintained).
 
-These files also ship inside the Papuma.Kernel NuGet package under `docs/` —
-after `dotnet restore` they are readable locally from the global packages folder
-(e.g. `~/.nuget/packages/papuma.kernel/<version>/docs/`).
+These files also ship inside the NuGet package under `docs/` — after
+`dotnet restore` they are readable locally from the global packages folder
+(e.g. `~/.nuget/packages/papuma.kernel/<version>/docs/` for the Postgres kernel,
+`~/.nuget/packages/papuma.kernel.local/<version>/docs/` for the SQLite kernel).
 
 ## Docs
 
-- [Agent playbook](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/ai/papuma-kernel-playbook.md): mental model in 4 sentences, binding ADR rules, API quick map, decision tree, troubleshooting
-- [AGENTS.md snippet](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/ai/papuma-kernel-agents-snippet.md): copy-paste block for AGENTS.md/CLAUDE.md of consuming applications
+- [Agent playbook](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/ai/papuma-kernel-playbook.md): mental model in 4 sentences, binding ADR rules, API quick map, decision tree, troubleshooting, `Papuma.Kernel.Local` differences
+- [AGENTS.md snippet](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/ai/papuma-kernel-agents-snippet.md): copy-paste block for AGENTS.md/CLAUDE.md of consuming applications — one variant per kernel
+- [`Papuma.Kernel.Local` design rationale](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/analyses/local-kernel-sqlite-sibling.md): what's shared code vs. deliberately different per engine, and why
 - [Slice conventions](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/ai/papuma-kernel-slice-conventions.md): canonical shape of command/view/automation/translation slices — drives scaffolding and code generators
 - [Tutorial](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/tutorial.md): learning-oriented, build one app from empty folder to a feed-driven read model (document → session → feed → handler), style-neutral
 - [Getting started](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/getting-started.md): bootstrap, write path, handlers, schema evolution in 5 minutes
