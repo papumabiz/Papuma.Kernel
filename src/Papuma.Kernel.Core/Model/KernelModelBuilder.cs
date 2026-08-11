@@ -531,7 +531,8 @@ public sealed class KernelModelBuilder
     }
 
     /// <summary>
-    /// Builds a deterministic PostgreSQL index name (≤ 63 chars) for a declared key.
+    /// Builds a deterministic index name (≤ 63 chars, PostgreSQL's NAMEDATALEN limit —
+    /// harmless truncation-and-hash headroom for other storage backends too) for a declared key.
     /// </summary>
     internal static string BuildIndexName(string documentType, string path, bool unique)
     {
@@ -542,7 +543,8 @@ public sealed class KernelModelBuilder
             return raw;
         }
 
-        // PostgreSQL truncates identifiers at 63 bytes — disambiguate with a stable hash.
+        // PostgreSQL truncates identifiers at 63 bytes; other backends aren't bound by that
+        // limit but the same truncate-and-hash scheme is still a valid, stable name for them.
         var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(raw)))[..8];
         return $"{raw[..54]}_{hash}";
     }

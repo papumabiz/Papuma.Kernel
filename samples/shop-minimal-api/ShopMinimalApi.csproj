@@ -5,6 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Papuma.Kernel.Core\Papuma.Kernel.Core.csproj" />
     <ProjectReference Include="..\..\src\Papuma.Kernel\Papuma.Kernel.csproj" />
     <ProjectReference Include="..\..\src\Papuma.Kernel.AspNetCore\Papuma.Kernel.AspNetCore.csproj" />
     <ProjectReference Include="..\..\src\Papuma.Kernel.Mcp\Papuma.Kernel.Mcp.csproj" />

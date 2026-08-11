@@ -7,6 +7,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Papuma.Kernel\Papuma.Kernel.csproj" />
+    <ProjectReference Include="..\..\src\Papuma.Kernel.Core\Papuma.Kernel.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>

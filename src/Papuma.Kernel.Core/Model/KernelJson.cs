@@ -3,7 +3,7 @@
 
 using System.Text.Json;
 
-namespace Papuma.Kernel.Store;
+namespace Papuma.Kernel.Model;
 
 /// <summary>
 /// Central serializer configuration for document persistence.

@@ -23,6 +23,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Explicit, not transitive: Papuma.Kernel references Core with PrivateAssets="all",
+         which cuts transitive compile-time visibility. Tests reach Core internals directly
+         (KernelModel, PolicyHash.Of(...)), so they need their own reference. -->
+    <ProjectReference Include="..\..\src\Papuma.Kernel.Core\Papuma.Kernel.Core.csproj" />
     <ProjectReference Include="..\..\src\Papuma.Kernel\Papuma.Kernel.csproj" />
     <ProjectReference Include="..\..\src\Papuma.Kernel.AspNetCore\Papuma.Kernel.AspNetCore.csproj" />
     <ProjectReference Include="..\..\src\Papuma.Kernel.Mcp\Papuma.Kernel.Mcp.csproj" />

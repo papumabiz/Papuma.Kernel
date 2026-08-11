@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 
 using Papuma.Kernel.Events;
+using Papuma.Kernel.Model;
 
 namespace Papuma.Kernel.Store;
 

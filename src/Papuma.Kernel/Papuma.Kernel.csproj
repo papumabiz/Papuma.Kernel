@@ -43,4 +43,26 @@
     <PackageReference Include="Npgsql" Version="10.0.3" />
   </ItemGroup>
 
+  <!-- Papuma.Kernel.Core holds the storage-neutral diff engine, policy engine, model and
+       validation code shared with future non-Postgres siblings (docs/analyses/local-kernel-sqlite-sibling.md).
+       It is not independently packable (IsPackable=false in its own csproj), so its assembly
+       must be embedded into this package explicitly — PrivateAssets alone would only suppress
+       the (bogus, since Core is never published) nuspec dependency without copying the DLL in;
+       the target below does the embedding. See CI verification: unzip the nupkg and confirm
+       lib/net10.0/ contains both Papuma.Kernel.dll and Papuma.Kernel.Core.dll. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Papuma.Kernel.Core\Papuma.Kernel.Core.csproj">
+      <PrivateAssets>all</PrivateAssets>
+    </ProjectReference>
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);CopyProjectReferencesToPackage</TargetsForTfmSpecificBuildOutput>
+  </PropertyGroup>
+  <Target Name="CopyProjectReferencesToPackage" DependsOnTargets="BuildOnlySettings;ResolveReferences">
+    <ItemGroup>
+      <BuildOutputInPackage Include="@(ReferenceCopyLocalPaths->WithMetadataValue('ReferenceSourceTarget', 'ProjectReference'))" />
+    </ItemGroup>
+  </Target>
+
 </Project>

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Papuma.Kernel" />
+    <InternalsVisibleTo Include="Papuma.Kernel.Tests" />
+  </ItemGroup>
+
+</Project>

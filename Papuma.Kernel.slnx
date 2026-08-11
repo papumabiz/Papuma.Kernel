@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Papuma.Kernel.Core/Papuma.Kernel.Core.csproj" />
     <Project Path="src/Papuma.Kernel/Papuma.Kernel.csproj" />
     <Project Path="src/Papuma.Kernel.AspNetCore/Papuma.Kernel.AspNetCore.csproj" />
     <Project Path="src/Papuma.Kernel.Mcp/Papuma.Kernel.Mcp.csproj" />

@@ -70,10 +70,10 @@ public sealed class KernelModel
     }
 
     /// <summary>
-    /// Maps a PostgreSQL constraint/index name from a unique violation (23505) back to
+    /// Maps a storage layer's constraint/index name from a unique-violation error back to
     /// the declared key, or <c>null</c> when the constraint is not a declared key index.
     /// </summary>
-    /// <param name="constraintName">The constraint name reported by PostgreSQL.</param>
+    /// <param name="constraintName">The constraint name reported by the storage layer.</param>
     public (DocumentTypeMetadata Metadata, KeyMetadata Key)? FindKeyByIndexName(string? constraintName) =>
         constraintName is not null && _byIndexName.TryGetValue(constraintName, out var match)
             ? match

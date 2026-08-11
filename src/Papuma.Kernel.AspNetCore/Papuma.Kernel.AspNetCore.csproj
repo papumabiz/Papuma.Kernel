@@ -17,6 +17,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Papuma.Kernel\Papuma.Kernel.csproj" />
+    <!-- Compiles directly against Core types (e.g. ScopeContext); PrivateAssets suppresses a
+         phantom nuspec dependency on the unpublished Papuma.Kernel.Core — Core.dll already
+         reaches consumers transitively via the Papuma.Kernel package dependency above. -->
+    <ProjectReference Include="..\Papuma.Kernel.Core\Papuma.Kernel.Core.csproj">
+      <PrivateAssets>all</PrivateAssets>
+    </ProjectReference>
   </ItemGroup>
 
 </Project>

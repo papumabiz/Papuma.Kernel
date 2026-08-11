@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Internal restructuring**: extracted the storage-neutral diff engine, policy
+  engine, model, and validation code (previously `Changes/`, `Model/`,
+  `Validation/`, and the storage-neutral half of `Tenancy/`) into a new
+  `Papuma.Kernel.Core` project, referenced by `Papuma.Kernel` and embedded in
+  its package (`Papuma.Kernel.Core.dll` ships inside the `Papuma.Kernel`
+  nupkg, not as a separate published package). Preparation for a future
+  SQLite-backed sibling for desktop/embedded use
+  (`docs/analyses/local-kernel-sqlite-sibling.md`). No public API or behavior
+  change; namespaces are unchanged.
+
 ## 1.0.2 (2026-06-22)
 
 - **Docs** (shipped inside the package under `docs/`): reframed the read-path
