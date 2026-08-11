@@ -1,14 +1,22 @@
-# Papuma.Kernel
+# Papuma Kernel
 
 **Your documents are the truth. Everything else follows automatically.**
 
-A PostgreSQL-native application kernel for .NET 10 that gives you what event
-sourcing promises — a complete, auditable change history and reactive
-projections — without what event sourcing costs: no replay obligation, no
-mandatory event modeling, no fight with GDPR. Store plain C# objects as JSON
-documents; the kernel derives a reversible change feed in the same transaction,
-applies your privacy policies before anything is recorded, and delivers every
-change to your handlers exactly in order.
+Two independent application kernels for .NET 10, sharing one model, each
+exploiting its own storage engine without apology: **`Papuma.Kernel`**
+(PostgreSQL ≥ 18, for servers) and **`Papuma.Kernel.Local`** (SQLite, for
+single-writer desktop/mobile apps with no business running a database
+server). Both give you what event sourcing promises — a complete, auditable
+change history and reactive projections — without what event sourcing costs:
+no replay obligation, no mandatory event modeling, no fight with GDPR. Store
+plain C# objects as JSON documents; the kernel derives a reversible change
+feed in the same transaction, applies your privacy policies before anything
+is recorded, and delivers every change to your handlers exactly in order.
+
+This factsheet leads with `Papuma.Kernel` (Postgres) — the diagrams, the
+measured numbers, and most of the depth — because it's the more mature of
+the two. `Papuma.Kernel.Local` gets its own section further down: same
+promises, different engine, honestly labeled as the newer of the two.
 
 ```mermaid
 flowchart LR
@@ -116,8 +124,11 @@ Honesty is cheaper than disappointment:
   not just recommended.
 - **Not event sourcing.** The document is the truth; the feed is derived. If
   you need event-defined state, you need a different product — and we say so.
-- **Not database-agnostic.** PostgreSQL ≥ 18, exploited without apology. The
-  single-statement write path *is* the product.
+- **Not one database-agnostic abstraction wearing two hats.** PostgreSQL ≥ 18
+  is exploited without apology — the single-statement write path *is* the
+  product. `Papuma.Kernel.Local` (SQLite, see below) is a second, independent
+  implementation of the same model, not an abstraction layer this kernel
+  hides behind.
 - **Not a workflow/BPMN engine.** Durable state machines, human-in-the-loop
   tasks and timers are documented patterns on kernel primitives (with running
   sample code) — the workflow definition stays your code.
@@ -130,6 +141,74 @@ carried production traffic**. Best fit today: internal line-of-business
 systems and new products built by teams that control their PostgreSQL version.
 For regulated, mission-critical workloads: run a pilot first — the
 observability to judge it is built in.
+
+---
+
+## `Papuma.Kernel.Local` — the same model, no server
+
+Same documents, same reversible diffs, same change feed, same privacy
+policies, same GDPR tooling, same schema-evolution story — built for the
+deployment shape where PostgreSQL is the wrong tool, not a smaller version of
+it: a single-writer SQLite file, opening in milliseconds, with no daemon, no
+port, no installer step your users have to run.
+
+```mermaid
+flowchart LR
+    A["C# record<br/>(your domain)"] --> B["SqliteDocumentSession<br/>(unit of work)"]
+    B -->|"SELECT + version-checked<br/>UPDATE...RETURNING"| C[("SQLite<br/>document + change feed<br/>+ event log, WAL mode")]
+    C -->|"in-process wakeup,<br/>ordered, checkpointed"| D["Your handlers"]
+    D --> E["FTS5 search"]
+    D --> F["Local read models"]
+    D --> G["UI update"]
+```
+
+What's identical to `Papuma.Kernel` (same code, `Papuma.Kernel.Core`, not two
+implementations agreeing by convention): write primitives, field policies,
+GDPR tooling, event log, schema upcasting, per-handler ordered/checkpointed/
+retried feed delivery, and — genuinely shared, not a lookalike — the same
+`Meter`/`ActivitySource` (`KernelDiagnostics` lives in Core too, so both
+kernels' metrics/traces land in the same OTel pipeline). What's Postgres-only
+in the table above: row-level security (multi-tenancy stays
+scope-predicate-only on SQLite), leader failover across concurrent processor
+instances (a single-writer store has exactly one), the embedded dashboard and
+feed-lag health check (both live in `Papuma.Kernel.AspNetCore`, which has no
+SQLite counterpart yet), and the MCP surface.
+
+What's deliberately different, because a single-writer embedded store doesn't
+need the machinery that solves multi-writer problems:
+
+| | Postgres kernel | SQLite kernel |
+|---|---|---|
+| Atomic old/new capture | one `RETURNING OLD/NEW` statement | `SELECT` + version-checked `UPDATE...RETURNING` — two statements, same atomicity (the transaction is exclusive; nothing can interleave) |
+| Feed wakeup | `LISTEN`/`NOTIFY`, network round trip | in-process `SqliteChangeNotifier`, no network involved |
+| Gapless-read handling | `txid`/snapshot filtering (ADR-010) — solves a multi-writer commit-order problem | not needed — one writer, no commit-order to reconcile |
+| Row isolation | explicit scope predicates **plus** Postgres row-level security | explicit scope predicates only — no second process to defend against |
+| Patch application | generated `jsonb_set`/`#-` SQL expressions | applied in-process against the loaded JSON, then written back |
+
+Every one of these is documented with the reasoning, not just the diff — see
+[docs/analyses/local-kernel-sqlite-sibling.md](analyses/local-kernel-sqlite-sibling.md).
+
+**Maturity, stated with the same honesty as above:** newer than the Postgres
+kernel. Full API parity, **58 tests green against the real SQLite engine**
+(including empirically pinned driver behavior — WAL mode, busy timeouts,
+expression-index matching — not assumed), but no production hours yet and no
+throughput benchmarks, only correctness. Right tool for local desktop/mobile
+storage today; treat performance claims as unverified until measured the same
+way the numbers above were.
+
+```csharp
+builder.Services
+    .AddPapumaKernelLocal(o =>
+    {
+        o.DbPath = Path.Combine(appDataDir, "app.db");
+        o.Model(m => m.Document<User>(d => d.UniqueKey(x => x.Email)));
+    })
+    .AddChangeHandler<UserProjection>();
+
+await using var session = store.OpenSession(ScopeContext.Tenant("local"));
+await session.SaveAsync(user, expectedVersion: 0);
+await session.CommitAsync();
+```
 
 ---
 
@@ -156,7 +235,9 @@ await session.CommitAsync();
 Schema, indexes and row-level security are created idempotently at startup.
 There is no migration step. There is no step two.
 
-**Packages:** `Papuma.Kernel` · `Papuma.Kernel.AspNetCore` · `Papuma.Kernel.Mcp`
+**Packages:** `Papuma.Kernel` (Postgres) · `Papuma.Kernel.Local` (SQLite) ·
+`Papuma.Kernel.AspNetCore` · `Papuma.Kernel.Mcp`
 **Docs:** shipped inside the package under `docs/`, and at
 [github.com/papumabiz/Papuma.Kernel](https://github.com/papumabiz/Papuma.Kernel)
-— start with `docs/vNEXT/getting-started.md`. MIT licensed.
+— start with `docs/vNEXT/getting-started.md` (Postgres) or
+`docs/analyses/local-kernel-sqlite-sibling.md` (SQLite). MIT licensed.

@@ -5,25 +5,34 @@
 <p align="center">
   <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10" />
   <img src="https://img.shields.io/badge/PostgreSQL-%E2%89%A518-336791" alt="PostgreSQL 18+" />
+  <img src="https://img.shields.io/badge/SQLite-embedded-003B57" alt="SQLite embedded" />
   <img src="https://img.shields.io/badge/version-1.0.2-blue" alt="1.0.2" />
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT" />
 </p>
 
 <p align="center"><strong>Your documents are the truth. The change feed follows automatically.</strong></p>
 
-Papuma Kernel is a small, PostgreSQL-native application kernel for .NET 10. You
-store plain C# objects as JSON documents; the kernel derives a **reversible
-change feed in the same atomic transaction**, applies your **privacy policies
-before anything is recorded**, and delivers every change to your handlers
-strictly in order. You get what event sourcing promises — a complete, auditable
-history and reactive projections — without the replay obligation, the mandatory
-event modeling, or the GDPR headache.
+Papuma Kernel is a small application kernel for .NET 10, built as **two
+independent products sharing one model**. You store plain C# objects as JSON
+documents; the kernel derives a **reversible change feed in the same atomic
+transaction**, applies your **privacy policies before anything is recorded**,
+and delivers every change to your handlers strictly in order. You get what
+event sourcing promises — a complete, auditable history and reactive
+projections — without the replay obligation, the mandatory event modeling, or
+the GDPR headache.
 
 This is **document-sourced CQRS**: the document is the source of truth, the feed
-is derived from it (never the other way around). One primitive makes it work —
-PostgreSQL 18's `RETURNING OLD/NEW` gives the before- and after-state in a single
-statement, so there is no outbox to forget and no window in which the diff can
-lie.
+is derived from it (never the other way around).
+
+- **`Papuma.Kernel`** — PostgreSQL ≥ 18. One primitive makes the write path
+  work: `RETURNING OLD/NEW` gives the before- and after-state in a single
+  statement, so there is no outbox to forget and no window in which the diff
+  can lie. Multi-tenant, row-level-security-isolated, built for servers.
+- **`Papuma.Kernel.Local`** — SQLite, no server. Same documents, same
+  reversible diffs, same change feed, same privacy policies — for
+  single-writer desktop and mobile apps that have no business running a
+  database server. See [the design rationale](docs/analyses/local-kernel-sqlite-sibling.md)
+  for what's shared and what's deliberately different per engine.
 
 > **vNEXT (1.0)** — rebuilt from scratch on PostgreSQL ≥ 18; no migration path
 > from 0.x (see [CHANGELOG](CHANGELOG.md)). The marketing one-pager with diagrams
@@ -52,21 +61,40 @@ await session.CommitAsync();
 Schema, indexes and row-level security are created idempotently at startup.
 There is no migration step. There is no step two.
 
+No server, same model — `Papuma.Kernel.Local` mirrors the same call shape:
+
+```csharp
+builder.Services
+    .AddPapumaKernelLocal(o =>
+    {
+        o.DbPath = Path.Combine(appDataDir, "app.db");
+        o.Model(m => m
+            .Document<User>(d => d.UniqueKey(x => x.Email))
+            .Event<UserLoggedIn>(e => e.Retention(TimeSpan.FromDays(90))));
+    })
+    .AddChangeHandler<UserProjection>();
+
+await using var session = store.OpenSession(ScopeContext.Tenant("local"));
+await session.SaveAsync(user, expectedVersion: 0);
+await session.CommitAsync();
+```
+
 ```bash
 dotnet build Papuma.Kernel.slnx
-dotnet test  Papuma.Kernel.slnx   # integration tests need Docker/Podman (PostgreSQL 18)
+dotnet test  Papuma.Kernel.slnx   # Postgres suite needs Docker/Podman; SQLite suite needs nothing extra
 ```
 
 Learn by building: [docs/vNEXT/tutorial.md](docs/vNEXT/tutorial.md) · terse API tour: [docs/vNEXT/getting-started.md](docs/vNEXT/getting-started.md).
 
 ## What ships in the box
 
+Shared between both kernels (same code, `Papuma.Kernel.Core`, not two
+implementations pretending to agree):
+
 - **Atomic write primitives** — versioned Save/Delete, single-statement patches
   (`Set`/`Remove`/`Increment`), set-based bulk ops, append-only rollback, and a
-  bounded counter that cannot oversell (proven under 12-way concurrency).
-- **Two-layer multi-tenancy** — explicit scope predicates **plus** PostgreSQL
-  row-level security; fail-closed (a missing scope yields empty reads, never a
-  leak).
+  bounded counter that cannot oversell (proven under 12-way concurrency on
+  Postgres).
 - **Privacy by construction** — field policies (`Redact`/`Hash`/`Reference`/
   `DoNotTrack`) applied *inside* the write transaction, so sensitive values never
   reach the feed, the logs, the traces, or AI consumers. The same policies
@@ -74,24 +102,51 @@ Learn by building: [docs/vNEXT/tutorial.md](docs/vNEXT/tutorial.md) · terse API
 - **GDPR tooling** — Art.-30 data inventory from the metamodel, Art.-15/20 subject
   export, history redaction with a mandatory audit trail ([gdpr.md](docs/vNEXT/gdpr.md)).
 - **Processing engine** — strict per-handler ordering, persisted checkpoints,
-  retry/backoff, poison handling, one-call rebuild, leader failover via
-  `FOR UPDATE SKIP LOCKED` — no extra infrastructure.
+  retry/backoff, poison handling, one-call rebuild.
 - **Event log** — first-class facts (`UserLoggedIn`) beside state changes, same
   transaction, same policies, per-type retention.
+- **Schema evolution** — lazy upcasting with version guards, same
+  `Upcast(fromVersion, …)` registration on either kernel.
+
+Postgres-only (`Papuma.Kernel`):
+
+- **Two-layer multi-tenancy** — explicit scope predicates **plus** PostgreSQL
+  row-level security; fail-closed (a missing scope yields empty reads, never a
+  leak).
+- **Multi-instance leader failover** via `FOR UPDATE SKIP LOCKED` — no extra
+  infrastructure for concurrent processor instances.
+- **AI-ready** — an [MCP server](src/Papuma.Kernel.Mcp) over the diagnostics and
+  scope-bound, policy-masked reads (read-only by default).
 - **Observability** — BCL `Meter` + `ActivitySource` (zero vendor deps),
   OpenTelemetry-ready, feed-lag health check, and an **embedded live dashboard**
-  (`MapPapumaDashboard()`) for the day before Prometheus exists.
-- **AI-ready** — an [MCP server](src/Papuma.Kernel.Mcp) over the diagnostics and
-  scope-bound, policy-masked reads (read-only by default); the policy-minimized
-  feed is safe LLM reading material by construction.
+  (`MapPapumaDashboard()`).
+
+SQLite-only (`Papuma.Kernel.Local`):
+
+- **No server, no daemon, no port** — one file, opens in milliseconds, single
+  writer enforced by the OS file lock, not application code.
+- **In-process feed wakeup** — a `SqliteChangeNotifier` replaces LISTEN/NOTIFY;
+  no network round trip, near-instant delivery.
+- **WAL journal mode + busy timeout on every connection**, applied through one
+  shared factory — a background feed processor writing doesn't block the UI
+  reading, verified empirically, not assumed.
+- Genuinely simpler where the single-writer topology allows it: no RLS
+  machinery, no gapless-read snapshot logic — see the
+  [design rationale](docs/analyses/local-kernel-sqlite-sibling.md) for exactly
+  what's dropped and why that's safe, not a shortcut.
 
 ## Packages
 
 | Package | What it is |
 |---|---|
-| `Papuma.Kernel` | core library — store, diff engine, policies, feeds, hosting |
+| `Papuma.Kernel` | PostgreSQL kernel — store, diff engine, policies, feeds, hosting |
+| `Papuma.Kernel.Local` | SQLite kernel — same model, single-writer embedded/desktop use, no server |
 | `Papuma.Kernel.AspNetCore` | optional ASP.NET Core integration — tenant middleware, feed-lag health check, embedded dashboard |
 | `Papuma.Kernel.Mcp` | optional MCP server — read-only diagnostics + masked content tools for agents |
+
+`Papuma.Kernel.Core` (diff engine, policies, model, validation) is shared
+internally by the two kernels; it is not independently published — its
+assembly ships embedded inside whichever kernel package you install.
 
 ## Samples
 
@@ -100,6 +155,9 @@ Learn by building: [docs/vNEXT/tutorial.md](docs/vNEXT/tutorial.md) · terse API
 | [shop-minimal-api](samples/shop-minimal-api) | the breadth — a mini shop touching every kernel concept: approval workflows with humans in the loop, saga compensation, inventory that cannot oversell, realtime UI push, the MCP endpoint and the dashboard |
 | [event-modeled-slices](samples/event-modeled-slices) | the *shape* — one vertical slice of each Event Modeling type (Command/View/Automation) with a pure, infrastructure-free Decider test |
 | [polyglot-consumers](samples/polyglot-consumers) | the feed as a cross-language contract — Python (psycopg3) and Go (pgx) consumers, ~50 lines each |
+
+All three samples run against `Papuma.Kernel` (Postgres) today — no
+`Papuma.Kernel.Local` sample yet.
 
 ## Recipes
 
@@ -117,26 +175,42 @@ Pattern guides on kernel primitives ([docs/vNEXT/recipes](docs/vNEXT/recipes)):
 - **Start:** [tutorial.md](docs/vNEXT/tutorial.md) — build one app end to end (guided) · [getting-started.md](docs/vNEXT/getting-started.md) — the five-minute API tour · marketing one-pager: [factsheet.md](docs/factsheet.md)
 - **Architecture:** [architecture.md](docs/vNEXT/architecture.md) · the *why* behind every decision: [concepts.md](docs/vNEXT/concepts.md)
 - **Decisions:** [16 ADRs](docs/vNEXT/adr) — each a single, dated, reversible choice
+- **`Papuma.Kernel.Local` (SQLite):** [design rationale and what's different per engine](docs/analyses/local-kernel-sqlite-sibling.md) — no dedicated getting-started yet; the write/read API mirrors `Papuma.Kernel`'s (`SaveAsync`/`LoadAsync`/`PatchAsync`/… on `SqliteDocumentSession`, `AddPapumaKernelLocal` for hosting)
 - **Cross-language:** the [feed wire format](docs/vNEXT/feed-wire-format.md) consumers rely on
 - **Agents:** [llms.txt](llms.txt) and `docs/ai/` are shipped inside the NuGet package
 - Archived 0.x/v1 docs live under `docs/v1`.
 
 ## Maturity, stated plainly
 
-`1.0.2` — the design is complete (13 implementation phases, 16 ADRs,
-every identified risk closed with a test or a measurement; **167 integration
-tests against real PostgreSQL 18, green**), but it has **not yet carried
-production traffic**. Best fit today: internal line-of-business systems and new
-products built by teams that control their PostgreSQL version. For regulated,
-mission-critical workloads, run a pilot first — the observability to judge it is
-built in.
+`1.0.2` — the Postgres kernel's design is complete (13 implementation phases,
+16 ADRs, every identified risk closed with a test or a measurement; **167
+integration tests against real PostgreSQL 18, green**), but it has **not yet
+carried production traffic**. Best fit today: internal line-of-business
+systems and new products built by teams that control their PostgreSQL
+version. For regulated, mission-critical workloads, run a pilot first — the
+observability to judge it is built in.
+
+`Papuma.Kernel.Local` is newer and should be read as such: full parity with
+the Postgres kernel's write/read/patch/GDPR/rollback/feed-processing surface,
+**58 tests green against the real SQLite engine** (including empirically
+verified driver behavior, not assumed — WAL mode, busy timeouts, expression
+index matching), but zero hours of real application traffic yet and no
+performance benchmarks (only correctness). Good fit today for exactly what it
+was built for: local desktop/mobile storage where a server is the wrong tool.
+Treat it as earlier-stage than the Postgres kernel until it's proven the same
+way.
 
 ## What it deliberately is not
 
 - **Not an ORM or query DSL** — lookups run over declared, indexed keys;
   anything richer is a projection or a SQL view (enforced, not just advised).
+  True on both kernels.
 - **Not event sourcing** — the document is the truth, the feed is derived.
-- **Not database-agnostic** — PostgreSQL ≥ 18, exploited without apology.
+- **Not one database-agnostic abstraction pretending to support everything.**
+  `Papuma.Kernel` exploits PostgreSQL ≥ 18 without apology; `Papuma.Kernel.Local`
+  is an independent SQLite implementation sharing the model, not a storage
+  seam bolted under one codebase — see
+  [why that's a different (and deliberate) design](docs/analyses/local-kernel-sqlite-sibling.md#1-why-this-doesnt-reopen-adr-001).
 - **Not a workflow/BPMN engine** — durable state machines and timers are
   documented patterns on kernel primitives (with running sample code).
 

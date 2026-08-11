@@ -1,18 +1,24 @@
-# Papuma.Kernel — Technical Factsheet
+# Papuma Kernel — Technical Factsheet
 
-Version `1.0.2` · Target framework .NET 10 · Requires PostgreSQL ≥ 18 · MIT licensed
+Version `1.0.2` · Target framework .NET 10 · MIT licensed
 
-A PostgreSQL-native persistence kernel for .NET. Plain C# records are stored as
-JSON documents; the document is the source of truth. In the same transaction as
-each write, the kernel derives a reversible field-level change record and applies
-declared field policies to it. A processing engine delivers those records to
-application handlers in strict order, with persisted checkpoints. It is not event
-sourcing (state is stored, not folded from events), not an ORM, and provides no
-query DSL.
+Two persistence kernels for .NET, sharing one document-sourced model:
+`Papuma.Kernel` (requires PostgreSQL ≥ 18, for servers) and
+`Papuma.Kernel.Local` (SQLite, embedded, no server — §8). Plain C# records are
+stored as JSON documents; the document is the source of truth. In the same
+transaction as each write, the kernel derives a reversible field-level change
+record and applies declared field policies to it. A processing engine delivers
+those records to application handlers in strict order, with persisted
+checkpoints. It is not event sourcing (state is stored, not folded from
+events), not an ORM, and provides no query DSL.
 
 The scope of the library is deliberately narrow: it owns the write path, the
 derived feed, and the delivery guarantees. Read models, search indexes, message
 buses and workflow logic are the application's, built on the primitives below.
+
+Sections 1–7 describe `Papuma.Kernel` (Postgres). §8 covers
+`Papuma.Kernel.Local` (SQLite) — what's shared code (not a lookalike
+reimplementation) versus what's deliberately different, and why.
 
 ---
 
@@ -104,15 +110,18 @@ the intended mitigation (`docs/vNEXT/concepts.md §14`) rather than left implici
   state must be defined by an event fold, this is the wrong tool.
 - **Not an ORM or query DSL.** Lookups run over declared, indexed keys; richer
   queries are projections or SQL views. The boundary is enforced, not advisory.
-- **PostgreSQL-specific.** PostgreSQL ≥ 18 is required; the single-statement write
-  path depends on `RETURNING OLD/NEW`. There is no database abstraction layer.
+- **No database abstraction layer.** `Papuma.Kernel` requires PostgreSQL ≥ 18;
+  the single-statement write path depends on `RETURNING OLD/NEW`, exploited
+  without a compatibility shim. `Papuma.Kernel.Local` (§8) is a second,
+  independent implementation of the same model against SQLite — not this
+  kernel abstracted over a storage interface.
 - **Not a workflow engine.** Durable state machines, human-in-the-loop steps and
   timers are documented patterns over the primitives (with sample code); the
   workflow definition stays application code.
 
 ---
 
-## 6. Maturity
+## 6. Maturity (`Papuma.Kernel`)
 
 The design is complete: 13 implementation phases, 16 ADRs, each identified risk
 closed with a test or a measurement. It has **not yet run production traffic**.
@@ -120,6 +129,13 @@ Suitable today for internal line-of-business systems and new products by teams
 that control their PostgreSQL version. For regulated or mission-critical
 workloads, run a pilot first; the observability needed to evaluate it is built
 in.
+
+`Papuma.Kernel.Local` is newer and earlier-stage: full API parity with the
+Postgres kernel's write/read/patch/GDPR/rollback/feed-processing surface, 58
+tests green against the real SQLite engine (including empirically pinned
+driver behavior — WAL mode, busy timeouts, expression-index matching — not
+assumed), but zero production hours and no throughput measurements yet, only
+correctness. See §8.4.
 
 ---
 
@@ -145,7 +161,89 @@ await session.CommitAsync();
 Schema, indexes and row-level security are created idempotently at startup; there
 is no separate migration step.
 
-**Packages:** `Papuma.Kernel` · `Papuma.Kernel.AspNetCore` · `Papuma.Kernel.Mcp`
+---
+
+## 8. `Papuma.Kernel.Local` — SQLite, no server
+
+`Papuma.Kernel.Local` is a second, independent implementation of the same
+document-sourced model against SQLite, for the deployment shape where
+PostgreSQL is the wrong tool rather than a smaller version of it: a
+single-writer embedded file, no daemon, no port, no server process for the
+application's users to install or operate.
+
+### 8.1 What's shared code, not a lookalike
+
+`Papuma.Kernel.Core` — extracted once, referenced by both kernels, embedded
+in whichever package is installed — supplies the diff engine, the field
+policy engine, the model/validation layer, GDPR redaction logic, the
+storage-neutral half of feed processing (`IChangeHandler`/`IEventHandler`,
+processor options, failure/lag types), and `KernelDiagnostics`
+(`Meter`/`ActivitySource`). Both kernels' metrics and traces land in the same
+OpenTelemetry pipeline; this is one codebase for that surface, not two
+implementations agreeing by convention.
+
+What each kernel implements independently against its own engine: the
+session write path, patch application, schema management, and feed
+processing loop — described in §8.2.
+
+### 8.2 What's deliberately different
+
+A single-writer embedded store doesn't need the machinery that exists to
+solve multi-writer problems:
+
+| | Postgres kernel | SQLite kernel |
+|---|---|---|
+| Atomic old/new capture | one `RETURNING OLD/NEW` statement | `SELECT` + version-checked `UPDATE...RETURNING` — two statements; still atomic because the transaction is exclusive, nothing can interleave |
+| Feed wakeup | `LISTEN`/`NOTIFY`, network round trip | in-process `SqliteChangeNotifier` (bounded channel), no network involved |
+| Gapless-read handling | `txid`/snapshot filtering (ADR-010) — solves a multi-writer commit-order problem | not needed — one writer, no commit-order to reconcile |
+| Row isolation | explicit scope predicates **plus** PostgreSQL row-level security | explicit scope predicates only — no second process to defend against |
+| Leader coordination | `FOR UPDATE SKIP LOCKED` across concurrent processor instances | not needed — a single-writer store has exactly one instance |
+| Patch application | generated `jsonb_set`/`#-` SQL expressions | applied in-process against the loaded JSON (`JsonPatchApplier`), then written back |
+| Declared-key indexes | `data #>> '{path,segments}'` expression index | `json_extract(data,'$.path')` expression index, with the path interpolated as a SQL literal, not bound as a parameter — SQLite's planner only matches an expression index when the query text is identical to the index definition |
+| Unique-violation detection | structured Postgres constraint name | `SqliteErrorCode == 19` + regex-extracted index name from `ex.Message` (no structured constraint-name property in the driver) |
+
+Two correctness details worth calling out because they were bugs, not design
+choices: SQLite's `json_extract` returns the native storage class (INTEGER/
+REAL/0-1) for numbers and booleans, not text, so comparisons against a
+declared key must switch on the CLR type of the compared value rather than
+always binding text; and the expression index above only fires when the
+query's JSON path is textually identical to the index's, which is why the
+path is interpolated as a literal (each segment still validated through the
+same `InputValidator` discipline the DDL uses) rather than passed as a query
+parameter. Both are covered by regression tests
+(`SqliteSpikeTests`, `SqliteNumericKeyTests`).
+
+Every one of these is documented with its reasoning, not just the diff, in
+[docs/analyses/local-kernel-sqlite-sibling.md](analyses/local-kernel-sqlite-sibling.md).
+
+### 8.3 Minimal setup
+
+```csharp
+builder.Services
+    .AddPapumaKernelLocal(o =>
+    {
+        o.DbPath = Path.Combine(appDataDir, "app.db");
+        o.Model(m => m.Document<User>(d => d.UniqueKey(x => x.Email)));
+    })
+    .AddChangeHandler<UserProjection>();
+
+await using var session = store.OpenSession(ScopeContext.Tenant("local"));
+await session.SaveAsync(user, expectedVersion: 0);
+await session.CommitAsync();
+```
+
+Every connection is opened through a shared `SqliteConnectionFactory` that
+applies `PRAGMA journal_mode = 'WAL'` and a 5-second `busy_timeout`, so a
+background feed processor writing doesn't block the UI reading — verified
+empirically (`SqliteConnectionFactoryTests`), not assumed.
+
+### 8.4 Maturity (`Papuma.Kernel.Local`)
+
+See §6 — same statement, not repeated with different numbers.
+
+**Packages:** `Papuma.Kernel` (Postgres) · `Papuma.Kernel.Local` (SQLite) ·
+`Papuma.Kernel.AspNetCore` · `Papuma.Kernel.Mcp`
 **Documentation:** shipped in the package under `docs/` and at
 [github.com/papumabiz/Papuma.Kernel](https://github.com/papumabiz/Papuma.Kernel);
-start with `docs/vNEXT/getting-started.md`.
+start with `docs/vNEXT/getting-started.md` (Postgres) or
+`docs/analyses/local-kernel-sqlite-sibling.md` (SQLite).
