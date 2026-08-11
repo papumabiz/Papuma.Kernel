@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 (2026-08-11)
 
 - **New package: `Papuma.Kernel.Local`** — a SQLite-backed sibling of
   `Papuma.Kernel` for single-writer desktop/embedded use, at full parity with
@@ -38,6 +38,18 @@
   SQLite-backed sibling for desktop/embedded use
   (`docs/analyses/local-kernel-sqlite-sibling.md`). No public API or behavior
   change; namespaces are unchanged.
+- **Docs**: `README.md` and `docs/factsheet*.md` rewritten to position
+  `Papuma.Kernel.Local` as an equal-billing second product rather than a
+  footnote — shared/Postgres-only/SQLite-only feature grouping, a
+  `Papuma.Kernel.Local` maturity statement, dual quickstart snippets, and a
+  new §8 in the technical factsheet. `llms.txt` and the `docs/ai/` set
+  (playbook, AGENTS.md snippet, slice conventions) updated for the same
+  reason — they were entirely Postgres-framed and would have misled a coding
+  agent building against `Papuma.Kernel.Local`. The `Papuma.Kernel.Local`
+  package itself now bundles its own docs (README, `docs/ai/`, the design
+  rationale, `concepts.md`, `gdpr.md`, the ADRs) the same way `Papuma.Kernel`
+  already did — previously it shipped none, contradicting what the docs
+  claimed.
 
 ## 1.0.2 (2026-06-22)
 

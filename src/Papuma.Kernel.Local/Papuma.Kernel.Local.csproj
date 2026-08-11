@@ -5,7 +5,29 @@
     <PackageId>Papuma.Kernel.Local</PackageId>
     <Description>SQLite-backed embedded sibling of Papuma.Kernel for single-writer desktop/local use — the same document-sourcing model (versioned documents, reversible diffs, change feed, GDPR redaction, privacy policies, schema evolution) without a server. See docs/analyses/local-kernel-sqlite-sibling.md.</Description>
     <PackageTags>sqlite;documents;cqrs;change-feed;gdpr;embedded;offline</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <!-- Agent-readable documentation ships with the package, mirroring Papuma.Kernel.csproj:
+       after restore it sits in the consumer's global packages folder, so coding agents can
+       read the playbook and design rationale locally instead of guessing. Only docs that are
+       actually accurate for the SQLite kernel are bundled here — getting-started.md,
+       tutorial.md, observability.md and feed-wire-format.md describe Postgres-only surface
+       (AddPapumaKernel bootstrap, the dashboard/health check, the Postgres wire format) and
+       are deliberately left out rather than shipped and be wrong. -->
+  <ItemGroup>
+    <None Include="..\..\docs\ai\papuma-kernel-playbook.md" Pack="true" PackagePath="docs\ai\" />
+    <None Include="..\..\docs\ai\papuma-kernel-agents-snippet.md" Pack="true" PackagePath="docs\ai\" />
+    <None Include="..\..\docs\ai\papuma-kernel-slice-conventions.md" Pack="true" PackagePath="docs\ai\" />
+    <None Include="..\..\docs\analyses\local-kernel-sqlite-sibling.md" Pack="true" PackagePath="docs\analyses\" />
+    <None Include="..\..\docs\vNEXT\concepts.md" Pack="true" PackagePath="docs\vNEXT\" />
+    <None Include="..\..\docs\vNEXT\gdpr.md" Pack="true" PackagePath="docs\vNEXT\" />
+    <None Include="..\..\docs\vNEXT\adr\*.md" Pack="true" PackagePath="docs\vNEXT\adr\" />
+  </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Papuma.Kernel.Local.Tests" />
