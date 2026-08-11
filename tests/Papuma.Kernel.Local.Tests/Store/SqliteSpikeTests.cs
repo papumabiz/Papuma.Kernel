@@ -181,6 +181,102 @@ public sealed class SqliteSpikeTests : IDisposable
     }
 
     [Fact]
+    public void JsonExtract_NumericField_ComparedAgainstTextParameter_DoesNotMatch()
+    {
+        // Finding: json_extract does NOT stringify JSON numbers the way Postgres's #>>
+        // always returns text — it preserves the SQLite storage class (INTEGER/REAL for
+        // JSON numbers, INTEGER 0/1 for booleans). A key-value comparison bound as TEXT
+        // (the original SqliteDocumentSession.ToKeyText behavior) therefore silently
+        // fails to match ANY non-string declared key (TEXT '42' != INTEGER 42 in SQLite —
+        // different storage classes never compare equal). Fixed by
+        // SqliteDocumentSession.ToKeyComparisonValue, which binds numeric CLR values as
+        // double instead of always TEXT — safe because SQLite compares INTEGER and REAL
+        // as equal when numerically equivalent (42 = 42.0 is true), so the exact
+        // INTEGER-vs-REAL storage class json_extract picks doesn't need to be predicted.
+        using var insert = _connection.CreateCommand();
+        insert.CommandText = "INSERT INTO doc (id, version, data) VALUES ('n1', 1, '{\"priority\":42}');";
+        insert.ExecuteNonQuery();
+
+        using var select = _connection.CreateCommand();
+        select.CommandText = "SELECT COUNT(*) FROM doc WHERE json_extract(data, '$.priority') = @value;";
+        select.Parameters.AddWithValue("value", "42"); // bound as TEXT, same as ToKeyText() does today
+        var textMatchCount = (long)select.ExecuteScalar()!;
+
+        using var select2 = _connection.CreateCommand();
+        select2.CommandText = "SELECT COUNT(*) FROM doc WHERE json_extract(data, '$.priority') = @value;";
+        select2.Parameters.AddWithValue("value", 42L); // bound as INTEGER
+        var intMatchCount = (long)select2.ExecuteScalar()!;
+
+        using var typeCmd = _connection.CreateCommand();
+        typeCmd.CommandText = "SELECT typeof(json_extract(data, '$.priority')) FROM doc WHERE id = 'n1';";
+        var extractedType = (string)typeCmd.ExecuteScalar()!;
+
+        Assert.Equal("integer", extractedType); // confirms json_extract does NOT stringify JSON numbers
+        Assert.Equal(0, textMatchCount);        // confirms TEXT '42' != INTEGER 42 in SQLite comparison
+        Assert.Equal(1, intMatchCount);         // confirms it DOES match with the correct SQLite type
+    }
+
+    [Fact]
+    public void JsonExtractIndex_NotUsed_WhenPathIsABoundParameter()
+    {
+        // Finding: SQLite's query planner only matches an expression index when the
+        // indexed expression is textually identical to the query's. A bound @path
+        // parameter is a distinct expression node from the index's literal '$.email' —
+        // even though the *value* at that parameter happens to be "$.email" at execution
+        // time, the planner can't see that (parameter values aren't known until bind
+        // time, well after the plan is chosen). Result: EXPLAIN QUERY PLAN reports a full
+        // "SCAN doc", not the index, for every one of LoadByKeyAsync's original
+        // (pre-fix) queries — even for a plain string key like Email, where the *value*
+        // comparison worked correctly and the bug was invisible without checking the
+        // plan explicitly. Fixed by interpolating the (validated) path as a SQL literal
+        // instead of binding it — see SqliteDocumentSession.ValidatedKeyJsonPath.
+        using var idx = _connection.CreateCommand();
+        idx.CommandText = "CREATE UNIQUE INDEX ux_doc_email2 ON doc (json_extract(data, '$.email'));";
+        idx.ExecuteNonQuery();
+
+        using var boundPathPlan = _connection.CreateCommand();
+        boundPathPlan.CommandText = "EXPLAIN QUERY PLAN SELECT * FROM doc WHERE json_extract(data, @path) = @value;";
+        boundPathPlan.Parameters.AddWithValue("path", "$.email");
+        boundPathPlan.Parameters.AddWithValue("value", "a@b.com");
+        Assert.Contains("SCAN doc", ReadPlan(boundPathPlan));
+
+        using var literalPathPlan = _connection.CreateCommand();
+        literalPathPlan.CommandText = "EXPLAIN QUERY PLAN SELECT * FROM doc WHERE json_extract(data, '$.email') = @value;";
+        literalPathPlan.Parameters.AddWithValue("value", "a@b.com");
+        Assert.Contains("ux_doc_email2", ReadPlan(literalPathPlan));
+    }
+
+    [Fact]
+    public void IntegerAndRealCompareEqual_WhenNumericallyEquivalent()
+    {
+        // Finding underpinning SqliteDocumentSession.ToKeyComparisonValue's design: unlike
+        // the TEXT-vs-NUMERIC case above (never equal, different storage classes), SQLite
+        // *does* consider INTEGER and REAL equal when the values match — so binding every
+        // numeric CLR key value as `double` is safe without needing to predict whether
+        // json_extract will report the stored JSON number as INTEGER or REAL.
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "SELECT (42 = 42.0), typeof(42), typeof(42.0);";
+        using var reader = cmd.ExecuteReader();
+        reader.Read();
+
+        Assert.Equal(1L, reader.GetInt64(0));
+        Assert.Equal("integer", reader.GetString(1));
+        Assert.Equal("real", reader.GetString(2));
+    }
+
+    private static string ReadPlan(SqliteCommand cmd)
+    {
+        using var reader = cmd.ExecuteReader();
+        var plan = "";
+        while (reader.Read())
+        {
+            plan += reader.GetString(reader.GetOrdinal("detail")) + "\n";
+        }
+
+        return plan;
+    }
+
+    [Fact]
     public void JsonExtractIndex_UsedByQueryPlanner()
     {
         // Finding: EXPLAIN QUERY PLAN confirms the partial expression index is used

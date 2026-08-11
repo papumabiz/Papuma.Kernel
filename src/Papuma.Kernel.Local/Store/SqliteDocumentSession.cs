@@ -200,17 +200,21 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText = """
+        // The JSON path is interpolated as a literal (validated below), not bound as a
+        // parameter: SQLite's query planner only matches an expression index when the
+        // indexed expression is textually identical to the query's — a bound @path
+        // parameter is a different expression node and silently defeats the declared-key
+        // index (SqliteSpikeTests.JsonExtractIndex_NotUsed_WhenPathIsABoundParameter).
+        cmd.CommandText = $"""
             SELECT id, data, version, schema_version
             FROM document
             WHERE scope = @scope AND tenant_id = @tenantId
               AND document_type = @type
-              AND json_extract(data, @path) = @value
+              AND json_extract(data, '{ValidatedKeyJsonPath(keyMetadata)}') = @value
             LIMIT 2
             """;
         AddScopeParameters(cmd, metadata.Name);
-        cmd.Parameters.AddWithValue("path", KeyJsonPath(keyMetadata));
-        cmd.Parameters.AddWithValue("value", ToKeyText(value));
+        cmd.Parameters.AddWithValue("value", ToKeyComparisonValue(value));
 
         var results = new List<DocumentResult<T>>();
         await using (var reader = await cmd.ExecuteReaderAsync(ct))
@@ -1039,21 +1043,50 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
                 nameof(key));
     }
 
-    /// <summary>Converts a declared key's dot-separated path into a SQLite JSONPath string.</summary>
-    private static string KeyJsonPath(KeyMetadata key) => "$." + string.Join('.', key.PathSegments);
-
     /// <summary>
-    /// Converts a key value to the text form comparable against <c>json_extract</c>'s result.
+    /// Converts a declared key's dot-separated path into a SQLite JSONPath string, safe to
+    /// interpolate literally into SQL text (validated per segment, same discipline as
+    /// <see cref="SqliteSchemaManager.BuildKeyIndexDdl"/> — path segments are
+    /// developer-declared property names, not user input, but interpolation still demands
+    /// the same identifier-pattern check before it happens).
     /// </summary>
-    private static string ToKeyText(object value)
+    private static string ValidatedKeyJsonPath(KeyMetadata key)
     {
-        if (value is string s)
+        foreach (var segment in key.PathSegments)
         {
-            return s;
+            InputValidator.ValidateDocumentType(segment);
         }
 
-        var node = JsonSerializer.SerializeToNode(value, KernelJson.Options)
-            ?? throw new ArgumentException("Key value serialized to null.", nameof(value));
-        return node is JsonValue jv && jv.TryGetValue<string>(out var text) ? text : node.ToJsonString();
+        return "$." + string.Join('.', key.PathSegments);
+    }
+
+    /// <summary>
+    /// Converts a key value to bind against <c>json_extract</c>'s result. Binds with a
+    /// matching SQLite storage class rather than always TEXT: <c>json_extract</c> returns
+    /// INTEGER/REAL for JSON numbers and INTEGER (0/1) for JSON booleans, and SQLite's
+    /// <c>=</c> never considers TEXT equal to a numeric value regardless of content —
+    /// unlike Postgres's <c>#&gt;&gt;</c>, which always returns text (see
+    /// SqliteSpikeTests.JsonExtract_NumericField_ComparedAgainstTextParameter_DoesNotMatch).
+    /// INTEGER vs. REAL doesn't need to match exactly — SQLite compares both as NUMERIC
+    /// and <c>42 = 42.0</c> is true — so every numeric CLR type binds as <c>double</c>.
+    /// Falls back to the pre-existing text/JSON behavior for anything else (e.g. Guid,
+    /// DateTimeOffset), which is correct there since those fields serialize to JSON
+    /// strings, so <c>json_extract</c> returns TEXT for them too.
+    /// </summary>
+    private static object ToKeyComparisonValue(object value)
+    {
+        switch (value)
+        {
+            case string s:
+                return s;
+            case bool b:
+                return b ? 1L : 0L;
+            case sbyte or byte or short or ushort or int or uint or long or ulong or float or double or decimal:
+                return Convert.ToDouble(value);
+            default:
+                var node = JsonSerializer.SerializeToNode(value, KernelJson.Options)
+                    ?? throw new ArgumentException("Key value serialized to null.", nameof(value));
+                return node is JsonValue jv && jv.TryGetValue<string>(out var text) ? text : node.ToJsonString();
+        }
     }
 }

@@ -54,16 +54,20 @@ public sealed partial class SqliteDocumentSession
         var (conn, tx) = await EnsureTransactionAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText = """
+        // Path interpolated as a validated literal, not bound — see
+        // SqliteDocumentSession.ValidatedKeyJsonPath's remarks (a bound @path parameter
+        // defeats the declared-key expression index). Value stays text-compared here
+        // (MCP entry point, string-in by contract) — matches the Postgres kernel's own
+        // #>> semantics for this specific method, which is always text too.
+        cmd.CommandText = $"""
             SELECT data, version, schema_version
             FROM document
             WHERE scope = @scope AND tenant_id = @tenantId
               AND document_type = @type
-              AND json_extract(data, @path) = @value
+              AND json_extract(data, '{ValidatedKeyJsonPath(key)}') = @value
             LIMIT 2
             """;
         AddScopeParameters(cmd, metadata.Name);
-        cmd.Parameters.AddWithValue("path", KeyJsonPath(key));
         cmd.Parameters.AddWithValue("value", value);
 
         var matches = new List<MaskedDocumentResult>();

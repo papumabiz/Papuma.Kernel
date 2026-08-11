@@ -16,6 +16,19 @@
   timeout, so a background feed processor writing doesn't block the UI
   reading chat/document history (verified empirically, not assumed — see
   `SqliteConnectionFactoryTests`).
+- **Fix**: declared keys (`UniqueKey`/`LookupKey`) on non-string fields
+  (numbers, booleans) now work correctly on `Papuma.Kernel.Local` —
+  `LoadByKeyAsync`/`PatchWhereAsync`/`DeleteWhereAsync` previously compared
+  every key value as TEXT, but SQLite's `json_extract` returns
+  INTEGER/REAL/0-1 for JSON numbers and booleans and never considers those
+  equal to TEXT, so non-string keys silently matched nothing. Also fixed:
+  the declared-key expression index was never actually used by any of these
+  lookups (SQLite only matches an expression index when the query's
+  expression is textually identical to the index's, and the JSON path was
+  being bound as a parameter, not a literal) — every keyed lookup, including
+  ones that "worked" on string keys, was doing a full table scan. Both
+  confirmed empirically and fixed; see `SqliteSpikeTests` and
+  `SqliteNumericKeyTests`.
 - **Internal restructuring**: extracted the storage-neutral diff engine, policy
   engine, model, and validation code (previously `Changes/`, `Model/`,
   `Validation/`, and the storage-neutral half of `Tenancy/`) into a new

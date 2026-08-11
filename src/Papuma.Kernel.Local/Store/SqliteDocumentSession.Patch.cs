@@ -165,14 +165,12 @@ public sealed partial class SqliteDocumentSession
         where T : class
     {
         var keyMetadata = ResolveDeclaredKey(key);
+        // Path interpolated as a validated literal, not bound — a bound parameter defeats
+        // the declared-key expression index (ValidatedKeyJsonPath's remarks).
         return BulkPatchAsync(
             patch,
-            "AND json_extract(data, @keyPath) = @keyValue",
-            cmd =>
-            {
-                cmd.Parameters.AddWithValue("keyPath", KeyJsonPath(keyMetadata));
-                cmd.Parameters.AddWithValue("keyValue", ToKeyText(value));
-            },
+            $"AND json_extract(data, '{ValidatedKeyJsonPath(keyMetadata)}') = @keyValue",
+            cmd => cmd.Parameters.AddWithValue("keyValue", ToKeyComparisonValue(value)),
             ct);
     }
 
@@ -212,12 +210,8 @@ public sealed partial class SqliteDocumentSession
     {
         var keyMetadata = ResolveDeclaredKey(key);
         return BulkDeleteAsync<T>(
-            "AND json_extract(data, @keyPath) = @keyValue",
-            cmd =>
-            {
-                cmd.Parameters.AddWithValue("keyPath", KeyJsonPath(keyMetadata));
-                cmd.Parameters.AddWithValue("keyValue", ToKeyText(value));
-            },
+            $"AND json_extract(data, '{ValidatedKeyJsonPath(keyMetadata)}') = @keyValue",
+            cmd => cmd.Parameters.AddWithValue("keyValue", ToKeyComparisonValue(value)),
             ct);
     }
 
