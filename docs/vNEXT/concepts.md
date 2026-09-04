@@ -1191,6 +1191,80 @@ projections and audit trails remain complete.
 
 ---
 
+## 29. F# as a facade, not a rewrite — and why the wire format stays closed
+
+→ [src/Papuma.Kernel.FSharp](../../src/Papuma.Kernel.FSharp) (prototype),
+§21 (polyglot consumers, the same "one deterministic wire format" argument)
+
+The kernel is authored in C#, and stays that way — not by default, by choice.
+F# is a fine consumer of it, but a poor host for it: the target audience
+(§ "Maturity, stated plainly" in the README — internal LOB teams who control
+their own PostgreSQL version) skews overwhelmingly C#, and the friction of
+consuming a library across the C#/F# boundary is asymmetric. An F#-authored
+core would hand its exceptions-as-DUs, `Result`-returning API and records
+without `[<CLIMutable>]` to the *majority* of consumers as friction, in
+exchange for removing friction from the minority. C# core + a thin idiomatic
+F# facade on top is the standard shape for this in the wider .NET ecosystem
+(Giraffe/Saturn sit on ASP.NET Core the same way) — not a compromise, the
+right tool for a kernel meant to reach the widest .NET audience.
+
+**Where the friction actually lives.** Two APIs lean on C#-compiler magic F#
+doesn't have: `Expression<Func<T,TValue>>` in the model builder (`UniqueKey`,
+`HasId`) and in `PatchBuilder<T>.Set/Remove/Increment` (ADR-012). The model
+builder side turns out to need nothing extra — `[UniqueKey]`/`[LookupKey]`
+attributes on a record field work unchanged from F#. The `Patch` side does:
+F# quotations (`<@ fun x -> x.Field @>`) don't convert to LINQ expression
+trees the way C# lambdas do. `Microsoft.FSharp.Linq.RuntimeHelpers.LeafExpressionConverter`
+bridges this, but only for a quotation that already constructs a `System.Func`
+(`<@ Func<_,_>(fun x -> ...) @>`) — a plain quotation carries an F# closure
+type it can't cast from. A ~15-line hand-rolled quotation walker (pattern-match
+`Lambda`/`PropertyGet`/`Var`, build the `System.Linq.Expressions` nodes
+directly) drops that wrapper entirely, landing on `p.SetQ(<@ fun x -> x.Name @>, v)`
+— visually almost the C# original.
+
+**Where F# convention actually diverges from the C# API, not just its
+syntax.** C# throws (`ConcurrencyException`, `DocumentNotFoundException`,
+`UniqueKeyViolationException`) for the three *expected* write-time outcomes
+ADR-003/ADR-006 document. F# culture treats expected outcomes as something to
+branch on, not catch — `Result<'T, KernelError>`. Built as a pure facade:
+catches exactly those three exception types at the boundary, translates them,
+rethrows anything else unchanged. C# call sites (and everything that depends
+on the exception-throwing contract — ASP.NET Core middleware, the MCP server,
+every existing test) see zero change. One extra wrinkle: `DocumentSession`
+(Postgres) and `SqliteDocumentSession` (SQLite) are unrelated `sealed` classes
+that happen to have identical method shapes ("mirrors the shape", see
+[local-kernel-sqlite-sibling.md](../analyses/local-kernel-sqlite-sibling.md)) —
+no common interface to write the wrapper against. Statically resolved type
+parameters (SRTP, F#'s structural/duck-typed generics) cover both kernels with
+one implementation instead of two near-duplicates.
+
+**Where the answer is "no, deliberately," not "not yet."** F#'s natural
+domain-modeling tools — `'T option` fields, discriminated unions — don't
+serialize through the kernel's `System.Text.Json` config as-is, and that
+config (`KernelJson.Options`, internal, one fixed instance) has no converter
+extension point. That is not an oversight; opening one would let the wire
+format vary by which packages happen to be referenced — exactly the
+determinism §21's polyglot argument depends on (every consumer, in any
+language, sees the same JSON for the same field, always). The fix stays at
+the F# facade's boundary, not inside the kernel: keep persisted document
+shapes as plain records with nullable-style fields (already works
+unmodified), and map at the domain edge —
+
+```fsharp
+type OrderDoc = { Id: string; Status: string; Note: string }        // storage
+let toDoc (o: Order) : OrderDoc =
+    { Id = o.Id
+      Status = match o.Status with Pending -> "pending" | Shipped _ -> "shipped" | Cancelled _ -> "cancelled"
+      Note = o.Note |> Option.toObj }                                // FSharp.Core, no new code
+```
+
+Revisit opening the extension point only against concrete, repeated friction
+across real projects — not speculatively now. The kernel's wire-format
+determinism is a hard-won property; loosening it needs evidence, not a
+prototype's convenience.
+
+---
+
 *Maintenance note: add new explainers from later phases here — this document is
 the collection point for the "why behind the how" and raw material for the
 tutorials (phase 9).*

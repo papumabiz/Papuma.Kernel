@@ -5,10 +5,12 @@
     <Project Path="src/Papuma.Kernel.AspNetCore/Papuma.Kernel.AspNetCore.csproj" />
     <Project Path="src/Papuma.Kernel.Mcp/Papuma.Kernel.Mcp.csproj" />
     <Project Path="src/Papuma.Kernel.Local/Papuma.Kernel.Local.csproj" />
+    <Project Path="src/Papuma.Kernel.FSharp/Papuma.Kernel.FSharp.fsproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Papuma.Kernel.Tests/Papuma.Kernel.Tests.csproj" />
     <Project Path="tests/Papuma.Kernel.Local.Tests/Papuma.Kernel.Local.Tests.csproj" />
+    <Project Path="tests/Papuma.Kernel.FSharp.Tests/Papuma.Kernel.FSharp.Tests.fsproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/shop-minimal-api/ShopMinimalApi.csproj" />
