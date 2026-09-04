@@ -1,13 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Prototype (not yet a packaged product) — validates whether Papuma's
-       Expression<Func<T,TValue>>-based Patch API can be made F#-idiomatic without
-       touching Papuma.Kernel.Core. See Patch.fs for the rationale and the empirically
-       verified quotation-to-Expression conversion it relies on. IsPackable stays false
-       until that's confirmed to feel right in real use. -->
   <PropertyGroup>
-    <IsPackable>false</IsPackable>
+    <IsPackable>true</IsPackable>
+    <PackageId>Papuma.Kernel.FSharp</PackageId>
+    <Description>F#-idiomatic facade over Papuma Kernel's write path: quotation-based Patch (SetQ/RemoveQ/IncrementQ — no Expression&lt;Func&lt;T,TValue&gt;&gt; ceremony), Result&lt;T,KernelError&gt; instead of exceptions for the three expected write outcomes (ADR-003/ADR-006), and an IAsyncDisposable-safe session runner. Works with either kernel — reference Papuma.Kernel (PostgreSQL) or Papuma.Kernel.Local (SQLite) alongside this package.</Description>
+    <PackageTags>fsharp;documents;cqrs;patch;quotations;result</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <Compile Include="Errors.fs" />
@@ -19,8 +22,22 @@
   <ItemGroup>
     <!-- PatchBuilder<T> (the type being extended) lives in Papuma.Kernel.Core, shared by
          both kernels — referencing Core directly (not Papuma.Kernel or .Local) keeps this
-         extension usable from either. -->
-    <ProjectReference Include="..\Papuma.Kernel.Core\Papuma.Kernel.Core.csproj" />
+         package usable with either. Same embedding pattern as Papuma.Kernel.csproj /
+         Papuma.Kernel.Local.csproj: Core is not independently published
+         (IsPackable=false in its own csproj), so its assembly must be copied into this
+         package explicitly — the target below does that. -->
+    <ProjectReference Include="..\Papuma.Kernel.Core\Papuma.Kernel.Core.csproj">
+      <PrivateAssets>all</PrivateAssets>
+    </ProjectReference>
   </ItemGroup>
+
+  <PropertyGroup>
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);CopyProjectReferencesToPackage</TargetsForTfmSpecificBuildOutput>
+  </PropertyGroup>
+  <Target Name="CopyProjectReferencesToPackage" DependsOnTargets="BuildOnlySettings;ResolveReferences">
+    <ItemGroup>
+      <BuildOutputInPackage Include="@(ReferenceCopyLocalPaths->WithMetadataValue('ReferenceSourceTarget', 'ProjectReference'))" />
+    </ItemGroup>
+  </Target>
 
 </Project>

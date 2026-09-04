@@ -143,6 +143,7 @@ SQLite-only (`Papuma.Kernel.Local`):
 | `Papuma.Kernel.Local` | SQLite kernel — same model, single-writer embedded/desktop use, no server |
 | `Papuma.Kernel.AspNetCore` | optional ASP.NET Core integration — tenant middleware, feed-lag health check, embedded dashboard |
 | `Papuma.Kernel.Mcp` | optional MCP server — read-only diagnostics + masked content tools for agents |
+| `Papuma.Kernel.FSharp` | optional F# facade — quotation-based Patch, `Result`-returning writes; works with either kernel ([details](src/Papuma.Kernel.FSharp/README.md)) |
 
 `Papuma.Kernel.Core` (diff engine, policies, model, validation) is shared
 internally by the two kernels; it is not independently published — its
@@ -155,9 +156,10 @@ assembly ships embedded inside whichever kernel package you install.
 | [shop-minimal-api](samples/shop-minimal-api) | the breadth — a mini shop touching every kernel concept: approval workflows with humans in the loop, saga compensation, inventory that cannot oversell, realtime UI push, the MCP endpoint and the dashboard |
 | [event-modeled-slices](samples/event-modeled-slices) | the *shape* — one vertical slice of each Event Modeling type (Command/View/Automation) with a pure, infrastructure-free Decider test |
 | [polyglot-consumers](samples/polyglot-consumers) | the feed as a cross-language contract — Python (psycopg3) and Go (pgx) consumers, ~50 lines each |
+| [fsharp-local-todo](samples/fsharp-local-todo) | `Papuma.Kernel.FSharp` end to end, on `Papuma.Kernel.Local` (SQLite — no server, no Docker) |
 
-All three samples run against `Papuma.Kernel` (Postgres) today — no
-`Papuma.Kernel.Local` sample yet.
+The first three samples run against `Papuma.Kernel` (Postgres);
+`fsharp-local-todo` is the first sample against `Papuma.Kernel.Local`.
 
 ## Recipes
 

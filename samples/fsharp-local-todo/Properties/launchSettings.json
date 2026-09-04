@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "fsharp-local-todo": {
+      "commandName": "Project",
+      "applicationUrl": "http://localhost:5098",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}

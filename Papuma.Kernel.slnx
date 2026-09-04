@@ -16,6 +16,7 @@
     <Project Path="samples/shop-minimal-api/ShopMinimalApi.csproj" />
     <Project Path="samples/event-modeled-slices/EventModeledSlices.csproj" />
     <Project Path="samples/event-modeled-slices/tests/EventModeledSlices.Tests.csproj" />
+    <Project Path="samples/fsharp-local-todo/fsharp-local-todo.fsproj" />
   </Folder>
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks/Papuma.Kernel.Benchmarks/Papuma.Kernel.Benchmarks.csproj" />

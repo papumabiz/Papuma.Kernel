@@ -1,0 +1,28 @@
+@host = http://localhost:5098
+
+### Create — 201, response includes id + version
+POST {{host}}/todos
+Content-Type: application/json
+
+{
+  "title": "Buy milk",
+  "slug": "buy-milk"
+}
+
+### Create again with the same slug — 409 UniqueKeyViolation
+POST {{host}}/todos
+Content-Type: application/json
+
+{
+  "title": "Buy milk again",
+  "slug": "buy-milk"
+}
+
+### Load — replace <id> with an id from the create response
+GET {{host}}/todos/<id>
+
+### Complete — SetQ(Done, true) + IncrementQ(TouchCount, 1) in one Patch call
+POST {{host}}/todos/<id>/complete
+
+### Load a missing id — 404 DocumentNotFound
+GET {{host}}/todos/does-not-exist
