@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.2.0 (2026-09-05)
+
+- **New package: `Papuma.Kernel.FSharp`** — an F#-idiomatic facade over the
+  write path, additive on top of `Papuma.Kernel.Core` (no kernel change).
+  Quotation-based `Patch` (`SetQ`/`RemoveQ`/`IncrementQ`) via a hand-rolled
+  quotation-to-`Expression<Func<T,TValue>>` walker — `<@ fun x -> x.Field @>`
+  converts directly, no `Func<_,_>` wrapper needed. `Result<'T, KernelError>`
+  instead of exceptions for the three expected write outcomes ADR-003/006
+  document (`VersionConflict`/`DocumentNotFound`/`UniqueKeyViolation`) via
+  `trySaveAsync`/`tryPatchAsync` — written against statically resolved type
+  parameters (SRTP) so one implementation covers both `Papuma.Kernel`
+  (Postgres) and `Papuma.Kernel.Local` (SQLite), which share no common
+  interface, only identical method shapes. `runSession` fills the
+  `IAsyncDisposable` gap F#'s `use` doesn't cover. Deliberately does not
+  support discriminated-union or `option` fields on document types — the
+  kernel's JSON serializer config stays fixed on purpose (one deterministic
+  wire format across every language and process); see
+  `docs/vNEXT/concepts.md` §29 for the full reasoning and the model-at-the-
+  boundary alternative.
+- **New sample: `samples/fsharp-local-todo`** — the first sample against
+  `Papuma.Kernel.Local` (the other three are Postgres-only), a minimal F#
+  ASP.NET Core API exercising the full `Papuma.Kernel.FSharp` facade:
+  `[<UniqueKey>]` on a record field, `SetQ`/`IncrementQ` in one `Patch` call,
+  `trySaveAsync`/`tryPatchAsync` mapped to HTTP 409/404, `runSession`, and an
+  F#-authored `IChangeHandler` on the feed.
+- **`publish-nuget.sh` retargeted at GitHub Packages** (was hardcoded to a
+  private Gitea instance) — the GitHub owner is now auto-detected from the
+  `origin` remote instead of a hardcoded default, so the script works
+  unchanged in any GitHub repo. Project discovery now also picks up
+  `.fsproj` packages, not just `.csproj`.
+
 ## 1.1.0 (2026-08-11)
 
 - **New package: `Papuma.Kernel.Local`** — a SQLite-backed sibling of
