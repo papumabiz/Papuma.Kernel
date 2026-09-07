@@ -12,6 +12,21 @@
     <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
+  <!-- Agent-readable documentation ships with the package, same rationale as
+       Papuma.Kernel.csproj/Papuma.Kernel.Local.csproj: after restore it's on disk in the
+       consumer's global packages folder, so a coding agent working in an F# app can read
+       the F#-specific guidance locally. A consumer of this package always also references
+       Papuma.Kernel or Papuma.Kernel.Local (this package only extends Papuma.Kernel.Core's
+       PatchBuilder<T>), which already bundle the full doc set — these are the same files,
+       duplicated here so they're found without having to know to look in the other
+       package's folder. -->
+  <ItemGroup>
+    <None Include="..\..\docs\ai\papuma-kernel-playbook.md" Pack="true" PackagePath="docs\ai\" />
+    <None Include="..\..\docs\ai\papuma-kernel-agents-snippet.md" Pack="true" PackagePath="docs\ai\" />
+    <None Include="..\..\docs\ai\papuma-kernel-slice-conventions.md" Pack="true" PackagePath="docs\ai\" />
+    <None Include="..\..\docs\vNEXT\concepts.md" Pack="true" PackagePath="docs\vNEXT\" />
+  </ItemGroup>
+
   <ItemGroup>
     <Compile Include="Errors.fs" />
     <Compile Include="Quotations.fs" />

@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.2.1 (2026-09-07)
+
+- **Docs**: closed the same gap for F# that opened for `Papuma.Kernel.Local`
+  in 1.1.0 — `llms.txt` and the `docs/ai/` set were entirely silent on
+  `Papuma.Kernel.FSharp` and would have misled a coding agent building an F#
+  app. Added, all additive (no restructuring, same pattern as the existing
+  `Papuma.Kernel.Local`-differences sections):
+  - Playbook: a "Using `Papuma.Kernel.FSharp`" section (`SetQ`/`RemoveQ`/
+    `IncrementQ`, `trySaveAsync`/`tryPatchAsync`, `runSession`, the
+    `CommitAsync` and no-DU/`option` rules).
+  - AGENTS.md snippet: an F# addendum on top of either kernel's block.
+  - Slice conventions: a full F# translation of the Command slice (the one
+    that actually diverges — Patch needs quotations, minimal-API needs a
+    `Func<_,_>` delegate wrapper), plus the Registration/Test idiom
+    differences; View/Automation/Translation follow the same pattern.
+  - `llms.txt`: points agents at all of the above and at the
+    `Papuma.Kernel.FSharp` README.
+  - `Papuma.Kernel.FSharp` now bundles the same `docs/ai/` set and
+    `concepts.md` its sibling packages do, so the guidance is on disk after
+    `dotnet restore` without needing to know to look in another package's
+    folder.
+
 ## 1.2.0 (2026-09-05)
 
 - **New package: `Papuma.Kernel.FSharp`** — an F#-idiomatic facade over the

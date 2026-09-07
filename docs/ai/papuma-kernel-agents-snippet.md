@@ -5,7 +5,8 @@ Copy the block for whichever kernel your application uses into `AGENTS.md` /
 the non-negotiable rules — details live in the
 [playbook](papuma-kernel-playbook.md) and the package docs. The two blocks
 share almost all of their rules (same model, same `Papuma.Kernel.Core`); only
-the persistence-specific lines differ.
+the persistence-specific lines differ. Using `Papuma.Kernel.FSharp` on top of
+either kernel? Also copy the F# addendum below.
 
 ---
 
@@ -125,4 +126,36 @@ derived automatically. NOT event sourcing, NOT an ORM, NO query DSL.
 - Concepts (the why, applies to the shared surface of both kernels):
   docs/vNEXT/concepts.md §1–§20
 - GDPR tooling: docs/vNEXT/gdpr.md
+```
+
+---
+
+## Addendum for F# apps (either block above, plus `Papuma.Kernel.FSharp`)
+
+Append this to whichever block above matches your kernel — the rules don't
+change for F#, only the syntax for three of them:
+
+```markdown
+### Additions for F# (Papuma.Kernel.FSharp)
+
+- Rule 3 (Patch/Increment): use `SetQ`/`RemoveQ`/`IncrementQ` with a quotation
+  (`<@ fun x -> x.Field @>`), not `Set`/`Remove`/`Increment` with a lambda —
+  F# has no compiler support for converting `x => x.Field` into an
+  `Expression<Func<T,TValue>>`.
+- `trySaveAsync`/`tryPatchAsync` return `Result<'T, KernelError>` for the
+  three expected write outcomes instead of throwing — optional, not
+  mandatory; the throwing API still works.
+- `runSession` replaces a hand-written `try`/`finally` around
+  `DisposeAsync` — F#'s `use` doesn't bind `IAsyncDisposable`.
+- Rule 4 (privacy policies): additionally, no discriminated-union or
+  `option` fields on document types — the kernel's JSON config is fixed on
+  purpose. Map `option` to a plain nullable-style field at the boundary
+  (`Option.toObj`/`ofObj`/`toNullable`/`ofNullable`, already in `FSharp.Core`).
+
+### Reference
+
+- `Papuma.Kernel.FSharp` package README (also shipped inside the NuGet package)
+- Playbook: docs/ai/papuma-kernel-playbook.md, "Using Papuma.Kernel.FSharp" section
+- Slice conventions in F#: docs/ai/papuma-kernel-slice-conventions.md, "Using Papuma.Kernel.FSharp" section
+- Concepts §29 (the why): docs/vNEXT/concepts.md
 ```

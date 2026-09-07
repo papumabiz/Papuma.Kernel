@@ -205,6 +205,129 @@ repetitive 80%; the Decider is the 20% that is the actual product. An agent may
 *propose* a Decider body from the event model, but that proposal is reviewed like
 any business logic — it is not mechanical.
 
+## Using Papuma.Kernel.FSharp (F#)
+
+The slice *shape* above is language-neutral — DTO/Decider/Handler/Endpoint/
+Registration/Test stays the same anatomy across both languages. Only the
+concrete syntax changes, and in exactly one place (Patch) it changes because
+F# lacks a C# compiler feature, not because the kernel behaves differently.
+See [Papuma.Kernel.FSharp](../../src/Papuma.Kernel.FSharp/README.md) and
+[concepts.md §29](../vNEXT/concepts.md#29-f-as-a-facade-not-a-rewrite--and-why-the-wire-format-stays-closed)
+for the reasoning; this section is the slice-shape translation only.
+
+One genuine improvement, not just a translation: the **Decider fits F# better
+than C#**. It was always meant to be a pure function — F# just doesn't make
+you wrap it in a static class to say so.
+
+### Command slice, translated
+
+```fsharp
+// PlaceOrder.fs — DTO. INVARIANT shape, same fields as the C# version. Plain
+// `string`, not `string option` — a command DTO is deserialized the same way
+// a document is (System.Text.Json), so the same option/DU limitation applies
+// (concepts §29).
+type PlaceOrder = { ProductId: string; Quantity: int; CustomerEmail: string }
+
+// PlaceOrderDecider — VARIABLE: the business rule, pure, no I/O. Takes the
+// pre-loaded stock (same as the C# version) for the early, synchronous
+// rejection; the actual oversell guarantee is the atomic Increment below plus
+// a `Validate` on Inventory (concepts §17) — the Decider's check is a UX
+// nicety on top, not the correctness mechanism.
+module PlaceOrderDecider =
+    let decide (product: Product) (stock: Inventory) (cmd: PlaceOrder) : Order =
+        if stock.Stock < cmd.Quantity then raise (OutOfStockException(product.Id))
+        let total = product.Price * decimal cmd.Quantity
+        { Id = Guid.NewGuid().ToString("N")
+          ProductId = product.Id
+          Quantity = cmd.Quantity
+          Total = total
+          Status = if total > 500m then "pending-approval" else "approved"
+          CustomerEmail = cmd.CustomerEmail }
+
+// PlaceOrderHandler — INVARIANT: load → decide → write, one session, one
+// commit (don't skip CommitAsync — nothing a session writes is visible
+// anywhere else until it's called; see samples/fsharp-local-todo's README).
+// The one line that's more than a syntax translation: Patch needs
+// SetQ/IncrementQ (a quotation, not `x => x.Field`), and trySaveAsync/
+// tryPatchAsync return Result instead of throwing — DocumentNotFoundException
+// becomes a match arm, not a try/catch.
+let handle (store: SqliteDocumentStore) (scope: ScopeContext) (cmd: PlaceOrder) : Task<Result<Order, KernelError>> =
+    runSession (store.OpenSession(scope)) (fun session ->
+        task {
+            let! product = session.LoadAsync<Product>(cmd.ProductId)
+            let! stock = session.LoadAsync<Inventory>(cmd.ProductId)
+
+            match product, stock with
+            | null, _
+            | _, null -> return Error(DocumentNotFound(nameof Product, cmd.ProductId))
+            | product, stock ->
+                let! stockOutcome =
+                    tryPatchAsync
+                        session
+                        cmd.ProductId
+                        (fun p -> p.IncrementQ(<@ fun (x: Inventory) -> x.Stock @>, int64 -cmd.Quantity) |> ignore)
+                        None
+
+                match stockOutcome with
+                | Error err -> return Error err
+                | Ok _ ->
+                    let order = PlaceOrderDecider.decide product.Document stock.Document cmd
+                    let! saveOutcome = trySaveAsync session order 0L
+
+                    match saveOutcome with
+                    | Ok _ -> do! session.CommitAsync()
+                    | Error _ -> ()
+
+                    return saveOutcome |> Result.map (fun _ -> order)
+        })
+```
+
+`trySaveAsync`/`tryPatchAsync`/`runSession` are written against statically
+resolved type parameters (SRTP), so the same handler code compiles unchanged
+against `Papuma.Kernel`'s `DocumentStore`/`DocumentSession` (Postgres) — swap
+the type annotation, nothing else.
+
+### Endpoint slice — the delegate-conversion gotcha
+
+Minimal API endpoint mapping needs an explicit `Func<_,_>` wrapper: F# doesn't
+implicitly convert a function value into a delegate the way C# does at a
+directly-typed call site (see `samples/fsharp-local-todo/Program.fs`):
+
+```fsharp
+app.MapPost("/orders", Func<HttpContext, Task>(placeOrderEndpoint)) |> ignore
+```
+
+### Registration — module functions instead of extension methods
+
+C#'s fluent extension-method chaining (`this KernelModelBuilder m`) has no F#
+equivalent worth reaching for; a plain function taking and returning the
+builder reads just as well, no ceremony needed:
+
+```fsharp
+module OrderingRegistration =
+    let addOrdering (m: KernelModelBuilder) : KernelModelBuilder =
+        m.Document<Order>().Document<Product>()
+
+    let addOrderingHandlers (k: PapumaKernelLocalBuilder) : PapumaKernelLocalBuilder =
+        k.AddChangeHandler<OnOrderPlaced>()
+```
+
+### View, Automation, Translation slices
+
+Same translation pattern as the Command slice — `LoadAsync` is unchanged,
+`IChangeHandler` is a plain interface F# implements natively (see
+`TodoChangeLogger` in the sample), and only a slice's own *Patch* calls need
+`SetQ`/`IncrementQ`. No slice type needs a second write-up here.
+
+### Tests — backtick names instead of PascalCase methods
+
+```fsharp
+[<Fact>]
+let ``PlaceOrder over stock is rejected`` () =
+    let outOfStock = { Id = "sku-1"; Stock = 0 }
+    Assert.Throws<OutOfStockException>(fun () -> PlaceOrderDecider.decide product outOfStock cmd |> ignore)
+```
+
 ## How a generator obtains the context
 
 1. **Depend on `Papuma.Kernel`** — the package ships `docs/` (playbook, this

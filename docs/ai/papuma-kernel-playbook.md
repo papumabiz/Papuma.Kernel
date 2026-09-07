@@ -159,6 +159,40 @@ GDPR/schema evolution/scope-binding — applies unchanged; it's the same code,
 shared via `Papuma.Kernel.Core`. Full reasoning for every difference above:
 [docs/analyses/local-kernel-sqlite-sibling.md](../analyses/local-kernel-sqlite-sibling.md).
 
+## Using `Papuma.Kernel.FSharp` (F#, additive facade)
+
+Not a third kernel — a thin, optional facade package that sits alongside
+either `Papuma.Kernel` or `Papuma.Kernel.Local`. Everything above still
+applies unchanged; this section is only what an F# consumer needs on top.
+Full reasoning: [concepts.md §29](../vNEXT/concepts.md#29-f-as-a-facade-not-a-rewrite--and-why-the-wire-format-stays-closed);
+slice-by-slice translation: [slice-conventions.md](papuma-kernel-slice-conventions.md#using-papumakernelfsharp-f).
+
+- **`Patch` needs quotations, not lambdas.** `x => x.Field` is C#-compiler
+  magic F# doesn't have. Use `SetQ`/`RemoveQ`/`IncrementQ` with
+  `<@ fun x -> x.Field @>` instead of `Set`/`Remove`/`Increment`.
+- **`trySaveAsync`/`tryPatchAsync` return `Result<'T, KernelError>`** for the
+  three *expected* write outcomes (`VersionConflict`/`DocumentNotFound`/
+  `UniqueKeyViolation`) instead of throwing — optional, not a replacement:
+  `SaveAsync`/`PatchAsync` still work and still throw exactly as documented
+  above if you'd rather catch.
+- **`runSession`** fills the gap where F#'s `use` doesn't bind
+  `IAsyncDisposable` (which is what a session implements) — use it instead of
+  a hand-written `try`/`finally` + `DisposeAsync`.
+- **Still true, no exception for F#: `CommitAsync` is not automatic.** A
+  session's writes are invisible to every other session, and silently rolled
+  back on dispose, until `CommitAsync` is called. Easy to miss for what
+  "looks" like a single, already-done write — see the comment in
+  `samples/fsharp-local-todo/Program.fs`, where this was the one real bug
+  the sample shipped with before it was caught by actually running it.
+- **Hard rule, no exception: no discriminated-union or `option` fields on
+  document types.** The kernel's JSON serializer config is fixed on purpose
+  (one deterministic wire format for every language/process reading the
+  feed) and has no converter extension point. Model the stored shape as a
+  plain record (nullable-style fields, not `option`) and map at the F#
+  boundary — `Option.toObj`/`Option.ofObj`/`Option.toNullable`/
+  `Option.ofNullable` (all in `FSharp.Core` already) usually make that a
+  one-liner per field.
+
 ## What the kernel deliberately is NOT
 
 No ORM, no query DSL, no workflow/BPMN engine, no projection generation, no event
