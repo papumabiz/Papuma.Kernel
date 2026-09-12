@@ -3,7 +3,7 @@
 
 // F# sample for Papuma.Kernel.FSharp, over Papuma.Kernel.Local (SQLite — no server, no
 // Docker). Walkthrough in README.md; the facade itself is documented in
-// Papuma.Kernel.FSharp's own README and docs/vNEXT/concepts.md §29.
+// Papuma.Kernel.FSharp's own README and docs/concepts.md §29.
 // Handlers read HttpContext directly and resolve the store from RequestServices —
 // deliberately not the typed minimal-API parameter binding C# samples use, to keep this
 // sample independent of any F#-specific minimal-API binding behavior.

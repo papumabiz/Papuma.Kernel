@@ -7,7 +7,7 @@ namespace Papuma.Kernel.Store;
 /// Thrown when the connected PostgreSQL server does not meet the minimum supported version.
 /// </summary>
 /// <remarks>
-/// Papuma.Kernel vNEXT requires PostgreSQL 18 or later: the write path relies on
+/// Papuma.Kernel requires PostgreSQL 18 or later: the write path relies on
 /// <c>RETURNING OLD/NEW</c> as a hard requirement (ADR-001), with no fallback code path.
 /// </remarks>
 public sealed class PostgresVersionNotSupportedException : InvalidOperationException

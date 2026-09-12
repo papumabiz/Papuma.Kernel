@@ -9,18 +9,18 @@ and on the way through it you meet every concept the kernel ships:
 | Bounded counter (never oversell) | `Inventory` validator + `Increment(-qty)` in `POST /orders` | concepts §17 |
 | Privacy policies | `[SensitiveData] CustomerEmail` — check `/orders/{id}/history`: only `{"changed": true}` | ADR-007 |
 | Event log (facts without state truth) | `StockReplenished` on create/replenish | ADR-013 |
-| Workflow / saga | [`OrderWorkflowHandler`](Handlers/OrderWorkflowHandler.cs) | concepts §18, [recipe](../../docs/vNEXT/recipes/workflow-saga.md) |
+| Workflow / saga | [`OrderWorkflowHandler`](Handlers/OrderWorkflowHandler.cs) | concepts §18, [recipe](../../docs/recipes/workflow-saga.md) |
 | Human-in-the-loop | `ApprovalTask` document + `POST /approvals/{id}/decide` | concepts §18 |
 | Saga compensation | rejection gives the stock back (`Increment(+qty)`) | concepts §18 |
 | The timer primitive | [`ApprovalEscalationService`](Services/ApprovalEscalationService.cs) (`dueAt` poller) | concepts §18 |
 | Optimistic concurrency as UX | second approver gets HTTP 409 | ADR-003 |
 | Audit for free | `GET /orders/{id}/history` — every transition with actor and diff | ADR-003/004 |
-| Realtime UI push | [`OrderUiNotifier`](Handlers/OrderUiNotifier.cs) → SignalR `/hub/shop` | [recipe](../../docs/vNEXT/recipes/realtime-ui-notifications.md) |
+| Realtime UI push | [`OrderUiNotifier`](Handlers/OrderUiNotifier.cs) → SignalR `/hub/shop` | [recipe](../../docs/recipes/realtime-ui-notifications.md) |
 | Health check (feed lag) | `GET /health` | observability.md |
 | MCP server for AI agents | `/mcp` (read-only default) | observability.md |
 | Embedded dashboard (lag, failures, throughput) | open `/papuma` in a browser | observability.md |
 | Management port (keep dashboard/MCP off the public surface) | set `ManagementPort` (+ `MainPort`) — `/papuma` & `/mcp` move there, `RequireHost`-pinned | observability.md, concepts §25 |
-| NATS/JetStream bridge (optional) | [`NatsBridge.cs`](Handlers/NatsBridge.cs) — set `Nats:Url` | [recipe](../../docs/vNEXT/recipes/nats-bridge.md), concepts §22 |
+| NATS/JetStream bridge (optional) | [`NatsBridge.cs`](Handlers/NatsBridge.cs) — set `Nats:Url` | [recipe](../../docs/recipes/nats-bridge.md), concepts §22 |
 
 ## Run it
 

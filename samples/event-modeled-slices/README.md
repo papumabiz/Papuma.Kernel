@@ -4,7 +4,7 @@ A deliberately tiny sample showing the **shape** of event-modeled slices
 (Dymitruk/Dilger) on a document-sourced kernel — one slice of each type, nothing
 more. For the breadth of kernel features see the
 [full Minimal-API sample](../shop-minimal-api/README.md); for the *why* read
-[event-modeling-slices.md](../../docs/vNEXT/recipes/event-modeling-slices.md) and
+[event-modeling-slices.md](../../docs/recipes/event-modeling-slices.md) and
 the [slice conventions](../../docs/ai/papuma-kernel-slice-conventions.md).
 
 > This sample is opt-in architecture. The kernel does not require slices or Event

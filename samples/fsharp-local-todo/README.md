@@ -4,7 +4,7 @@ A minimal F# ASP.NET Core API over `Papuma.Kernel.Local` (SQLite — no server, 
 Docker), using every piece of [`Papuma.Kernel.FSharp`](../../src/Papuma.Kernel.FSharp):
 quotation-based `Patch`, `Result`-returning writes, and the `IAsyncDisposable` session
 runner. Design reasoning behind the facade:
-[concepts.md §29](../../docs/vNEXT/concepts.md#29-f-as-a-facade-not-a-rewrite--and-why-the-wire-format-stays-closed).
+[concepts.md §29](../../docs/concepts.md#29-f-as-a-facade-not-a-rewrite--and-why-the-wire-format-stays-closed).
 
 | Concept | Where in this sample |
 |---|---|

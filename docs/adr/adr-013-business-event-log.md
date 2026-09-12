@@ -14,7 +14,7 @@ them, no diff exists from which a translator could derive anything; the fact
 itself is the information (audit, fraud detection, behavioral analysis).
 
 v1 already separated `change_feed` and `business_event_log` for this — that
-separation returns as a deliberate vNEXT concept.
+separation returns as a deliberate Papuma Kernel concept.
 
 ## Decision
 

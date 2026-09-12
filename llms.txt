@@ -18,7 +18,7 @@ why), then the ADRs (decisions; deviations are bugs). The AGENTS.md snippet has
 one block per kernel plus an F# addendum — copy the kernel block matching the
 consuming application, and the addendum too if it's F#. All canonical documents
 are English; the implementation plan and the original design chat remain German
-(historical project records), and `docs/vNEXT/concepts.de.md` is a frozen German
+(historical project records), and `docs/legacy/concepts.de.md` is a frozen German
 snapshot of the concepts document (not maintained).
 
 These files also ship inside the NuGet package under `docs/` — after
@@ -34,18 +34,18 @@ These files also ship inside the NuGet package under `docs/` — after
 - [`Papuma.Kernel.Local` design rationale](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/analyses/local-kernel-sqlite-sibling.md): what's shared code vs. deliberately different per engine, and why
 - [Slice conventions](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/ai/papuma-kernel-slice-conventions.md): canonical shape of command/view/automation/translation slices — drives scaffolding and code generators; includes the F# translation
 - [`Papuma.Kernel.FSharp` README](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/src/Papuma.Kernel.FSharp/README.md): the F# facade package itself — `SetQ`/`RemoveQ`/`IncrementQ`, `trySaveAsync`/`tryPatchAsync`, `runSession`
-- [Tutorial](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/tutorial.md): learning-oriented, build one app from empty folder to a feed-driven read model (document → session → feed → handler), style-neutral
-- [Getting started](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/getting-started.md): bootstrap, write path, handlers, schema evolution in 5 minutes
-- [Concepts](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/concepts.md): 29 explanatory sections — the "why behind the how" (concurrency, feeds, checkpoints, snapshots, workflows, GDPR, the F# facade at §29)
-- [Architecture](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/architecture.md): namespaces, SQL data model, write path, ADR index
+- [Tutorial](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/tutorial.md): learning-oriented, build one app from empty folder to a feed-driven read model (document → session → feed → handler), style-neutral
+- [Getting started](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/getting-started.md): bootstrap, write path, handlers, schema evolution in 5 minutes
+- [Concepts](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/concepts.md): 29 explanatory sections — the "why behind the how" (concurrency, feeds, checkpoints, snapshots, workflows, GDPR, the F# facade at §29)
+- [Architecture](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/architecture.md): namespaces, SQL data model, write path, ADR index
 
 ## Guides
 
-- [Observability](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/observability.md): metrics, tracing, diagnostics APIs, MCP server
-- [GDPR tooling](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/gdpr.md): data inventory, subject export, history redaction, per-tenant erasure-vs-restriction pattern
-- [Recipe: AI consumers](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/recipes/ai-consumers.md): pgvector embeddings projection, natural-language audit, anomaly detection
-- [Recipe: realtime UI notifications](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/vNEXT/recipes/realtime-ui-notifications.md): NOTIFY-driven UI updates
+- [Observability](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/observability.md): metrics, tracing, diagnostics APIs, MCP server
+- [GDPR tooling](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/gdpr.md): data inventory, subject export, history redaction, per-tenant erasure-vs-restriction pattern
+- [Recipe: AI consumers](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/recipes/ai-consumers.md): pgvector embeddings projection, natural-language audit, anomaly detection
+- [Recipe: realtime UI notifications](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/recipes/realtime-ui-notifications.md): NOTIFY-driven UI updates
 
 ## Decisions
 
-- [ADR index](https://github.com/papumabiz/Papuma.Kernel/tree/master/docs/vNEXT/adr): 15 ADRs — PostgreSQL-18-only, derived change feed, write path with mandatory expectedVersion, reversible diffs, schema evolution, keys, privacy policies, rollback, feed consumption, gapless reads, event translation, patch primitive, event log, bulk operations, GDPR tooling
+- [ADR index](https://github.com/papumabiz/Papuma.Kernel/tree/master/docs/adr): 15 ADRs — PostgreSQL-18-only, derived change feed, write path with mandatory expectedVersion, reversible diffs, schema evolution, keys, privacy policies, rollback, feed consumption, gapless reads, event translation, patch primitive, event log, bulk operations, GDPR tooling

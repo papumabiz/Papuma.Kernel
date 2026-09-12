@@ -60,8 +60,8 @@ derived automatically. NOT event sourcing, NOT an ORM, NO query DSL.
 
 - Playbook: docs/ai/papuma-kernel-playbook.md in the Papuma.Kernel repo
   (also shipped inside the NuGet package under docs/)
-- Concepts (the why): docs/vNEXT/concepts.md §1–§20
-- GDPR tooling: docs/vNEXT/gdpr.md · Diagnostics: docs/vNEXT/observability.md
+- Concepts (the why): docs/concepts.md §1–§20
+- GDPR tooling: docs/gdpr.md · Diagnostics: docs/observability.md
 ```
 
 ---
@@ -124,8 +124,8 @@ derived automatically. NOT event sourcing, NOT an ORM, NO query DSL.
 - Design rationale (what's shared vs. deliberately different per engine):
   docs/analyses/local-kernel-sqlite-sibling.md in the Papuma.Kernel repo
 - Concepts (the why, applies to the shared surface of both kernels):
-  docs/vNEXT/concepts.md §1–§20
-- GDPR tooling: docs/vNEXT/gdpr.md
+  docs/concepts.md §1–§20
+- GDPR tooling: docs/gdpr.md
 ```
 
 ---
@@ -157,5 +157,5 @@ change for F#, only the syntax for three of them:
 - `Papuma.Kernel.FSharp` package README (also shipped inside the NuGet package)
 - Playbook: docs/ai/papuma-kernel-playbook.md, "Using Papuma.Kernel.FSharp" section
 - Slice conventions in F#: docs/ai/papuma-kernel-slice-conventions.md, "Using Papuma.Kernel.FSharp" section
-- Concepts §29 (the why): docs/vNEXT/concepts.md
+- Concepts §29 (the why): docs/concepts.md
 ```

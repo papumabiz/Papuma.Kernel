@@ -45,7 +45,7 @@ implementations of the same thing.
 ## 2. Where a Skill would clearly pay for itself
 
 **2.1 — On-demand depth that doesn't belong in every session's fixed context.**
-The recipes (`docs/vNEXT/recipes/*.md`), the playbook's troubleshooting
+The recipes (`docs/recipes/*.md`), the playbook's troubleshooting
 section, the full decision-tree — genuinely useful, but wrong to inline into
 every app's `AGENTS.md` permanently. A Skill triggered by "building a
 workflow/saga" or "diagnosing feed lag" would pull in exactly the relevant
@@ -75,7 +75,7 @@ the right static block correctly.
 ## 3. Where it would not help, and the real risks
 
 - **Content-fork risk.** A Skill's bundled reference material must not
-  become a second, hand-maintained copy of `docs/ai/`/`docs/vNEXT/` that
+  become a second, hand-maintained copy of `docs/ai/` and the guides that
   quietly drifts. Given how much documentation this project already
   maintains in parallel (canonical English, an archived German snapshot, the
   NuGet-embedded copy, the GitHub raw-URL copy `llms.txt` points at), adding
@@ -110,7 +110,7 @@ three at once:
   agent has to pick between.
 - **`SKILL.md`**: a short trigger description ("use when adding or modifying
   a Papuma Kernel feature slice"), the compressed decision tree from the
-  playbook, and links back to `docs/ai/`/`docs/vNEXT/recipes/` for anything
+  playbook, and links back to `docs/ai/` and `docs/recipes/` for anything
   deeper — reference, not duplicate.
 - **A bundled scaffold script** implementing `slice-conventions.md`'s
   generator contract: slice name + document type in, the five invariant

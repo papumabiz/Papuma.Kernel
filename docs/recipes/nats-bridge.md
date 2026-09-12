@@ -1,7 +1,7 @@
 # Recipe: The NATS bridge — publishing the feeds to JetStream
 
 Status: verified against running code (2026-06-12) — the bridge lives in the
-sample ([NatsBridge.cs](../../../samples/shop-minimal-api/Handlers/NatsBridge.cs),
+sample ([NatsBridge.cs](../../samples/shop-minimal-api/Handlers/NatsBridge.cs),
 NATS.Net 2.8.1) and was proven end-to-end including the dedup behavior below.
 Background: [concepts §22](../concepts.md) ("the feed is the outbox").
 

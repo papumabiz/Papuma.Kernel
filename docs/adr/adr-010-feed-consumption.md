@@ -11,7 +11,7 @@ The change feed is ordered by a `seq` column (identity). Naive polling with
 **after** transaction B with `seq = 101`. A poller that has already seen 101 and
 advanced its checkpoint never sees 100.
 
-The v1 analysis [polling-vs-listen-analysis.md](../../analyses/polling-vs-listen-analysis.md)
+The v1 analysis [polling-vs-listen-analysis.md](../legacy/polling-vs-listen-analysis.md)
 already established: LISTEN/NOTIFY alone is unsuitable as the source of truth
 (connection drops, no persistence), polling alone is sluggish or expensive.
 

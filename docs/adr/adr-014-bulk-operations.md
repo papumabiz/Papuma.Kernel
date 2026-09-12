@@ -12,7 +12,7 @@ set-based — an `UPDATE ... WHERE` delivers **one row per affected document** w
 old and new state. The phase-2 spike finding (ADR-003) thus carries over to sets:
 one statement, atomic, diff material for every document.
 
-At the same time, the back door to a query DSL looms here, which vNEXT
+At the same time, the back door to a query DSL looms here, which Papuma Kernel
 deliberately does not want to be (ADR-006/009): "update with arbitrary WHERE"
 would be the beginning of a LINQ provider.
 

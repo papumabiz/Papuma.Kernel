@@ -51,7 +51,7 @@ Candidates for the diff format:
    document (or forwards from the insert). That is an audit/replay tool, not a hot
    path.
 4. Optional **snapshots** (e.g. every n versions) are a later optimization should
-   reconstruction become too expensive — not part of the vNEXT start.
+   reconstruction become too expensive — not part of the initial scope.
 
 ## Rejected alternative: third-party diff libraries
 

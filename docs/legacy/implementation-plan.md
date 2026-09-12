@@ -1,6 +1,12 @@
-# Papuma vNEXT — Implementierungsplan
+# Papuma Kernel — Implementierungsplan (historisch)
 
-Status: Aktiv (2026-06-11) · Grundlage: [architecture.md](architecture.md) + [ADR 001–013](adr/)
+> ⚠️ **Eingefrorenes Dokument.** Dieser Plan hat den 1.0-Reboot in 13 Phasen
+> abgearbeitet; alle Phasen sind erledigt. Er wird nicht mehr gepflegt und ist nur
+> noch als Entstehungsprotokoll erhalten. Aktuell sind
+> [architecture.md](../architecture.md), [concepts.md](../concepts.md) und die
+> [ADRs](../adr/).
+
+Status: Aktiv (2026-06-11) · Grundlage: [architecture.md](../architecture.md) + [ADR 001–013](../adr/)
 
 Abarbeitung in Phasen-Reihenfolge; Checkboxen direkt hier pflegen. Jede Phase nennt
 ihre ADRs, ihre v1-Erntequellen (Kopieren + Anpassen, nie Referenzieren) und eine
@@ -37,7 +43,7 @@ Definition of Done. **Eine Phase ist erst fertig, wenn auch die Querschnitts-Che
 
 ## Phase 1 — Fundament: Tenancy-Ernte + Schema ✅ (2026-06-11)
 
-ADRs: [001](adr/adr-001-postgresql-18-only.md) · Ernte: `Tenancy/ScopeContext`,
+ADRs: [001](../adr/adr-001-postgresql-18-only.md) · Ernte: `Tenancy/ScopeContext`,
 `ScopeType`, `ScopeFilter`, `ScopeConnectionExtensions`, `IScopeDataSourceFactory`,
 `ScopeDataSourceFactory`, `Validation/InputValidator`, AspNetCore `ScopeMiddleware` + Extensions
 
@@ -61,8 +67,8 @@ Non-Superuser-Rolle (Tenant/Platform/All/ohne Scope/WITH CHECK), Versionscheck-T
 
 ## Phase 2 — Write-Pfad-Spike: Save / Load / Delete + Diff-Engine ✅ (2026-06-11)
 
-ADRs: [002](adr/adr-002-document-as-truth.md) · [003](adr/adr-003-write-path-concurrency.md) ·
-[004](adr/adr-004-changerecord-diff-only.md) · Ernte: — (alles neu)
+ADRs: [002](../adr/adr-002-document-as-truth.md) · [003](../adr/adr-003-write-path-concurrency.md) ·
+[004](../adr/adr-004-changerecord-diff-only.md) · Ernte: — (alles neu)
 
 - [x] **Spike bestanden**: `RETURNING old.data, new.data, new.version` gegen echtes
       PG 18 verifiziert (`SqlReturningSpikeTests`) — die riskanteste Design-Annahme trägt
@@ -88,7 +94,7 @@ Tenant-Isolation über Schicht-1-Prädikate. 48 Tests grün.
 
 ## Phase 3 — Metamodell + Policies + Keys ✅ (2026-06-11)
 
-ADRs: [006](adr/adr-006-keys-and-constraints.md) · [007](adr/adr-007-privacy-policies.md) ·
+ADRs: [006](../adr/adr-006-keys-and-constraints.md) · [007](../adr/adr-007-privacy-policies.md) ·
 Ernte: konzeptionell `Gdpr/SensitiveRef`-Gedanke; Code neu
 
 - [x] Metamodell-Registry (`KernelModelBuilder` → `KernelModel`): Reflection-Scan beim
@@ -116,7 +122,7 @@ Tenant gescoped, nicht registrierter Typ wirft `DocumentTypeNotRegisteredExcepti
 
 ## Phase 4 — Schema-Evolution ✅ (2026-06-11)
 
-ADRs: [005](adr/adr-005-schema-evolution.md) · Ernte: —
+ADRs: [005](../adr/adr-005-schema-evolution.md) · Ernte: —
 
 - [x] `schema_version` semantisch korrekt durch alle Pfade: Load/LoadByKey lesen sie,
       Save schreibt die Modell-Version, **Delete-ChangeRecords tragen die gespeicherte
@@ -139,7 +145,7 @@ Lazy-Test, Persist-Test, drei Guard-Tests (Load/Save/Delete) inkl. Rollback-Nach
 
 ## Phase 5 — Patch-Primitiv + Bulk-Operationen ✅ (2026-06-11)
 
-ADRs: [012](adr/adr-012-partial-updates.md) · [014](adr/adr-014-bulk-operations.md) · Ernte: —
+ADRs: [012](../adr/adr-012-partial-updates.md) · [014](../adr/adr-014-bulk-operations.md) · Ernte: —
 
 - [x] `PatchAsync(id, p => p.Set(...).Remove(...).Increment(...))` — typisierte Pfade,
       bewusst minimaler Katalog (`PatchBuilder<T>`)
@@ -169,7 +175,7 @@ Delete-Records, leere ID-Liste. 99 Tests grün.
 
 ## Phase 6 — Session als Unit of Work + Rollback ✅ (2026-06-11)
 
-ADRs: [008](adr/adr-008-rollback-is-update.md) · Architektur §5 ("Session = Unit of Work") · Ernte: `Transactions/NpgsqlUnitOfWork` (Muster)
+ADRs: [008](../adr/adr-008-rollback-is-update.md) · Architektur §5 ("Session = Unit of Work") · Ernte: `Transactions/NpgsqlUnitOfWork` (Muster)
 
 - [x] Session = eine Transaktion (lazy geöffnet, `SET LOCAL`-Scope pro Transaktion
       neu gesetzt); `CommitAsync` explizit, Dispose ohne Commit rollt zurück;
@@ -198,8 +204,8 @@ expectedVersion. 108 Tests grün.
 
 ## Phase 7 — Feed-Konsum + Processing-Engine ✅ (2026-06-11)
 
-ADRs: [009](adr/adr-009-projections-as-dumb-handlers.md) ·
-[010](adr/adr-010-feed-consumption.md) · Ernte: `Projections/ProjectionWorkerBase`
+ADRs: [009](../adr/adr-009-projections-as-dumb-handlers.md) ·
+[010](../adr/adr-010-feed-consumption.md) · Ernte: `Projections/ProjectionWorkerBase`
 (Checkpoint-Upsert, Failure-Tabelle mit Backoff-SQL, Replay-Reset, Lag-Snapshot),
 `ChangeFeed/ChangeFeedReader` (Keyset-Pagination-Muster), AspNetCore-Health-Checks
 
@@ -227,7 +233,7 @@ Changes fließen), Lag 2→0, Leader-Lock-Test (gesperrter Checkpoint wird konfl
 
 ## Phase 8 — Event-Log ✅ (2026-06-11)
 
-ADRs: [013](adr/adr-013-business-event-log.md) · Ernte: Retention-Worker-Muster aus `Gdpr/RetentionWorker`
+ADRs: [013](../adr/adr-013-business-event-log.md) · Ernte: Retention-Worker-Muster aus `Gdpr/RetentionWorker`
 
 - [x] Tabelle `papuma.event` (txid, RLS inkl. FORCE, Index auf `(event_type,
       occurred_at)` für Retention) in `EnsureSchemaAsync`
@@ -263,10 +269,10 @@ Ernte: `ScopeMiddleware`, `IScopeResolver`, Health-Check-Extensions
       (`UseScopeResolution`)
 - [x] Rezept gegen die echte API verifiziert — Typnamen stimmten exakt (Handler,
       `Diff.Paths`, Registrierung); Disclaimer entfernt, Bootstrap-Beispiel ergänzt
-- [x] [getting-started.md](getting-started.md) neu; README auf vNEXT umgestellt;
+- [x] [getting-started.md](../getting-started.md) neu; README auf vNEXT umgestellt;
       architecture.md-Drift korrigiert (§3 Namespaces inkl. Events/Hosting,
       §5 `await using`/`SaveAsync`, §8 `AppendAsync`)
-- [x] [concepts.md](concepts.md) lebt (13 Abschnitte, §12/§13 aus Phase 8)
+- [x] [concepts.md](../concepts.md) lebt (13 Abschnitte, §12/§13 aus Phase 8)
 - [x] XML-Doku: öffentliche API durchgängig dokumentiert (laufend gepflegt);
       Health-Check-Registrierung via `AddPapumaChangeFeedLag(...)`
 
@@ -305,7 +311,7 @@ gegen echtes PostgreSQL 18 abgedeckt. Der Reboot ist vollständig.
 ## Phase 11 — Observability & Diagnostics ✅ (2026-06-12)
 
 Prinzip: **Instrumentierung mit BCL-Primitives im Kernel, kein Vendor-Lock** —
-Guide: [observability.md](observability.md), Hintergründe: [concepts.md §15](concepts.md).
+Guide: [observability.md](../observability.md), Hintergründe: [concepts.md §15](../concepts.md).
 
 - [x] **Metriken** (Meter `Papuma.Kernel`, `KernelDiagnostics`): `papuma.feed.lag`
       als Observable Gauge pro Handler/Feed (Cache-basiert — Gauge-Frische ≈
@@ -325,7 +331,7 @@ Guide: [observability.md](observability.md), Hintergründe: [concepts.md §15](c
       sieht uncommitted Session-Writes
 - [x] **`GetFailuresAsync()` + `RetryFailureAsync(handler, seq)`** auf beiden
       Prozessoren (`FeedFailure`-Record; Event-Prefix wird gemappt)
-- [x] Doku: [observability.md](observability.md) (Verdrahtung, Metrik-Tabelle,
+- [x] Doku: [observability.md](../observability.md) (Verdrahtung, Metrik-Tabelle,
       Dashboard-Empfehlung, Diagnose-APIs) + concepts §15
 
 **DoD erfüllt:** MeterListener-Tests (Lag-Gauge 2→0, Failure-/Poison-Counter),
@@ -335,9 +341,9 @@ Failure-Inspektion + manueller Retry-Flow. 130 Tests grün.
 
 ## Phase 12 — DSGVO-Werkzeuge ✅ (2026-06-12)
 
-ADRs: [015](adr/adr-015-gdpr-tooling.md) · Prinzip: Mechanismen im Kernel,
+ADRs: [015](../adr/adr-015-gdpr-tooling.md) · Prinzip: Mechanismen im Kernel,
 Rechtsentscheidungen (Löschen vs. Einschränken vs. Aufbewahren pro Tenant) in der
-Anwendung. Guide: [gdpr.md](gdpr.md).
+Anwendung. Guide: [gdpr.md](../gdpr.md).
 
 - [x] **Export-Assembly** (Art. 15/20): `GdprExport.ExportAsync(store, scope,
       documentRefs, eventSelectors)` → strukturiertes JSON (Zustand + Historie +
@@ -355,7 +361,7 @@ Anwendung. Guide: [gdpr.md](gdpr.md).
       selectorPath, selectorValue, paths, reason)`** entfernt Payload-Felder
       selektierter Events; beide irreversibel, Audit-Grund verpflichtend,
       `redaction`-Block (wann/warum/Actor/Correlation) per `metadata || @audit`
-- [x] Doku: [gdpr.md](gdpr.md) (PII-Disziplin als erste Verteidigungslinie,
+- [x] Doku: [gdpr.md](../gdpr.md) (PII-Disziplin als erste Verteidigungslinie,
       Tenant-Muster: Löschen in Scope A vs. Art.-18-Einschränkung + Fristvormerkung
       in Scope B, Grenztabelle Kernel vs. Anwendung)
 
@@ -388,12 +394,12 @@ dumme Handler als universeller Andockpunkt.
       Reflection-Bridge), `retry_feed_failure`/`reset_feed_checkpoint` nur mit
       `AllowMutations`-Opt-in; Registrierung `AddMcpServer().WithPapumaKernel()`;
       bewusst kein `gdpr_export`-Tool (Betroffenen-Export = Anwendungsworkflow);
-      Doku in [observability.md](observability.md)
+      Doku in [observability.md](../observability.md)
 - [x] **Doku reist mit dem Paket**: Playbook, Snippet, concepts, Guides, ADRs und
       Rezepte liegen als `docs/` im `Papuma.Kernel`-nupkg (nach `dotnet restore`
       lokal im Packages-Ordner des Konsumenten lesbar — kein Doku-Server nötig);
       `llms.txt` im Repo-Root als Einstiegskarte mit Leseempfehlung und Raw-URLs
-- [x] **KI-Konsumenten-Rezepte**: [recipes/ai-consumers.md](recipes/ai-consumers.md) —
+- [x] **KI-Konsumenten-Rezepte**: [recipes/ai-consumers.md](../recipes/ai-consumers.md) —
       pgvector-Embeddings-Projektion (Idempotenz via version-Prädikat),
       Natural-Language-Audit über `GetHistoryAsync` (Policy-Bereinigung als
       Prompt-Sicherheitsgrenze), Anomalie-Erkennung mit Alert-Dokument
@@ -406,7 +412,7 @@ Mutations-Gate default-zu); Rezepte gegen die reale API geschrieben. 145 Tests g
 
 ## Weitere Post-1.0-Kandidaten (bei Bedarf, getrieben durch Lag-Metriken)
 
-Skalierungsmodell und Begründung: [concepts.md §14](concepts.md). Festlegung
+Skalierungsmodell und Begründung: [concepts.md §14](../concepts.md). Festlegung
 (2026-06-12): Diese drei werden **bewusst nicht auf Vorrat gebaut** — jede kostet
 Semantik oder Betriebskomplexität, die ohne reale Workload nicht validierbar ist.
 Stattdessen gilt pro Kandidat ein **objektiver Trigger** (alle Messgrößen
@@ -446,7 +452,7 @@ Reihenfolge 1 → 3 → 2.
       ChangeRecords einer Bulk-Operation; text[]/bigint[]/int[]/jsonb[]-Arrays),
       genutzt von BulkPatch und BulkDelete; Verhalten unverändert (145 Tests grün)
 - [x] Workflow-/Saga-Rezept (concepts §18) — ✅ 2026-06-12 als
-      [recipes/workflow-saga.md](recipes/workflow-saga.md) **plus lauffähige
+      [recipes/workflow-saga.md](../recipes/workflow-saga.md) **plus lauffähige
       Sample-App** [samples/shop-minimal-api](../../samples/shop-minimal-api/README.md):
       Mini-Shop mit Bounded-Counter-Inventar, Order-Saga (Approval-Task als
       Human-in-the-Loop, Rejection-Kompensation), `dueAt`-Eskalations-Poller,

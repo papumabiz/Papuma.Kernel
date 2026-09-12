@@ -3,7 +3,7 @@
 Status: guide (2026-06-13). Maps Adam Dymitruk's **Event Modeling** and the
 **vertical-slice** style (Martin Dilger, *Understanding Eventsourcing*) onto
 Papuma. Every pattern below is named against real code in the
-[sample shop](../../../samples/shop-minimal-api/README.md).
+[sample shop](../../samples/shop-minimal-api/README.md).
 
 ## Start here: Event Modeling is not Event Sourcing
 
@@ -203,10 +203,10 @@ Because slices are structurally uniform (only the Decider varies), the plumbing
 is a strong fit for scaffolding — `dotnet new` templates, a source generator, or
 an AI agent. The canonical shape of each slice type, with the invariant vs.
 variable parts marked, is specified in
-[papuma-kernel-slice-conventions.md](../../ai/papuma-kernel-slice-conventions.md)
+[papuma-kernel-slice-conventions.md](../ai/papuma-kernel-slice-conventions.md)
 — precise enough to drive a generator. A minimal, runnable example of all three
 slice types (one each, with the pure Decider tests) lives in
-[samples/event-modeled-slices](../../../samples/event-modeled-slices/README.md). The generator itself is an external tool
+[samples/event-modeled-slices](../../samples/event-modeled-slices/README.md). The generator itself is an external tool
 that consumes that contract; it does not belong in the kernel (which stays
 AI-free), and it obtains its context by depending on the package (the docs ship
 inside it) and reading the conventions, not by being hand-fed.

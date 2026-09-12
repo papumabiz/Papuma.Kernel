@@ -1,6 +1,6 @@
 # Framework-Bewertung und Erweiterungsvorschläge
 
-> **⚠️ Historisches v1-Dokument.** Diese Bewertung bezieht sich auf den v1-Code, der beim vNEXT-Reboot entfernt wurde — Code-Referenzen und relative Links lösen nicht mehr auf. Erhalten als Kontext für den Reboot; die eingefrorene v1-Dokumentation liegt unter [docs/v1](../v1/implementation/README.md).
+> **⚠️ Historisches v1-Dokument.** Diese Bewertung bezieht sich auf den v1-Code, der beim vNEXT-Reboot entfernt wurde — Code-Referenzen und relative Links lösen nicht mehr auf. Erhalten als Kontext für den Reboot; die eingefrorene v1-Dokumentation liegt unter [docs/v1](v1/README.md).
 
 ## Gesamteinschätzung
 

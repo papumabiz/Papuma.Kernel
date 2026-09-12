@@ -15,7 +15,7 @@ brainstorm this grew out of).
 Origin: while building a desktop application on Papuma Kernel, a Postgres
 server started to feel like overkill for a single-user local store —
 which reopened, almost verbatim, the DB-agnostic-core idea that
-[ADR-001](../vNEXT/adr/adr-001-postgresql-18-only.md) already considered and
+[ADR-001](../adr/adr-001-postgresql-18-only.md) already considered and
 rejected (`chat-1.md` → `IStorageProvider` with Postgres/SQL Server
 providers). This document works out why the desktop use case is *not* the
 same proposal ADR-001 turned down, and what a version of it that respects
@@ -51,7 +51,7 @@ What's proposed here is a different shape entirely:
 | Risk to Postgres kernel | Real — every abstraction leaks back | Low — `Papuma.Kernel`'s SQL/session code stays where it is; only the parts that are already storage-neutral move to a shared project |
 
 Sharing a *data contract* is not a new idea invented for this document — it's
-literally what [feed-wire-format.md](../vNEXT/feed-wire-format.md) already
+literally what [feed-wire-format.md](../feed-wire-format.md) already
 does for polyglot consumers (concepts §21): a stable, storage-neutral spec
 for what a change record looks like, so any language can consume the feed
 without touching Postgres internals. This proposal reuses the same posture
@@ -61,7 +61,7 @@ language, *produce* it from a second, independent storage engine.
 ## 2. The contract is largely already storage-neutral
 
 Checked against the current code, not just the docs — `ChangeRecord`
-([src/Papuma.Kernel/Changes/ChangeRecord.cs](../../src/Papuma.Kernel/Changes/ChangeRecord.cs))
+([src/Papuma.Kernel/Changes/ChangeRecord.cs](../../src/Papuma.Kernel.Core/Changes/ChangeRecord.cs))
 is already a plain C# record: `Seq`, `Scope`, `DocumentType`, `DocumentId`,
 `Version`, `SchemaVersion`, `Operation`, `Diff` (a `DocumentDiff` of
 `System.Text.Json.Nodes` values), `ActorId`, `Metadata`, `OccurredAt`. No
@@ -157,7 +157,7 @@ LISTEN/NOTIFY. Simpler storage adapter, same shared orchestration above it.
 
 ## 4. Why the hardest Postgres problem mostly disappears here
 
-[ADR-010](../vNEXT/adr/adr-010-feed-consumption.md)'s entire "seq visibility
+[ADR-010](../adr/adr-010-feed-consumption.md)'s entire "seq visibility
 gap" mechanism (`txid8`, `pg_snapshot_xmin`) exists to solve one problem:
 **multiple concurrent writers** whose transaction-commit order can cross
 their seq-assignment order. An embedded SQLite database inside a single
@@ -185,7 +185,7 @@ Connecting the two is not a new mechanism to invent here — it's
 [offline-sync-and-projection-conflicts.md](offline-sync-and-projection-conflicts.md)'s
 Idea A (local outbox, replay against the central Postgres with a remembered
 `expectedVersion`, conflict resolution policy, `AppendEventAsync` for audit).
-One rule from [feed-wire-format.md §6](../vNEXT/feed-wire-format.md#6-writing)
+One rule from [feed-wire-format.md §6](../feed-wire-format.md#6-writing)
 carries over unchanged and matters here specifically: *"Foreign consumers are
 consumers... writes go through the kernel's session — never `INSERT` into
 `papuma.document`/`change`/`event` directly."* The sync process pushing local

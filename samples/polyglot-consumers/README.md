@@ -2,7 +2,7 @@
 
 The change feed is **not a .NET-private artifact** — it is two ordinary
 PostgreSQL tables with a documented, stable wire format (concepts §21, ADR-010;
-full contract in [feed-wire-format.md](../../docs/vNEXT/feed-wire-format.md)).
+full contract in [feed-wire-format.md](../../docs/feed-wire-format.md)).
 Any language can consume it. These two clients prove the "~50 lines" claim: a
 [Python](python/consumer.py) and a [Go](go/main.go) consumer, each implementing
 the full pattern.
@@ -70,4 +70,4 @@ gapless predicate and a separate checkpoint name. There is no `operation`/`diff`
 These direct-SQL clients are path A of concepts §21: simple, same-database
 consumers. They do not get the engine's retry/backoff, poison handling or leader
 coordination — a critical consumer rebuilds those, or uses path B (a .NET bridge
-handler publishing to NATS/Kafka, see the [nats-bridge recipe](../../docs/vNEXT/recipes/nats-bridge.md)).
+handler publishing to NATS/Kafka, see the [nats-bridge recipe](../../docs/recipes/nats-bridge.md)).

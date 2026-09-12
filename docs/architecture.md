@@ -1,12 +1,11 @@
-# Papuma vNEXT — Architecture Overview
+# Papuma Kernel — Architecture Overview
 
-Status: draft (2026-06-11) · Implementation: [implementation-plan.md](implementation-plan.md) ·
-Background: [concepts.md](concepts.md) (the "why behind the how", narrative)
+Status: current (1.2.x) · Background: [concepts.md](concepts.md) (the "why behind the how", narrative)
 
 This document describes the reboot of Papuma.Kernel as **document-sourced CQRS**:
 JSON documents are the truth, the change feed arises automatically as a diff,
 projections are deliberately dumb change handlers. There is no migration path
-from v1 — vNEXT is a fresh start (derived in the original design discussion,
+from v1 — 1.0 was a fresh start (derived in the original design discussion,
 "chat-1"; removed with the v1 cleanup).
 
 The binding individual decisions live in [adr/](adr/) — this document is the map
@@ -25,7 +24,7 @@ v1 solved this with relational tables, an outbox and explicitly produced events 
 at the familiar price: change detection is laborious, events must be defined
 manually, GDPR-relevant data ends up in immutable feeds.
 
-vNEXT inverts the model:
+Papuma Kernel inverts the model:
 
 ```text
 Entity (C# class)
@@ -78,7 +77,7 @@ event sourcing.
 
 ## 3. Layers and project structure
 
-vNEXT remains a small library (one package plus optional ASP.NET Core
+Papuma Kernel remains a small library (one package plus optional ASP.NET Core
 integration); the layers are namespaces, not separate NuGet packages:
 
 ```text
@@ -330,7 +329,7 @@ one with a higher `seq`. The engine therefore reads snapshot-based: only changes
 whose `txid` lies before `pg_snapshot_xmin(pg_current_snapshot())` count as
 visibly stable. LISTEN/NOTIFY serves only as the wakeup; polling remains the
 truth ([ADR-010](adr/adr-010-feed-consumption.md), building on
-[polling-vs-listen-analysis.md](../analyses/polling-vs-listen-analysis.md)).
+[polling-vs-listen-analysis.md](legacy/polling-vs-listen-analysis.md)).
 
 ### Convenience on top, not underneath
 
@@ -387,7 +386,7 @@ of documents and changes, the `DocumentSession` is always bound to a tenant, and
 
 ---
 
-## 11. Deliberately NOT part of vNEXT
+## 11. Deliberately NOT part of Papuma Kernel
 
 - **Provider abstraction / other databases** — Postgres-only, see ADR-001.
 - **Event sourcing / an event store** — changes are derived, not the truth.
@@ -440,7 +439,7 @@ Application patterns on top of the ADRs, as drafts for later tutorials:
   — pgvector embeddings, natural-language audit, anomaly detection.
 - [Workflows and sagas on kernel primitives](recipes/workflow-saga.md)
   — human-in-the-loop, compensation, the dueAt timer; backed by the runnable
-  [sample app](../../samples/shop-minimal-api/README.md).
+  [sample app](../samples/shop-minimal-api/README.md).
 - [The NATS bridge](recipes/nats-bridge.md)
   — publishing both feeds to JetStream with seq-based dedup; runnable in the
   sample via `Nats:Url`.
@@ -460,4 +459,4 @@ Application patterns on top of the ADRs, as drafts for later tutorials:
 
 The cross-language contract for consuming the feeds directly is specified in
 [feed-wire-format.md](feed-wire-format.md), with runnable Python/Go clients in
-[samples/polyglot-consumers](../../samples/polyglot-consumers/README.md).
+[samples/polyglot-consumers](../samples/polyglot-consumers/README.md).

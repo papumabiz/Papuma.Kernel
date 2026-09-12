@@ -6,7 +6,7 @@ Accepted (2026-06-11)
 
 ## Context
 
-The original vNEXT discussion (chat-1.md) sketched a DB-agnostic core library with
+The original design discussion sketched a DB-agnostic core library with
 provider packages (`Papuma.Postgres`, `Papuma.SqlServer`, ...). The kernel,
 however, lives off features that only PostgreSQL offers in this combination:
 
@@ -22,7 +22,7 @@ a single user for a second provider exists.
 
 ## Decision
 
-1. vNEXT supports exclusively **PostgreSQL, minimum version 18**.
+1. Papuma Kernel supports exclusively **PostgreSQL, minimum version 18**.
 2. There is **no `IStorageProvider` interface** and no provider packages.
    SQL lives directly in the kernel.
 3. The minimum version is checked at startup (`SHOW server_version_num`,

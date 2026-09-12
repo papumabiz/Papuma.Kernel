@@ -93,7 +93,7 @@ Measured on commodity hardware (i7, local PG-18 container; reusable probes in
 
 Scaling limits are not hidden — they are documented with the metric that
 detects them and the designed escape route for each
-(`docs/vNEXT/concepts.md §14`).
+(`docs/concepts.md §14`).
 
 ---
 
@@ -239,5 +239,5 @@ There is no migration step. There is no step two.
 `Papuma.Kernel.AspNetCore` · `Papuma.Kernel.Mcp`
 **Docs:** shipped inside the package under `docs/`, and at
 [github.com/papumabiz/Papuma.Kernel](https://github.com/papumabiz/Papuma.Kernel)
-— start with `docs/vNEXT/getting-started.md` (Postgres) or
+— start with `docs/getting-started.md` (Postgres) or
 `docs/analyses/local-kernel-sqlite-sibling.md` (SQLite). MIT licensed.

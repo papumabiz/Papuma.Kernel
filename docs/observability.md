@@ -1,4 +1,4 @@
-# Papuma vNEXT — Observability Guide
+# Papuma Kernel — Observability Guide
 
 Status: verified against the implemented API (phase 11, 2026-06-12)
 

@@ -9,7 +9,7 @@ exposes, and works alongside **either** `Papuma.Kernel` (PostgreSQL) or
 Design reasoning (why C# stays the core language, where F# genuinely needs help vs.
 where it doesn't, why the wire format stays closed): concepts.md §29, shipped in the
 kernel packages' own `docs/` folder, or
-[read it on GitHub](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/vNEXT/concepts.md#29-f-as-a-facade-not-a-rewrite--and-why-the-wire-format-stays-closed).
+[read it on GitHub](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/concepts.md#29-f-as-a-facade-not-a-rewrite--and-why-the-wire-format-stays-closed).
 
 ## Install
 

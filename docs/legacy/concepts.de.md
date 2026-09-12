@@ -2,7 +2,7 @@
 
 > ⚠️ **Eingefrorener Stand (2026-06-12).** Diese deutsche Fassung wird nicht mehr
 > gepflegt — kanonisch und aktuell ist die englische Fassung
-> [concepts.md](concepts.md). Sie bleibt als Original der Entwurfsphase erhalten
+> [concepts.md](../concepts.md). Sie bleibt als Original der Entwurfsphase erhalten
 > (§1–§20, identischer Inhalt zum Zeitpunkt des Einfrierens).
 
 Status: lebendes Dokument (Start 2026-06-11)
@@ -16,7 +16,7 @@ für Tutorials und Onboarding. Jeder Abschnitt verlinkt sein ADR.
 
 ## 1. Warum ein einziges UPDATE das Race-Fenster schließt
 
-→ [ADR-003](adr/adr-003-write-path-concurrency.md)
+→ [ADR-003](../adr/adr-003-write-path-concurrency.md)
 
 Der naive Weg, ein Diff zu berechnen, ist: altes Dokument laden, vergleichen,
 schreiben. Zwischen Laden und Schreiben liegt aber ein Zeitfenster — ändert ein
@@ -45,7 +45,7 @@ Eigenheiten des Clients (Key-Reihenfolge, Zahlenformat) können es nicht verfäl
 
 ## 2. Der langsame und der schnelle Writer (die seq-Sichtbarkeitslücke)
 
-→ [ADR-010](adr/adr-010-feed-consumption.md)
+→ [ADR-010](../adr/adr-010-feed-consumption.md)
 
 Das heimtückischste Problem eines gepollten Feeds: **Sequenznummern werden beim
 INSERT vergeben, sichtbar werden Zeilen aber erst beim COMMIT — und diese
@@ -91,7 +91,7 @@ Lag-Health-Check da.
 
 ## 3. NOTIFY ist der Wecker, Polling ist die Wahrheit
 
-→ [ADR-010](adr/adr-010-feed-consumption.md)
+→ [ADR-010](../adr/adr-010-feed-consumption.md)
 
 LISTEN/NOTIFY allein wäre als Zustellmechanismus ungeeignet: Notifications sind
 nicht persistent, Verbindungsabrisse verlieren sie lautlos. Polling allein wäre
@@ -111,7 +111,7 @@ trotzdem in Millisekunden an.
 
 ## 4. Stop-the-line: warum Ordnung vor Fortschritt geht
 
-→ [ADR-009](adr/adr-009-projections-as-dumb-handlers.md)
+→ [ADR-009](../adr/adr-009-projections-as-dumb-handlers.md)
 
 Wenn ein Handler bei seq 105 wirft, gibt es zwei Schulen: *weiterlaufen und 105
 später nachholen* (maximaler Durchsatz) oder *anhalten, bis 105 geklärt ist*
@@ -150,7 +150,7 @@ Modellierungsthema (Zähler sharden), kein Engine-Problem.
 
 ## 5. Savepoints: warum ein Fehlschlag die Session nicht zerstört
 
-→ Architektur §5, [ADR-003](adr/adr-003-write-path-concurrency.md)
+→ Architektur §5, [ADR-003](../adr/adr-003-write-path-concurrency.md)
 
 Session = eine Transaktion (Unit of Work) hat ein Problem: In PostgreSQL gilt
 "einmal Fehler, immer Fehler" — nach einem Constraint-Verstoß ist die *gesamte*
@@ -180,7 +180,7 @@ weil Schreiben bis zum Commit nichts bedeutet.
 
 ## 6. Null ≠ Absent: das Detail, das Diffs reversibel macht
 
-→ [ADR-004](adr/adr-004-changerecord-diff-only.md)
+→ [ADR-004](../adr/adr-004-changerecord-diff-only.md)
 
 `{"email": null}` und ein Dokument *ohne* `email`-Feld sind in JSON verschiedene
 Zustände. Ein Diff-Format, das beide gleich kodiert, kann nicht rückwärts angewendet
@@ -202,7 +202,7 @@ Diff-Engine per Property-Tests garantiert: `Apply(before, diff) == after` und
 
 ## 7. Warum Arrays atomar gedifft werden
 
-→ [ADR-004](adr/adr-004-changerecord-diff-only.md)
+→ [ADR-004](../adr/adr-004-changerecord-diff-only.md)
 
 Index-basierte Array-Diffs (`roles[2]: {old, new}`) sehen präzise aus, sind aber
 eine Falle: Wird vorne ein Element eingefügt, "ändern" sich alle Indizes dahinter —
@@ -225,7 +225,7 @@ brechen.
 
 ## 8. Warum Rollback über redactete Felder scheitern *muss*
 
-→ [ADR-007](adr/adr-007-privacy-policies.md), [ADR-008](adr/adr-008-rollback-is-update.md)
+→ [ADR-007](../adr/adr-007-privacy-policies.md), [ADR-008](../adr/adr-008-rollback-is-update.md)
 
 `RollbackAsync` rekonstruiert alte Zustände durch Rückwärts-Anwenden der Diffs.
 Ein redacteter Eintrag (`{"changed": true}`) enthält aber *keinen Wert* — das ist
@@ -246,7 +246,7 @@ die alten Geheimnisse schlicht nicht.
 
 ## 9. Insert nach Delete: warum Versionen weiterzählen
 
-→ [ADR-003](adr/adr-003-write-path-concurrency.md)
+→ [ADR-003](../adr/adr-003-write-path-concurrency.md)
 
 Wird ein Dokument gelöscht und seine ID später wiederverwendet, dürfte ein naiver
 Insert wieder bei Version 1 beginnen — und würde mit der Change-Historie
@@ -267,7 +267,7 @@ nicht existiert" — der Aufrufer muss von der Vorgeschichte nichts wissen.
 
 ## 10. Warum Patch kein Load braucht — und wann LWW richtig ist
 
-→ [ADR-012](adr/adr-012-partial-updates.md)
+→ [ADR-012](../adr/adr-012-partial-updates.md)
 
 Ein Patch lädt das Dokument nicht — weder der Aufrufer noch der Kernel intern.
 Der "Read" passiert im UPDATE selbst: `jsonb_set` wendet die Änderung auf den
@@ -293,7 +293,7 @@ Lost-Update-Problem aus der Mehrbenutzer-Diskussion (ADR-003).
 
 ## 11. Leader-Koordination ohne Konsens-Protokoll
 
-→ [ADR-010](adr/adr-010-feed-consumption.md)
+→ [ADR-010](../adr/adr-010-feed-consumption.md)
 
 Laufen mehrere Prozesse mit demselben Handler (Scale-out, Deployment-Überlappung),
 braucht es genau einen aktiven Verarbeiter pro Handler — aber kein ZooKeeper, kein
@@ -314,7 +314,7 @@ Failover ist damit ein Nebeneffekt der Transaktionssemantik, kein eigenes System
 
 ## 12. Warum Policies auf Event-Payloads anders wirken als auf Diffs
 
-→ [ADR-013](adr/adr-013-business-event-log.md), [ADR-007](adr/adr-007-privacy-policies.md)
+→ [ADR-013](../adr/adr-013-business-event-log.md), [ADR-007](../adr/adr-007-privacy-policies.md)
 
 Im Change Feed transformieren Policies *Diff-Einträge* — `{"changed": true}` statt
 Werten. Bei Events geht das nicht: Der Payload ist das Faktum selbst, und Konsumenten
@@ -336,7 +336,7 @@ Felder selbst:
 
 ## 13. Zwei Feeds, keine globale Ordnung — und warum das reicht
 
-→ [ADR-013](adr/adr-013-business-event-log.md)
+→ [ADR-013](../adr/adr-013-business-event-log.md)
 
 Change Feed und Event-Log haben getrennte Sequenzen und getrennte Checkpoint-Räume
 (Event-Handler werden intern mit `event:`-Präfix in derselben Checkpoint-Tabelle
@@ -354,7 +354,7 @@ Zusammenhänge braucht, korreliert statt zu ordnen. Und weil beide Tabellen dies
 
 ## 14. Das Skalierungsmodell der Feed-Engines — Grenzen und Auswege
 
-→ [ADR-009](adr/adr-009-projections-as-dumb-handlers.md), [ADR-010](adr/adr-010-feed-consumption.md)
+→ [ADR-009](../adr/adr-009-projections-as-dumb-handlers.md), [ADR-010](../adr/adr-010-feed-consumption.md)
 
 Pro Prozess läuft **ein** `ChangeFeedProcessor` und **ein** `EventFeedProcessor`;
 registriert werden *Handler*, nicht Prozessoren. Parallelität entsteht über
@@ -396,7 +396,7 @@ Dokument* bei N parallelen Konsumenten).
 
 ## 15. Observability ohne Vendor: warum BCL-Primitives reichen — und der Link-Trick
 
-→ Phase 11, [observability.md](observability.md)
+→ Phase 11, [observability.md](../observability.md)
 
 In .NET ist "OpenTelemetry oder etwas Besseres?" eine falsche Dichotomie: `Meter`
 und `ActivitySource` aus der BCL *sind* die vendor-neutralen Quellen, und OTel,
@@ -425,7 +425,7 @@ gesamte Observability-Pipeline PII-arm by design.
 
 ## 16. Lesen mit Garantie: Session-Load, SQL-Views und Projektionen
 
-→ [ADR-002](adr/adr-002-document-as-truth.md), [ADR-005](adr/adr-005-schema-evolution.md), [ADR-006](adr/adr-006-keys-and-constraints.md)
+→ [ADR-002](../adr/adr-002-document-as-truth.md), [ADR-005](../adr/adr-005-schema-evolution.md), [ADR-006](../adr/adr-006-keys-and-constraints.md)
 
 Projektionen sind asynchron — aber **der Document Store ist die Wahrheit**, und
 `LoadAsync`/`LoadByKeyAsync` lesen ihn direkt und transaktional konsistent. Der
@@ -464,7 +464,7 @@ Materialized Views sind die schlechteste der Welten: Sie holen die Staleness zur
 
 ## 17. Der begrenzte Zähler: Lagerbestand ohne Überverkauf
 
-→ [ADR-012](adr/adr-012-partial-updates.md), §4 (Hot Document), §10 (Increment)
+→ [ADR-012](../adr/adr-012-partial-updates.md), §4 (Hot Document), §10 (Increment)
 
 Das Shop-Problem "nur N Stück auf Lager, niemals überverkaufen" hat zwei korrekte
 Lösungen — und eine klare Empfehlung:
@@ -506,8 +506,8 @@ Decke → Bestand in Buckets sharden (Modellierungsthema, §14).
 
 ## 18. Human-in-the-Loop und die Workflow-Frage: Warten ist Zustand, kein Thread
 
-→ §4 (Stop-the-line), [ADR-003](adr/adr-003-write-path-concurrency.md) (expectedVersion),
-[ADR-013](adr/adr-013-business-event-log.md) (Events)
+→ §4 (Stop-the-line), [ADR-003](../adr/adr-003-write-path-concurrency.md) (expectedVersion),
+[ADR-013](../adr/adr-013-business-event-log.md) (Events)
 
 Zwei scheinbar verschiedene Fragen — "kann ein Mensch im Feed mitentscheiden?"
 und "kann ich darauf eine Workflow-Engine bauen?" — haben dieselbe Antwort,
@@ -597,8 +597,8 @@ dieselbe wie bei DSGVO (ADR-015): Mechanismen unten, Entscheidungen oben.
 
 ## 19. Checkpoints, Backup und Rebuild: Was ist Wahrheit, was ist ableitbar?
 
-→ [ADR-009](adr/adr-009-projections-as-dumb-handlers.md) (Checkpoints),
-[ADR-013](adr/adr-013-business-event-log.md) (Retention), §16 (Projektionen)
+→ [ADR-009](../adr/adr-009-projections-as-dumb-handlers.md) (Checkpoints),
+[ADR-013](../adr/adr-013-business-event-log.md) (Retention), §16 (Projektionen)
 
 **Woher weiß ein Prozessor nach dem Neustart, wo er war?** Aus
 `papuma.checkpoint`: eine Zeile pro Handler (`handler_name → last_seq`), in
@@ -666,7 +666,7 @@ aufbauen. At-least-once plus Idempotenz machen genau das gefahrlos.
 
 ## 20. Snapshots: Das Konzept existiert — invertiert
 
-→ [ADR-002](adr/adr-002-document-as-truth.md) (Dokument = Wahrheit),
+→ [ADR-002](../adr/adr-002-document-as-truth.md) (Dokument = Wahrheit),
 §6 (reversible Diffs), §19 (Rebuild)
 
 Eventsourcing-Systeme kennen **Snapshots**: periodisch persistierte

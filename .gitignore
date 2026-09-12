@@ -136,3 +136,17 @@ BenchmarkDotNet.Artifacts/
 
 # CommandCode tool artifacts
 .commandcode/
+
+### Local-only working material — must never be published
+# Drafts, transcripts, review output and tool state that live in the working
+# tree but are not part of the project.
+.artifacts/
+.claude/
+.roo/
+.kilo/
+.kilocode/
+reviews/
+nupkg/
+docs/chats/
+docs/articles/
+docs/*.pdf

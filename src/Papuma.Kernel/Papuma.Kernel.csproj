@@ -20,15 +20,15 @@
     <None Include="..\..\docs\ai\papuma-kernel-playbook.md" Pack="true" PackagePath="docs\ai\" />
     <None Include="..\..\docs\ai\papuma-kernel-agents-snippet.md" Pack="true" PackagePath="docs\ai\" />
     <None Include="..\..\docs\ai\papuma-kernel-slice-conventions.md" Pack="true" PackagePath="docs\ai\" />
-    <None Include="..\..\docs\vNEXT\tutorial.md" Pack="true" PackagePath="docs\vNEXT\" />
-    <None Include="..\..\docs\vNEXT\getting-started.md" Pack="true" PackagePath="docs\vNEXT\" />
-    <None Include="..\..\docs\vNEXT\concepts.md" Pack="true" PackagePath="docs\vNEXT\" />
-    <None Include="..\..\docs\vNEXT\architecture.md" Pack="true" PackagePath="docs\vNEXT\" />
-    <None Include="..\..\docs\vNEXT\observability.md" Pack="true" PackagePath="docs\vNEXT\" />
-    <None Include="..\..\docs\vNEXT\gdpr.md" Pack="true" PackagePath="docs\vNEXT\" />
-    <None Include="..\..\docs\vNEXT\feed-wire-format.md" Pack="true" PackagePath="docs\vNEXT\" />
-    <None Include="..\..\docs\vNEXT\adr\*.md" Pack="true" PackagePath="docs\vNEXT\adr\" />
-    <None Include="..\..\docs\vNEXT\recipes\*.md" Pack="true" PackagePath="docs\vNEXT\recipes\" />
+    <None Include="..\..\docs\tutorial.md" Pack="true" PackagePath="docs\" />
+    <None Include="..\..\docs\getting-started.md" Pack="true" PackagePath="docs\" />
+    <None Include="..\..\docs\concepts.md" Pack="true" PackagePath="docs\" />
+    <None Include="..\..\docs\architecture.md" Pack="true" PackagePath="docs\" />
+    <None Include="..\..\docs\observability.md" Pack="true" PackagePath="docs\" />
+    <None Include="..\..\docs\gdpr.md" Pack="true" PackagePath="docs\" />
+    <None Include="..\..\docs\feed-wire-format.md" Pack="true" PackagePath="docs\" />
+    <None Include="..\..\docs\adr\*.md" Pack="true" PackagePath="docs\adr\" />
+    <None Include="..\..\docs\recipes\*.md" Pack="true" PackagePath="docs\recipes\" />
   </ItemGroup>
 
   <ItemGroup>

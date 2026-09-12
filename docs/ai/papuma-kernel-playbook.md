@@ -6,10 +6,10 @@ page is Postgres-framed by default; the SQLite sibling's differences are
 called out separately below).
 
 This document is the entry map. The truth lives in the reference chain:
-[getting-started.md](../vNEXT/getting-started.md) (the API in 5 minutes) →
-[concepts.md](../vNEXT/concepts.md) (the why, §1–§20) →
-[ADRs](../vNEXT/adr/) (binding decisions) →
-[architecture.md](../vNEXT/architecture.md) (data model, namespaces).
+[getting-started.md](../getting-started.md) (the API in 5 minutes) →
+[concepts.md](../concepts.md) (the why, §1–§20) →
+[ADRs](../adr/) (binding decisions) →
+[architecture.md](../architecture.md) (data model, namespaces).
 
 ## The mental model in four sentences
 
@@ -101,11 +101,11 @@ Typed errors you should handle (not swallow): `ConcurrencyException`,
 | …react to "field X went Y→Z" | `change.IsFieldTransition(path, from, to)` in a handler (ADR-011) |
 | …add a human approval step | write a task document, handler returns; the decision = a normal write (concepts §18) |
 | …build a workflow/saga | workflow document + feed handlers + `expectedVersion`; timers = a `dueAt` poller (concepts §18) |
-| …update a UI live | the NOTIFY recipe ([realtime-ui-notifications](../vNEXT/recipes/realtime-ui-notifications.md)) |
-| …embeddings/RAG, NL audit, anomaly detection | the AI recipes ([ai-consumers](../vNEXT/recipes/ai-consumers.md)) — feed consumers, not kernel features |
-| …track who did what and why (audit) | `SessionOptions` with `ActorId`, `CausationType`, `CausationId` ([causation-tracking recipe](../vNEXT/recipes/causation-tracking.md)); ASP.NET Core: `GetSessionOptions()` with enricher |
-| …serve a GDPR access/erasure request | [gdpr.md](../vNEXT/gdpr.md) — export, inventory, redaction |
-| …inspect lag/failures of a running app | the diagnostics APIs ([observability.md](../vNEXT/observability.md)) or the MCP server (`Papuma.Kernel.Mcp`) |
+| …update a UI live | the NOTIFY recipe ([realtime-ui-notifications](../recipes/realtime-ui-notifications.md)) |
+| …embeddings/RAG, NL audit, anomaly detection | the AI recipes ([ai-consumers](../recipes/ai-consumers.md)) — feed consumers, not kernel features |
+| …track who did what and why (audit) | `SessionOptions` with `ActorId`, `CausationType`, `CausationId` ([causation-tracking recipe](../recipes/causation-tracking.md)); ASP.NET Core: `GetSessionOptions()` with enricher |
+| …serve a GDPR access/erasure request | [gdpr.md](../gdpr.md) — export, inventory, redaction |
+| …inspect lag/failures of a running app | the diagnostics APIs ([observability.md](../observability.md)) or the MCP server (`Papuma.Kernel.Mcp`) |
 
 ## When something is stuck
 
@@ -119,7 +119,7 @@ Typed errors you should handle (not swallow): `ConcurrencyException`,
   the load-modify-save (concepts §4/§17).
 - **RLS errors / empty reads in workers**: check the `'All'` scope mechanism
   (`SetAllScopesAsync` or `ScopeFilter.All()`), cross-cutting checklist in the
-  [implementation plan](../vNEXT/implementation-plan.md).
+  [historical implementation plan](../legacy/implementation-plan.md).
 - **Rollback fails typed**: diffs on the way back contain policy entries without
   values — that is intended (concepts §8); rethink the use case instead of
   removing the policy.
@@ -164,7 +164,7 @@ shared via `Papuma.Kernel.Core`. Full reasoning for every difference above:
 Not a third kernel — a thin, optional facade package that sits alongside
 either `Papuma.Kernel` or `Papuma.Kernel.Local`. Everything above still
 applies unchanged; this section is only what an F# consumer needs on top.
-Full reasoning: [concepts.md §29](../vNEXT/concepts.md#29-f-as-a-facade-not-a-rewrite--and-why-the-wire-format-stays-closed);
+Full reasoning: [concepts.md §29](../concepts.md#29-f-as-a-facade-not-a-rewrite--and-why-the-wire-format-stays-closed);
 slice-by-slice translation: [slice-conventions.md](papuma-kernel-slice-conventions.md#using-papumakernelfsharp-f).
 
 - **`Patch` needs quotations, not lambdas.** `x => x.Field` is C#-compiler

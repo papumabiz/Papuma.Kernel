@@ -24,9 +24,9 @@
     <None Include="..\..\docs\ai\papuma-kernel-agents-snippet.md" Pack="true" PackagePath="docs\ai\" />
     <None Include="..\..\docs\ai\papuma-kernel-slice-conventions.md" Pack="true" PackagePath="docs\ai\" />
     <None Include="..\..\docs\analyses\local-kernel-sqlite-sibling.md" Pack="true" PackagePath="docs\analyses\" />
-    <None Include="..\..\docs\vNEXT\concepts.md" Pack="true" PackagePath="docs\vNEXT\" />
-    <None Include="..\..\docs\vNEXT\gdpr.md" Pack="true" PackagePath="docs\vNEXT\" />
-    <None Include="..\..\docs\vNEXT\adr\*.md" Pack="true" PackagePath="docs\vNEXT\adr\" />
+    <None Include="..\..\docs\concepts.md" Pack="true" PackagePath="docs\" />
+    <None Include="..\..\docs\gdpr.md" Pack="true" PackagePath="docs\" />
+    <None Include="..\..\docs\adr\*.md" Pack="true" PackagePath="docs\adr\" />
   </ItemGroup>
 
   <ItemGroup>

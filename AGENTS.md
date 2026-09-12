@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This repository contains `Papuma.Kernel`, a small .NET 10 library for a PostgreSQL-based, document-sourced application kernel (documents as the source of truth, derived change feed, privacy policies — see `docs/vNEXT/architecture.md`). Requires PostgreSQL ≥ 18; integration tests run against a real PostgreSQL 18 container (Testcontainers).
+This repository contains `Papuma.Kernel`, a small .NET 10 library for a PostgreSQL-based, document-sourced application kernel (documents as the source of truth, derived change feed, privacy policies — see `docs/architecture.md`). Requires PostgreSQL ≥ 18; integration tests run against a real PostgreSQL 18 container (Testcontainers).
 
 This document defines the working rules for GitHub Copilot and other agents in this workspace.
 
@@ -53,7 +53,8 @@ This document defines the working rules for GitHub Copilot and other agents in t
 
 ## Repository Conventions
 
-- Production code lives under `src/Papuma.Kernel`.
-- Tests live under `tests/Papuma.Kernel.Tests`.
-- Architecture and implementation documentation lives under `docs/`.
+- Production code lives under `src/` (`Papuma.Kernel`, `.Local`, `.Core`, `.AspNetCore`, `.Mcp`, `.FSharp`).
+- Tests live under `tests/`, mirroring the project they cover.
+- Documentation lives under `docs/` — [`docs/README.md`](docs/README.md) is the map.
+  `docs/legacy/` is frozen pre-1.0 material; never cite it as current.
 - Changes should remain compatible with the repository's existing style.

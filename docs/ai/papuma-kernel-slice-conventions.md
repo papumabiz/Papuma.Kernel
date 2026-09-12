@@ -1,7 +1,7 @@
 # Papuma.Kernel — Slice Conventions (for humans, agents and generators)
 
 Status: convention spec (2026-06-13). Companion to
-[event-modeling-slices.md](../vNEXT/recipes/event-modeling-slices.md) (the why)
+[event-modeling-slices.md](../recipes/event-modeling-slices.md) (the why)
 and the [playbook](papuma-kernel-playbook.md) (the rules). This document is the
 **canonical shape of each slice type** — precise enough to drive a code generator
 or guide an AI agent, and explicit about what is *invariant* (the generator
@@ -118,7 +118,7 @@ a task document instead, §18), and `Name` is the checkpoint identity.
 ## Translation slice (integration edge)
 
 External input → a write or an `AppendAsync` fact; outbound → a bridge handler
-publishing to a bus (the [NATS bridge](../vNEXT/recipes/nats-bridge.md)).
+publishing to a bus (the [NATS bridge](../recipes/nats-bridge.md)).
 Inbound is a command slice whose DTO comes from the external contract; outbound
 is an automation slice whose action is a publish.
 
@@ -212,7 +212,7 @@ Registration/Test stays the same anatomy across both languages. Only the
 concrete syntax changes, and in exactly one place (Patch) it changes because
 F# lacks a C# compiler feature, not because the kernel behaves differently.
 See [Papuma.Kernel.FSharp](../../src/Papuma.Kernel.FSharp/README.md) and
-[concepts.md §29](../vNEXT/concepts.md#29-f-as-a-facade-not-a-rewrite--and-why-the-wire-format-stays-closed)
+[concepts.md §29](../concepts.md#29-f-as-a-facade-not-a-rewrite--and-why-the-wire-format-stays-closed)
 for the reasoning; this section is the slice-shape translation only.
 
 One genuine improvement, not just a translation: the **Decider fits F# better

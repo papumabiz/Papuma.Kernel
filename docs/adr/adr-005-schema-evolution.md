@@ -8,9 +8,9 @@ Accepted (2026-06-11)
 
 When the C# class defines the truth but the database holds JSONB documents from
 earlier class revisions, exactly the migration problem arises — without a concept
-— that vNEXT is fleeing from: renamed properties, changed types, restructured
+— that Papuma Kernel is fleeing from: renamed properties, changed types, restructured
 nesting break deserialization silently or loudly. This is the best-known pain
-point of document stores (cf. Marten upcasting). The original vNEXT discussion had
+point of document stores (cf. Marten upcasting). The original design discussion had
 no answer for it — hence this day-one ADR.
 
 ## Decision
@@ -65,7 +65,7 @@ no answer for it — hence this day-one ADR.
 Protobuf was evaluated as the evolution mechanism and rejected:
 
 - **Opaque blob instead of JSONB**: Protobuf storage (`bytea`) loses everything
-  vNEXT stands on — expression indexes (ADR-006), SQL-inspectable documents,
+  Papuma Kernel stands on — expression indexes (ADR-006), SQL-inspectable documents,
   queryable diffs, policies on JSON paths (ADR-007).
 - **Tolerance instead of transformation**: Protobuf's model (field numbers,
   preserving unknown fields) prevents read errors but cannot establish semantics —

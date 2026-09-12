@@ -28,13 +28,13 @@ With a central Postgres and clients that always write through the kernel
 synchronously, conflict handling is **already fully solved** by the existing
 design, with nothing left to build:
 
-- [ADR-003](../vNEXT/adr/adr-003-write-path-concurrency.md): every write carries
+- [ADR-003](../adr/adr-003-write-path-concurrency.md): every write carries
   `expectedVersion`; a concurrent write loses the race and gets a typed
   `ConcurrencyException`. Lost updates are structurally impossible.
-- [ADR-012](../vNEXT/adr/adr-012-partial-updates.md): `Patch` gives explicit,
+- [ADR-012](../adr/adr-012-partial-updates.md): `Patch` gives explicit,
   deliberate field-level last-writer-wins for the common case of two users
   touching different fields of the same document — not a conflict, by design.
-- [ADR-010](../vNEXT/adr/adr-010-feed-consumption.md): the change feed is
+- [ADR-010](../adr/adr-010-feed-consumption.md): the change feed is
   gapless and strictly ordered by transaction commit order. By the time a
   `ChangeRecord` exists, whatever conflict could have happened at write time
   has already been resolved — the feed is **linearized history**, not a set of
@@ -46,7 +46,7 @@ explicitly:
 > **A projection consumer (NATS, search index, cache) never sees a conflict,
 > because none survives to the feed.** Conflicts are resolved once, at the
 > `Save`/`Patch` call, inside the transaction that produces the ChangeRecord.
-> Everything downstream — including the [NATS bridge](../vNEXT/recipes/nats-bridge.md)
+> Everything downstream — including the [NATS bridge](../recipes/nats-bridge.md)
 > — consumes an already-decided, totally ordered stream.
 
 This is the load-bearing fact for the rest of the document: **the two
@@ -81,10 +81,10 @@ Nothing here needs a kernel change — every primitive already exists:
 | Need | Existing primitive |
 |---|---|
 | "What version did I last know?" | `version` returned by every `Save`/`Patch` |
-| Attribute a change to a device/session | `actor_id` ([ADR-017](../vNEXT/adr/adr-017-actor-id-column.md)) |
+| Attribute a change to a device/session | `actor_id` ([ADR-017](../adr/adr-017-actor-id-column.md)) |
 | Prevent double-apply on retry | `IdempotencyKey` on `Save`/`Patch` |
 | Diff base vs. mine vs. theirs | `old_data`/`new_data` on every `ChangeRecord` |
-| Non-conflicting field edits | `Patch` field-level LWW ([ADR-012](../vNEXT/adr/adr-012-partial-updates.md)) |
+| Non-conflicting field edits | `Patch` field-level LWW ([ADR-012](../adr/adr-012-partial-updates.md)) |
 | Record how a conflict was resolved, without inventing a new record kind | `ChangeWriter.AppendEventAsync` (`kind = "Event"`) |
 
 ### 2.3 Sketch: local outbox + replay
@@ -136,7 +136,7 @@ UIs").
 ### 2.5 What would need to be built
 
 One additive extension package — same shape as the existing
-[ChangeFeed DSL](../design/change-feed-architecture.md), i.e. a new project
+[ChangeFeed DSL](../legacy/change-feed-architecture.md), i.e. a new project
 referencing `Papuma.Kernel`, touching nothing inside it:
 
 - Local outbox storage on the desktop client (not a kernel concern).
@@ -168,8 +168,8 @@ Two users on two machines, both connected, editing the same tenant's data:
 whichever `Save`/`Patch` commits first wins the version race at the database;
 the second either fails typed (`Save`) or serializes cleanly (`Patch`,
 disjoint fields). Only a *resolved* state ever becomes a `ChangeRecord`. The
-[NATS bridge](../vNEXT/recipes/nats-bridge.md) and every other
-[external read model](../vNEXT/recipes/external-read-models.md) consume that
+[NATS bridge](../recipes/nats-bridge.md) and every other
+[external read model](../recipes/external-read-models.md) consume that
 resolved, ordered stream — there is nothing left for them to reconcile beyond
 the at-least-once/out-of-order handling those recipes already document
 (version-guarded upsert, idempotent delete).

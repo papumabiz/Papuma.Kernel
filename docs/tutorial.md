@@ -361,12 +361,12 @@ You now know the core loop: **document → session/commit → derived feed →
 handler**, with versioning and privacy built in. Pick your direction:
 
 - **Breadth — every feature as running code.** The
-  [shop-minimal-api sample](../../samples/shop-minimal-api) extends exactly this
+  [shop-minimal-api sample](../samples/shop-minimal-api) extends exactly this
   loop with approval workflows, saga compensation, a bounded counter that cannot
   oversell, realtime UI push, the MCP endpoint and the dashboard. Pair it with
   the [recipes](recipes/).
 - **An architecture to build *this* way.** If you like vertical slices and Event
-  Modeling (Dymitruk/Dilger), the [event-modeled-slices sample](../../samples/event-modeled-slices)
+  Modeling (Dymitruk/Dilger), the [event-modeled-slices sample](../samples/event-modeled-slices)
   and the [slice recipe](recipes/event-modeling-slices.md) show the shape — one
   Command/View/Automation slice each, with infrastructure-free tests. Entirely
   optional; the kernel does not require it.

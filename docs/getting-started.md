@@ -1,4 +1,4 @@
-# Papuma vNEXT — Getting Started
+# Papuma Kernel — Getting Started
 
 Status: verified against the implemented API (2026-06-11) ·
 Prerequisite: **PostgreSQL ≥ 18** ([ADR-001](adr/adr-001-postgresql-18-only.md))
@@ -132,4 +132,4 @@ app.UseScopeResolution();   // tenant middleware (implement IScopeResolver)
 
 Further reading: [recipe: causation tracking](recipes/causation-tracking.md) ·
 [recipe: realtime UI notifications](recipes/realtime-ui-notifications.md) ·
-[implementation plan](implementation-plan.md) · ADRs in [adr/](adr/)
+ADRs in [adr/](adr/)

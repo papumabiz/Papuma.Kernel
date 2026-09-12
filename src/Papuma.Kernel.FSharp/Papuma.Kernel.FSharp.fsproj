@@ -24,7 +24,7 @@
     <None Include="..\..\docs\ai\papuma-kernel-playbook.md" Pack="true" PackagePath="docs\ai\" />
     <None Include="..\..\docs\ai\papuma-kernel-agents-snippet.md" Pack="true" PackagePath="docs\ai\" />
     <None Include="..\..\docs\ai\papuma-kernel-slice-conventions.md" Pack="true" PackagePath="docs\ai\" />
-    <None Include="..\..\docs\vNEXT\concepts.md" Pack="true" PackagePath="docs\vNEXT\" />
+    <None Include="..\..\docs\concepts.md" Pack="true" PackagePath="docs\" />
   </ItemGroup>
 
   <ItemGroup>

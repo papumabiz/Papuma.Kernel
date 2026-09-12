@@ -39,7 +39,7 @@
   support discriminated-union or `option` fields on document types — the
   kernel's JSON serializer config stays fixed on purpose (one deterministic
   wire format across every language and process); see
-  `docs/vNEXT/concepts.md` §29 for the full reasoning and the model-at-the-
+  `docs/concepts.md` §29 for the full reasoning and the model-at-the-
   boundary alternative.
 - **New sample: `samples/fsharp-local-todo`** — the first sample against
   `Papuma.Kernel.Local` (the other three are Postgres-only), a minimal F#
@@ -121,16 +121,16 @@
 - **REUSE: added `LICENSES/MIT.txt`** with the full license text alongside the
   SPDX headers.
 - **Docs** (shipped inside the package under `docs/`): added a learning-oriented
-  [tutorial](docs/vNEXT/tutorial.md) (empty folder → feed-driven read model,
+  [tutorial](docs/tutorial.md) (empty folder → feed-driven read model,
   verified end-to-end against PostgreSQL 18); the slice conventions now document
   registration co-located with each slice; modernized the root README and
   refreshed the factsheet.
 
-## 1.0.0 (2026-06-12) — the vNEXT reboot
+## 1.0.0 (2026-06-12) — the 1.0 reboot
 
 **Complete rewrite. No migration path from 0.x — this is a different kernel under the
 same name.** The 0.x line (relational tables + outbox + explicitly raised events) is
-removed; vNEXT is document-sourced CQRS:
+removed; 1.0 is document-sourced CQRS:
 
 - **Documents are the source of truth** (JSONB), the change feed is derived
   automatically as a reversible field diff per write — no ORM, no triggers, no
@@ -154,9 +154,9 @@ removed; vNEXT is document-sourced CQRS:
 - **Bootstrap**: `services.AddPapumaKernel(...)` hosts schema setup, feed workers and
   retention; multi-tenancy (scope predicates + RLS) carried over from 0.x.
 
-Docs: `docs/vNEXT/` (architecture, 14 ADRs, concepts, getting started, recipes).
+Docs: `docs/` (architecture, 14 ADRs, concepts, getting started, recipes).
 
 ## 0.0.1-legacy
 
 Final release of the v1 kernel (PostgreSQL event feed, outbox, projections,
-GDPR redaction). Superseded by the vNEXT reboot.
+GDPR redaction). Superseded by the 1.0 reboot.

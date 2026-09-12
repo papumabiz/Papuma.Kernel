@@ -8,10 +8,10 @@ Accepted (2026-06-11)
 
 Because the kernel knows the C# model (types, properties, attributes), it can
 apply privacy rules to the change feed automatically — before personal data ever
-reaches an immutable feed. That is vNEXT's unique selling point over outbox and
+reaches an immutable feed. That is Papuma Kernel's unique selling point over outbox and
 event-sourcing systems, which this problem catches up with painfully years later.
 
-The vNEXT discussion ended at "fluent configuration only" (because policies are
+The design discussion ended at "fluent configuration only" (because policies are
 organization-dependent). Against that speaks: the model is the place of truth —
 whoever reads the class should see that `Email` is sensitive.
 

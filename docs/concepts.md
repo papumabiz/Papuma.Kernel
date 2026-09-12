@@ -1,7 +1,7 @@
-# Papuma vNEXT — Concepts Explained
+# Papuma Kernel — Concepts Explained
 
 Status: living document (started 2026-06-11) ·
-[Deutsche Fassung (eingefroren, 2026-06-12)](concepts.de.md)
+[Deutsche Fassung (eingefroren, 2026-06-12)](legacy/concepts.de.md)
 
 The ADRs record *decisions* — this document explains the *mechanisms behind them*,
 with the examples and lines of thought from the design and implementation phase.
@@ -108,7 +108,7 @@ still arrives within milliseconds.
 
 When a handler throws at seq 105, there are two schools: *keep running and catch
 up on 105 later* (maximum throughput) or *stop until 105 is resolved* (strict
-order). vNEXT stops — the checkpoint stays before 105, retry with exponential
+order). Papuma Kernel stops — the checkpoint stays before 105, retry with exponential
 backoff.
 
 Why? Because handlers should be *allowed to rely on* the ordering: a SQL
@@ -202,7 +202,7 @@ becomes huge and semantically misleading ("roles[5] changed", although something
 was merely inserted). Identity-based diffs (LCS, move detection) solve that, but
 cost exactly the complexity that makes Apply/Reverse error-prone.
 
-vNEXT chooses the boring, provably correct variant: **if arrays differ, there is
+Papuma Kernel chooses the boring, provably correct variant: **if arrays differ, there is
 one entry with the full old and new array.** Reversible without special cases,
 projection-friendly ("roles changed"), and policies apply to exactly one path.
 Element granularity remains a later optimization *behind* the same wire format.
@@ -499,8 +499,8 @@ then simply cannot be built. (A migration lint gate flagging `CREATE VIEW` over
 
 For AI coding agents working in a *consumer* project (an app that uses the
 kernel), this rule is part of the copy-paste block in the
-[AGENTS.md snippet](../ai/papuma-kernel-agents-snippet.md) and the
-[playbook](../ai/papuma-kernel-playbook.md) — so the agent treats a projection as
+[AGENTS.md snippet](ai/papuma-kernel-agents-snippet.md) and the
+[playbook](ai/papuma-kernel-playbook.md) — so the agent treats a projection as
 the default and a view as the justified exception.
 
 ---
@@ -770,7 +770,7 @@ are two consumption paths, with a clear decision rule.
 replicates the poll loop in ~50 lines and may even keep its position in the
 same `papuma.checkpoint` table (`handler_name` is just text — pick a unique
 one). Runnable Python and Go clients live in
-[samples/polyglot-consumers](../../samples/polyglot-consumers/README.md),
+[samples/polyglot-consumers](../samples/polyglot-consumers/README.md),
 verified against the real feed. Three things such a consumer must take
 seriously:
 
@@ -1193,7 +1193,7 @@ projections and audit trails remain complete.
 
 ## 29. F# as a facade, not a rewrite — and why the wire format stays closed
 
-→ [src/Papuma.Kernel.FSharp](../../src/Papuma.Kernel.FSharp) (prototype),
+→ [src/Papuma.Kernel.FSharp](../src/Papuma.Kernel.FSharp) (prototype),
 §21 (polyglot consumers, the same "one deterministic wire format" argument)
 
 The kernel is authored in C#, and stays that way — not by default, by choice.
@@ -1233,7 +1233,7 @@ on the exception-throwing contract — ASP.NET Core middleware, the MCP server,
 every existing test) see zero change. One extra wrinkle: `DocumentSession`
 (Postgres) and `SqliteDocumentSession` (SQLite) are unrelated `sealed` classes
 that happen to have identical method shapes ("mirrors the shape", see
-[local-kernel-sqlite-sibling.md](../analyses/local-kernel-sqlite-sibling.md)) —
+[local-kernel-sqlite-sibling.md](analyses/local-kernel-sqlite-sibling.md)) —
 no common interface to write the wrapper against. Statically resolved type
 parameters (SRTP, F#'s structural/duck-typed generics) cover both kernels with
 one implementation instead of two near-duplicates.

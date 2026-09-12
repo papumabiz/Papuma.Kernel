@@ -86,7 +86,7 @@ Commodity hardware (i7, local PostgreSQL 18 container). The probes are in
 | Integration tests against real PostgreSQL 18 | 167, passing |
 
 Known scaling limits are documented alongside the metric that detects each and
-the intended mitigation (`docs/vNEXT/concepts.md §14`) rather than left implicit.
+the intended mitigation (`docs/concepts.md §14`) rather than left implicit.
 
 ---
 
@@ -245,5 +245,5 @@ See §6 — same statement, not repeated with different numbers.
 `Papuma.Kernel.AspNetCore` · `Papuma.Kernel.Mcp`
 **Documentation:** shipped in the package under `docs/` and at
 [github.com/papumabiz/Papuma.Kernel](https://github.com/papumabiz/Papuma.Kernel);
-start with `docs/vNEXT/getting-started.md` (Postgres) or
+start with `docs/getting-started.md` (Postgres) or
 `docs/analyses/local-kernel-sqlite-sibling.md` (SQLite).

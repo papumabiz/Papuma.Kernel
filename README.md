@@ -34,7 +34,7 @@ is derived from it (never the other way around).
   database server. See [the design rationale](docs/analyses/local-kernel-sqlite-sibling.md)
   for what's shared and what's deliberately different per engine.
 
-> **vNEXT (1.0)** — rebuilt from scratch on PostgreSQL ≥ 18; no migration path
+> **The 1.0 reboot** — rebuilt from scratch on PostgreSQL ≥ 18; no migration path
 > from 0.x (see [CHANGELOG](CHANGELOG.md)). The marketing one-pager with diagrams
 > and measured numbers lives in [docs/factsheet.md](docs/factsheet.md).
 
@@ -84,7 +84,7 @@ dotnet build Papuma.Kernel.slnx
 dotnet test  Papuma.Kernel.slnx   # Postgres suite needs Docker/Podman; SQLite suite needs nothing extra
 ```
 
-Learn by building: [docs/vNEXT/tutorial.md](docs/vNEXT/tutorial.md) · terse API tour: [docs/vNEXT/getting-started.md](docs/vNEXT/getting-started.md).
+Learn by building: [docs/tutorial.md](docs/tutorial.md) · terse API tour: [docs/getting-started.md](docs/getting-started.md).
 
 ## What ships in the box
 
@@ -98,9 +98,9 @@ implementations pretending to agree):
 - **Privacy by construction** — field policies (`Redact`/`Hash`/`Reference`/
   `DoNotTrack`) applied *inside* the write transaction, so sensitive values never
   reach the feed, the logs, the traces, or AI consumers. The same policies
-  project onto masked reads ([ADR-016](docs/vNEXT/adr/adr-016-policy-projected-reads.md)).
+  project onto masked reads ([ADR-016](docs/adr/adr-016-policy-projected-reads.md)).
 - **GDPR tooling** — Art.-30 data inventory from the metamodel, Art.-15/20 subject
-  export, history redaction with a mandatory audit trail ([gdpr.md](docs/vNEXT/gdpr.md)).
+  export, history redaction with a mandatory audit trail ([gdpr.md](docs/gdpr.md)).
 - **Processing engine** — strict per-handler ordering, persisted checkpoints,
   retry/backoff, poison handling, one-call rebuild.
 - **Event log** — first-class facts (`UserLoggedIn`) beside state changes, same
@@ -163,24 +163,25 @@ The first three samples run against `Papuma.Kernel` (Postgres);
 
 ## Recipes
 
-Pattern guides on kernel primitives ([docs/vNEXT/recipes](docs/vNEXT/recipes)):
-[workflow-saga](docs/vNEXT/recipes/workflow-saga.md) ·
-[realtime-ui-notifications](docs/vNEXT/recipes/realtime-ui-notifications.md) ·
-[external-read-models](docs/vNEXT/recipes/external-read-models.md) (search/vector/cache) ·
-[nats-bridge](docs/vNEXT/recipes/nats-bridge.md) ·
-[field-level-encryption](docs/vNEXT/recipes/field-level-encryption.md) ·
-[event-modeling-slices](docs/vNEXT/recipes/event-modeling-slices.md) ·
-[ai-consumers](docs/vNEXT/recipes/ai-consumers.md).
+Pattern guides on kernel primitives ([docs/recipes](docs/recipes)):
+[workflow-saga](docs/recipes/workflow-saga.md) ·
+[realtime-ui-notifications](docs/recipes/realtime-ui-notifications.md) ·
+[external-read-models](docs/recipes/external-read-models.md) (search/vector/cache) ·
+[nats-bridge](docs/recipes/nats-bridge.md) ·
+[field-level-encryption](docs/recipes/field-level-encryption.md) ·
+[event-modeling-slices](docs/recipes/event-modeling-slices.md) ·
+[ai-consumers](docs/recipes/ai-consumers.md).
 
 ## Documentation map
 
-- **Start:** [tutorial.md](docs/vNEXT/tutorial.md) — build one app end to end (guided) · [getting-started.md](docs/vNEXT/getting-started.md) — the five-minute API tour · marketing one-pager: [factsheet.md](docs/factsheet.md)
-- **Architecture:** [architecture.md](docs/vNEXT/architecture.md) · the *why* behind every decision: [concepts.md](docs/vNEXT/concepts.md)
-- **Decisions:** [16 ADRs](docs/vNEXT/adr) — each a single, dated, reversible choice
+- **Start:** [tutorial.md](docs/tutorial.md) — build one app end to end (guided) · [getting-started.md](docs/getting-started.md) — the five-minute API tour · marketing one-pager: [factsheet.md](docs/factsheet.md)
+- **Architecture:** [architecture.md](docs/architecture.md) · the *why* behind every decision: [concepts.md](docs/concepts.md)
+- **Decisions:** [18 ADRs](docs/adr) — each a single, dated, reversible choice
 - **`Papuma.Kernel.Local` (SQLite):** [design rationale and what's different per engine](docs/analyses/local-kernel-sqlite-sibling.md) — no dedicated getting-started yet; the write/read API mirrors `Papuma.Kernel`'s (`SaveAsync`/`LoadAsync`/`PatchAsync`/… on `SqliteDocumentSession`, `AddPapumaKernelLocal` for hosting)
-- **Cross-language:** the [feed wire format](docs/vNEXT/feed-wire-format.md) consumers rely on
+- **Cross-language:** the [feed wire format](docs/feed-wire-format.md) consumers rely on
 - **Agents:** [llms.txt](llms.txt) and `docs/ai/` are shipped inside the NuGet package
-- Archived 0.x/v1 docs live under `docs/v1`.
+- **Recipes:** [pattern guides](docs/recipes) on kernel primitives
+- Frozen 0.x/v1 material (German, unmaintained) lives under [docs/legacy](docs/legacy).
 
 ## Maturity, stated plainly
 

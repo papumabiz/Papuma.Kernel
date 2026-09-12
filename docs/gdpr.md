@@ -1,4 +1,4 @@
-# Papuma vNEXT — GDPR Guide
+# Papuma Kernel — GDPR Guide
 
 Status: verified against the implemented API (phase 12, 2026-06-12)
 

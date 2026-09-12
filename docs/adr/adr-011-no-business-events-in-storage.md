@@ -9,7 +9,7 @@ Accepted (2026-06-11)
 Is `Status: Pending → Paid` an `Update` or an `OrderPaid`? Both — but on different
 levels. If the storage layer produced domain events, the data model would have to
 anticipate every domain interpretation, and the kernel would be back at the
-event-sourcing mandate vNEXT is trying to avoid.
+event-sourcing mandate Papuma Kernel is trying to avoid.
 
 v1 already separated `change_feed` (technical) from `business_event_log` (domain)
 — this separation remains, but moves entirely out of the kernel.

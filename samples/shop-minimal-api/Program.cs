@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
 // The Papuma.Kernel sample shop — every kernel concept as running code.
-// Walkthrough in README.md; the workflow story in docs/vNEXT/recipes/workflow-saga.md.
+// Walkthrough in README.md; the workflow story in docs/recipes/workflow-saga.md.
 
 using NATS.Client.Core;
 using NATS.Client.JetStream;
