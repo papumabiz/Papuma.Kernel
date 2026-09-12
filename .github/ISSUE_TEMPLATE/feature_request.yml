@@ -1,0 +1,35 @@
+name: Feature request
+description: Propose behaviour that does not exist yet
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Papuma Kernel is deliberately small — please read
+        [what it deliberately is not](../../blob/master/README.md#what-it-deliberately-is-not)
+        and the [ADRs](../../tree/master/docs/adr) first. A proposal that reverses an
+        ADR is welcome, but argue against that ADR's reasoning.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what stops you today?
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you do instead today
+      description: Projection, SQL view, application code — and why that is not enough.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed shape
+      description: Roughly what the API or behaviour would look like.
+  - type: input
+    id: adr
+    attributes:
+      label: Related ADR, if any
+      placeholder: "adr-006-keys-and-constraints"

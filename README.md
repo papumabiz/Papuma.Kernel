@@ -218,6 +218,13 @@ way.
 - **Not a workflow/BPMN engine** — durable state machines and timers are
   documented patterns on kernel primitives (with running sample code).
 
+## Contributing
+
+Issues and pull requests are welcome — start with [CONTRIBUTING.md](CONTRIBUTING.md);
+it covers the build prerequisites (Docker for the PostgreSQL suite), the conventions,
+and when a change needs an ADR. Security reports go through
+[SECURITY.md](SECURITY.md), never a public issue.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

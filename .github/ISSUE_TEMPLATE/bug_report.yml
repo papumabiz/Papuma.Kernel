@@ -1,0 +1,45 @@
+name: Bug report
+description: Something behaves differently than documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a suspected **security** issue, do not use this form —
+        see [SECURITY.md](../../blob/master/SECURITY.md).
+  - type: input
+    id: package
+    attributes:
+      label: Package and version
+      placeholder: "Papuma.Kernel 1.2.1 / Papuma.Kernel.Local 1.2.1"
+    validations:
+      required: true
+  - type: input
+    id: engine
+    attributes:
+      label: Database engine and version
+      placeholder: "PostgreSQL 18.1 / SQLite bundled"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: Link the doc or ADR that says so, if there is one.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: Include the exception type and message, not just the text.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Smallest model + calls that show it. A failing test is ideal.
+      render: csharp
+    validations:
+      required: true

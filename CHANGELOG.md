@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+- **Docs reorganised for the public repository.** The `vNEXT` working title is gone:
+  `docs/vNEXT/*` moved up to `docs/` (guides flat, `docs/adr/`, `docs/recipes/`), and
+  every frozen pre-1.0 document — the German v1 implementation set, the three v1-era
+  ADRs, the v1 change-feed DSL spec, the German `concepts.de.md`, the v1 assessment and
+  polling analysis, and the 13-phase implementation plan — now lives under
+  `docs/legacy/`, which states plainly that it is not maintained.
+  [`docs/README.md`](docs/README.md) is the new map. **Links into `docs/vNEXT/` or
+  `docs/v1/` no longer resolve**; the packaged doc set moved the same way
+  (`docs/vNEXT/concepts.md` → `docs/concepts.md` inside the NuGet packages).
+- **Packaging**: packages now carry the project icon, a README, Source Link metadata
+  (`PublishRepositoryUrl`, `EmbedUntrackedSources`, deterministic CI builds), XML
+  documentation for IntelliSense, and a `.snupkg` symbol package.
+- **Dependencies**: `Testcontainers.PostgreSql` 4.1.0 → 4.15.0, which drops the
+  transitively vulnerable `SSH.NET` 2024.1.0 (GHSA-q939-rpr3-3284). Test-only.
+- **Build is warning-free again**: resolved XML `cref` references that broke once
+  documentation generation was enabled, and the obsolete `PostgreSqlBuilder()` constructor.
+- **Project files**: added `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`,
+  issue/PR templates, Dependabot, `.editorconfig` and `.gitattributes`. The internal
+  security/architecture review pair was removed from the repository root.
+
 ## 1.2.1 (2026-09-07)
 
 - **Docs**: closed the same gap for F# that opened for `Papuma.Kernel.Local`
