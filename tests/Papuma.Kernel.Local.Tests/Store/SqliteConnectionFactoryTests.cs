@@ -8,7 +8,7 @@ using Papuma.Kernel.Store;
 namespace Papuma.Kernel.Local.Tests.Store;
 
 /// <summary>
-/// Verifies <see cref="SqliteConnectionFactory"/> actually applies WAL mode and a busy
+/// Verifies <see cref="Papuma.Kernel.Store.SqliteConnectionFactory"/> actually applies WAL mode and a busy
 /// timeout — empirically, not assumed, matching this project's spike-test discipline
 /// (<see cref="SqliteSpikeTests"/>).
 /// </summary>

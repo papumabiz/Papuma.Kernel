@@ -1,0 +1,7 @@
+<Project>
+  <!-- The package icon has to be packed by every packable project; kept here rather than
+       in Directory.Build.props because IsPackable is only known after the project body. -->
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)assets/logo.png" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+</Project>

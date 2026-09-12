@@ -18,8 +18,7 @@ public sealed class PostgresFixture : IAsyncLifetime
     public const string AppRoleName = "papuma_app";
     private const string AppRolePassword = "papuma_app_pw";
 
-    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder()
-        .WithImage("postgres:18-alpine")
+    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:18-alpine")
         .Build();
 
     private NpgsqlDataSource? _dataSource;

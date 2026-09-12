@@ -5,7 +5,12 @@
     <PackageId>Papuma.Kernel.Mcp</PackageId>
     <Description>Model Context Protocol (MCP) server tools for Papuma.Kernel — exposes model introspection, the Art.-30 data inventory, feed lag, failure diagnostics and document history to AI agents. Thin, read-only-by-default wrapper over the kernel's diagnostics APIs; the kernel itself stays AI-free.</Description>
     <PackageTags>mcp;model-context-protocol;ai;diagnostics;postgresql;documents;cqrs</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Papuma.Kernel\Papuma.Kernel.csproj" />

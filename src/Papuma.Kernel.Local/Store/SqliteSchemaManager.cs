@@ -12,8 +12,8 @@ namespace Papuma.Kernel.Store;
 
 /// <summary>
 /// Creates and maintains the SQLite kernel database schema — the
-/// <see cref="Papuma.Kernel.Store.SchemaManager"/> (Postgres) counterpart for
-/// <see cref="Papuma.Kernel.Local"/>. No server-version check: unlike a Postgres server,
+/// <c>Papuma.Kernel.Store.SchemaManager</c> (Postgres) counterpart for
+/// <c>Papuma.Kernel.Local</c>. No server-version check: unlike a Postgres server,
 /// the SQLite engine version is bundled with the NuGet package, not a deployment variable.
 /// </summary>
 public static class SqliteSchemaManager

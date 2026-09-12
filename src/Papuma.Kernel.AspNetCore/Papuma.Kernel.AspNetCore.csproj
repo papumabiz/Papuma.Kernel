@@ -5,7 +5,12 @@
     <PackageId>Papuma.Kernel.AspNetCore</PackageId>
     <Description>Optional ASP.NET Core integration for Papuma.Kernel — tenant scope resolution middleware, change feed lag health checks, and an embedded first-look dashboard (lag, failures, throughput).</Description>
     <PackageTags>aspnetcore;multi-tenancy;health-checks;change-feed;dashboard</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Papuma.Kernel.Tests" />

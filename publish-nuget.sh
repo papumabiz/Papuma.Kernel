@@ -1,52 +1,56 @@
 #!/usr/bin/env bash
 # =============================================================================
 # publish-nuget.sh
-# Baut alle NuGet-Pakete unter src/*/*.csproj|*.fsproj dieses Repos und lädt
-# sie in die GitHub-Packages-NuGet-Registry des Repo-Owners hoch. Generisch
-# gehalten -> unverändert in jedem Repo mit gleichem Layout
-# (src/<PackageName>/<PackageName>.csproj bzw. .fsproj) nutzbar, Owner/Repo
-# werden automatisch aus dem Git-Remote ermittelt.
+# Packs every NuGet package under src/*/*.csproj|*.fsproj of this repository and
+# uploads them to the repository owner's GitHub Packages NuGet registry. Kept
+# generic -> usable unchanged in any repository with the same layout
+# (src/<PackageName>/<PackageName>.csproj or .fsproj); the owner is derived from
+# the git remote.
 #
-# Verwendung:
+# NOTE: this publishes to GitHub Packages, which requires a token even for read
+# access. Public releases belong on nuget.org — decide the feed before using
+# this for a public version.
+#
+# Usage:
 #   chmod +x publish-nuget.sh
 #   ./publish-nuget.sh
 #
-# Optionale Flags:
-#   --dry-run   Nur bauen, nicht hochladen
-#   --version X Versionsnummer überschreiben (z. B. --version 1.2.0)
+# Optional flags:
+#   --dry-run   Pack only, do not upload
+#   --version X Override the version number (e.g. --version 1.2.0)
 #
-# Umgebungsvariablen (optional; ohne sie wird automatisch ermittelt/nachgefragt):
-#   GITHUB_OWNER – GitHub-Organisation oder -Benutzer, unter dem die Pakete
-#                  landen. Default: aus dem "origin"-Remote geparst
-#                  (git@github.com:OWNER/REPO.git bzw. https://github.com/OWNER/REPO).
-#   GITHUB_TOKEN – GitHub Personal Access Token mit Scope "write:packages"
-#                  (classic PAT) bzw. Berechtigung "Packages: Read and write"
-#                  (fine-grained PAT). Default: `gh auth token`, falls die
-#                  GitHub-CLI installiert und eingeloggt ist.
+# Environment variables (optional; derived automatically when unset):
+#   GITHUB_OWNER – GitHub organisation or user the packages land under.
+#                  Default: parsed from the "origin" remote
+#                  (git@github.com:OWNER/REPO.git or https://github.com/OWNER/REPO).
+#   GITHUB_TOKEN – GitHub Personal Access Token with scope "write:packages"
+#                  (classic PAT) or permission "Packages: Read and write"
+#                  (fine-grained PAT). Default: `gh auth token`, if the GitHub
+#                  CLI is installed and logged in.
 #
-# Beispiel:
-#   ./publish-nuget.sh                      # Owner + Token automatisch ermitteln
+# Examples:
+#   ./publish-nuget.sh                      # derive owner + token automatically
 #   ./publish-nuget.sh --version 1.1.0
 #   ./publish-nuget.sh --dry-run
 #
-#   # Gegen einen anderen Owner veröffentlichen (z. B. Fork/anderes Konto):
+#   # Publish under a different owner (e.g. a fork / another account):
 #   GITHUB_OWNER=other-org ./publish-nuget.sh
 #
-# Hinweis: damit GitHub das Paket auf der richtigen Repo-Seite anzeigt, sollte
-# das/die .csproj/.fsproj (oder Directory.Build.props) ein <RepositoryUrl>
-# tragen, das auf dieses Repo zeigt.
+# Note: for GitHub to show the package on the right repository page, the
+# .csproj/.fsproj (or Directory.Build.props) needs a <RepositoryUrl> pointing at
+# this repository.
 # =============================================================================
 
 set -euo pipefail
 
-# ── Farben ────────────────────────────────────────────────────────────────────
+# ── Colors ────────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# ── Argumente parsen ──────────────────────────────────────────────────────────
+# ── Parse arguments ───────────────────────────────────────────────────────────
 DRY_RUN=false
 VERSION_OVERRIDE=""
 
@@ -61,16 +65,16 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     *)
-      echo -e "${RED}Unbekanntes Argument: $1${NC}"
+      echo -e "${RED}Unknown argument: $1${NC}"
       exit 1
       ;;
   esac
 done
 
-# ── GitHub Owner ermitteln ────────────────────────────────────────────────────
-# Aus dem "origin"-Remote geparst, falls nicht per Env-Var vorgegeben – so
-# funktioniert das Script unverändert in jedem GitHub-Repo, ohne einen Owner
-# hart zu kodieren. Deckt beide üblichen Remote-Formate ab:
+# ── Determine the GitHub owner ────────────────────────────────────────────────
+# Parsed from the "origin" remote unless given as an environment variable, so the
+# script works unchanged in any GitHub repository without hard-coding an owner.
+# Covers both common remote formats:
 #   git@github.com:OWNER/REPO.git
 #   https://github.com/OWNER/REPO(.git)
 if [ -z "${GITHUB_OWNER:-}" ]; then
@@ -78,20 +82,20 @@ if [ -z "${GITHUB_OWNER:-}" ]; then
   GITHUB_OWNER=$(echo "${ORIGIN_URL}" | sed -nE 's#.*github\.com[:/]+([^/]+)/.*#\1#p')
 fi
 
-# ── GitHub Token ermitteln ────────────────────────────────────────────────────
-# Fällt auf ein bereits eingeloggtes `gh` zurück, falls nicht per Env-Var
-# vorgegeben – erspart das manuelle Anlegen eines PATs im Regelfall.
+# ── Determine the GitHub token ────────────────────────────────────────────────
+# Falls back to an already logged-in `gh` when no environment variable is set,
+# which usually avoids having to create a PAT by hand.
 if [ -z "${GITHUB_TOKEN:-}" ] && command -v gh >/dev/null 2>&1; then
   GITHUB_TOKEN=$(gh auth token 2>/dev/null || true)
 fi
 
-# ── Konfiguration ─────────────────────────────────────────────────────────────
+# ── Configuration ─────────────────────────────────────────────────────────────
 
 OUTPUT_DIR="./nupkg"
 FEED_URL="https://nuget.pkg.github.com/${GITHUB_OWNER:-unknown}/index.json"
 
-# Anzeigename fürs Banner: Name der Solution-Datei (*.sln/*.slnx) im Repo-Root,
-# sonst Name des aktuellen Verzeichnisses.
+# Display name for the banner: name of the solution file (*.sln/*.slnx) in the
+# repository root, otherwise the name of the current directory.
 SOLUTION_FILE=$(find . -maxdepth 1 \( -name "*.sln" -o -name "*.slnx" \) | head -n1)
 if [ -n "$SOLUTION_FILE" ]; then
   REPO_NAME=$(basename "$SOLUTION_FILE")
@@ -100,16 +104,15 @@ else
   REPO_NAME=$(basename "$(pwd)")
 fi
 
-# Alle zu bauenden Projekte automatisch ermitteln: jedes Projekt unter
-# src/<Name>/<Name>.csproj|.fsproj, das nicht explizit IsPackable=false gesetzt
-# hat. .fsproj mit rein, damit F#-Pakete (z. B. eine .FSharp-Fassade neben dem
-# C#-Kern) genauso automatisch erfasst werden wie .csproj.
+# Discover every project to pack: each project under src/<Name>/<Name>.csproj|.fsproj
+# that does not explicitly set IsPackable=false. .fsproj is included so F# packages
+# (e.g. a .FSharp facade next to the C# core) are picked up as automatically as .csproj.
 #
-# Sortierung nach Länge des Projektordnernamens (dann alphabetisch): bei der
-# üblichen Namenskonvention (Core zuerst, dann Core.Adapter, z. B. ImagePro.Db
-# vor ImagePro.Db.MySql) kommt so automatisch der "Core" vor den Adaptern.
-# (Reines Sortieren der vollen Pfade würde hier falsch sortieren, weil '.' im
-# ASCII vor '/' kommt -> "ImagePro.Db.MySql/..." käme vor "ImagePro.Db/...".)
+# Sorted by the length of the project folder name (then alphabetically): with the usual
+# naming convention (core first, then core.adapter — e.g. ImagePro.Db before
+# ImagePro.Db.MySql) this puts the "core" ahead of its adapters. (Sorting the full paths
+# would sort wrongly, because '.' precedes '/' in ASCII, so "ImagePro.Db.MySql/..." would
+# come before "ImagePro.Db/...".)
 PROJECTS=()
 while IFS= read -r PROJ; do
   [ -z "$PROJ" ] && continue
@@ -125,21 +128,21 @@ done < <(
 )
 
 if [ "${#PROJECTS[@]}" -eq 0 ]; then
-  echo -e "${RED}Keine packbaren Projekte unter src/*/*.csproj|*.fsproj gefunden.${NC}"
+  echo -e "${RED}No packable projects found under src/*/*.csproj|*.fsproj.${NC}"
   exit 1
 fi
 
-# ── Pflicht-Umgebungsvariablen prüfen (nur wenn kein Dry-Run) ─────────────────
+# ── Check required environment variables (skipped on a dry run) ───────────────
 if [ "$DRY_RUN" = false ]; then
-  : "${GITHUB_OWNER:?Konnte den GitHub-Owner nicht aus dem 'origin'-Remote ermitteln. Bitte GITHUB_OWNER setzen, z. B. export GITHUB_OWNER=my-org}"
-  : "${GITHUB_TOKEN:?Bitte GITHUB_TOKEN setzen (PAT mit Scope write:packages) oder mit 'gh auth login' einloggen}"
+  : "${GITHUB_OWNER:?Could not derive the GitHub owner from the 'origin' remote. Please set GITHUB_OWNER, e.g. export GITHUB_OWNER=my-org}"
+  : "${GITHUB_TOKEN:?Please set GITHUB_TOKEN (PAT with scope write:packages) or log in with 'gh auth login'}"
 fi
 
-# ── Ausgabe-Verzeichnis vorbereiten ───────────────────────────────────────────
+# ── Prepare the output directory ──────────────────────────────────────────────
 rm -rf "${OUTPUT_DIR}"
 mkdir -p "${OUTPUT_DIR}"
 
-# Zeichnet eine Box mit zentriertem Titel, Breite passt sich der Titellänge an.
+# Draws a box with a centred title; the width follows the title length.
 print_box() {
   local title="$1"
   local inner_width=$((${#title} + 4))
@@ -155,17 +158,17 @@ print_box "${REPO_NAME} – NuGet Publish"
 echo ""
 
 if [ "$DRY_RUN" = true ]; then
-  echo -e "${YELLOW}  ⚠  DRY-RUN – Pakete werden gebaut, aber NICHT hochgeladen${NC}"
+  echo -e "${YELLOW}  ⚠  DRY RUN – packages are built but NOT uploaded${NC}"
   echo ""
 fi
 
 if [ -n "$VERSION_OVERRIDE" ]; then
-  echo -e "${YELLOW}  ⚠  Versionsüberschreibung: ${VERSION_OVERRIDE}${NC}"
+  echo -e "${YELLOW}  ⚠  Version override: ${VERSION_OVERRIDE}${NC}"
   echo ""
 fi
 
-# ── Schritt 1: Alle Pakete bauen ──────────────────────────────────────────────
-echo -e "${CYAN}==> Schritt 1: Pakete bauen${NC}"
+# ── Step 1: pack everything ───────────────────────────────────────────────────
+echo -e "${CYAN}==> Step 1: packing${NC}"
 echo ""
 
 PACK_ARGS=(
@@ -173,21 +176,21 @@ PACK_ARGS=(
   "--output" "${OUTPUT_DIR}"
 )
 
-# Versionsnummer überschreiben, falls angegeben
+# Override the version number when one was given
 if [ -n "$VERSION_OVERRIDE" ]; then
   PACK_ARGS+=("-p:Version=${VERSION_OVERRIDE}")
 fi
 
 for PROJECT in "${PROJECTS[@]}"; do
   PACKAGE_NAME=$(basename "$(dirname "${PROJECT}")")
-  echo -e "  ${CYAN}▶ Baue ${PACKAGE_NAME}…${NC}"
+  echo -e "  ${CYAN}▶ Packing ${PACKAGE_NAME}…${NC}"
   dotnet pack "${PROJECT}" "${PACK_ARGS[@]}"
-  echo -e "  ${GREEN}✓ ${PACKAGE_NAME} erfolgreich gebaut${NC}"
+  echo -e "  ${GREEN}✓ ${PACKAGE_NAME} packed${NC}"
   echo ""
 done
 
-# ── Erzeugte Pakete anzeigen ──────────────────────────────────────────────────
-echo -e "${CYAN}==> Erzeugte Pakete:${NC}"
+# ── Show the resulting packages ───────────────────────────────────────────────
+echo -e "${CYAN}==> Packages produced:${NC}"
 echo ""
 for NUPKG in "${OUTPUT_DIR}"/*.nupkg; do
   SIZE=$(du -sh "${NUPKG}" | cut -f1)
@@ -195,17 +198,17 @@ for NUPKG in "${OUTPUT_DIR}"/*.nupkg; do
 done
 echo ""
 
-# ── Schritt 2: Pakete hochladen ───────────────────────────────────────────────
+# ── Step 2: upload ────────────────────────────────────────────────────────────
 if [ "$DRY_RUN" = true ]; then
-  echo -e "${YELLOW}==> Dry-Run: Upload übersprungen.${NC}"
+  echo -e "${YELLOW}==> Dry run: upload skipped.${NC}"
   echo ""
-  echo -e "  Zum Hochladen ausführen:"
+  echo -e "  To upload, run:"
   echo -e "  ${CYAN}./publish-nuget.sh${NC}"
   echo ""
   exit 0
 fi
 
-echo -e "${CYAN}==> Schritt 2: Pakete in GitHub Packages hochladen${NC}"
+echo -e "${CYAN}==> Step 2: uploading to GitHub Packages${NC}"
 echo -e "    Owner: ${GITHUB_OWNER}"
 echo -e "    Feed:  ${FEED_URL}"
 echo ""
@@ -218,8 +221,8 @@ for NUPKG in "${OUTPUT_DIR}"/*.nupkg; do
   FILENAME=$(basename "${NUPKG}")
   echo -e "  ${CYAN}▶ Uploading: ${FILENAME}${NC}"
 
-  # Exit-Code NICHT wegwerfen (kein "|| true") -> echte Fehler (401/403/404/Netzwerk/…)
-  # müssen als Fehler erkannt werden, nicht als Erfolg durchgewunken werden.
+  # Do NOT discard the exit code (no "|| true") -> real failures (401/403/404/network/…)
+  # must be recognised as failures instead of being waved through as success.
   set +e
   OUTPUT=$(dotnet nuget push "${NUPKG}" \
     --source "${FEED_URL}" \
@@ -229,39 +232,39 @@ for NUPKG in "${OUTPUT_DIR}"/*.nupkg; do
   set -e
 
   if echo "${OUTPUT}" | grep -qi "already exists\|conflict\|409"; then
-    echo -e "  ${YELLOW}⚠  ${FILENAME} – bereits vorhanden, übersprungen${NC}"
+    echo -e "  ${YELLOW}⚠  ${FILENAME} – already present, skipped${NC}"
     SKIP_COUNT=$((SKIP_COUNT + 1))
   elif [ "$PUSH_EXIT_CODE" -eq 0 ]; then
-    echo -e "  ${GREEN}✓  ${FILENAME} – erfolgreich hochgeladen${NC}"
+    echo -e "  ${GREEN}✓  ${FILENAME} – uploaded${NC}"
     UPLOAD_COUNT=$((UPLOAD_COUNT + 1))
   else
-    echo -e "  ${RED}✗  ${FILENAME} – Upload fehlgeschlagen (Exit-Code ${PUSH_EXIT_CODE})${NC}"
+    echo -e "  ${RED}✗  ${FILENAME} – upload failed (exit code ${PUSH_EXIT_CODE})${NC}"
     echo -e "${RED}${OUTPUT}${NC}" | sed 's/^/    /'
     FAIL_COUNT=$((FAIL_COUNT + 1))
   fi
   echo ""
 done
 
-# ── Zusammenfassung ───────────────────────────────────────────────────────────
+# ── Summary ───────────────────────────────────────────────────────────────────
 if [ "$FAIL_COUNT" -eq 0 ]; then
   echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${GREEN}║  Fertig!                                                     ║${NC}"
+  echo -e "${GREEN}║  Done!                                                       ║${NC}"
   echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
 else
   echo -e "${RED}╔══════════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${RED}║  Fertig mit Fehlern!                                         ║${NC}"
+  echo -e "${RED}║  Done, with errors!                                          ║${NC}"
   echo -e "${RED}╚══════════════════════════════════════════════════════════════╝${NC}"
 fi
 echo ""
-echo -e "  Hochgeladen : ${GREEN}${UPLOAD_COUNT}${NC} Paket(e)"
-echo -e "  Übersprungen: ${YELLOW}${SKIP_COUNT}${NC} Paket(e) (bereits vorhanden)"
-echo -e "  Fehlgeschlagen: ${RED}${FAIL_COUNT}${NC} Paket(e)"
+echo -e "  Uploaded : ${GREEN}${UPLOAD_COUNT}${NC} package(s)"
+echo -e "  Skipped  : ${YELLOW}${SKIP_COUNT}${NC} package(s) (already present)"
+echo -e "  Failed   : ${RED}${FAIL_COUNT}${NC} package(s)"
 echo ""
-echo -e "  Pakete verfügbar unter:"
+echo -e "  Packages available at:"
 echo -e "  ${CYAN}https://github.com/${GITHUB_OWNER}?tab=packages${NC}"
 echo ""
-echo -e "  Einbinden in nuget.config (Lesezugriff braucht ebenfalls ein Token"
-echo -e "  mit Scope read:packages, GitHub Packages erlaubt keine anonymen Reads):"
+echo -e "  Consuming them from nuget.config (read access also needs a token with"
+echo -e "  scope read:packages — GitHub Packages allows no anonymous reads):"
 echo -e "  ${CYAN}<packageSources>"
 echo -e "    <add key=\"github\" value=\"${FEED_URL}\" />"
 echo -e "  </packageSources>"

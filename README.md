@@ -3,10 +3,11 @@
 <p align="center"><img src="assets/logo.png" width="300" /></p>
 
 <p align="center">
+  <a href="https://github.com/papumabiz/Papuma.Kernel/actions/workflows/ci.yml"><img src="https://github.com/papumabiz/Papuma.Kernel/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10" />
   <img src="https://img.shields.io/badge/PostgreSQL-%E2%89%A518-336791" alt="PostgreSQL 18+" />
   <img src="https://img.shields.io/badge/SQLite-embedded-003B57" alt="SQLite embedded" />
-  <img src="https://img.shields.io/badge/version-1.1.0-blue" alt="1.1.0" />
+  <img src="https://img.shields.io/badge/version-1.2.1-blue" alt="1.2.1" />
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT" />
 </p>
 
@@ -185,7 +186,7 @@ Pattern guides on kernel primitives ([docs/recipes](docs/recipes)):
 
 ## Maturity, stated plainly
 
-`1.1.0` — the Postgres kernel's design is complete (13 implementation phases,
+`1.2.1` — the Postgres kernel's design is complete (13 implementation phases,
 16 ADRs, every identified risk closed with a test or a measurement; **167
 integration tests against real PostgreSQL 18, green**), but it has **not yet
 carried production traffic**. Best fit today: internal line-of-business

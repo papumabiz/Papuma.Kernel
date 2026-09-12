@@ -20,7 +20,7 @@ namespace Papuma.Kernel.Store;
 
 /// <summary>
 /// Scope-bound unit of work for loading and writing documents against SQLite — the
-/// <see cref="DocumentSession"/> (Postgres) counterpart for a single-writer embedded
+/// <c>DocumentSession</c> (Postgres) counterpart for a single-writer embedded
 /// kernel (docs/analyses/local-kernel-sqlite-sibling.md).
 /// </summary>
 /// <remarks>

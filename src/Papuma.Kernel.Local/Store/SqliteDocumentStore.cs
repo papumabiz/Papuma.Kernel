@@ -7,7 +7,7 @@ using Papuma.Kernel.Tenancy;
 namespace Papuma.Kernel.Store;
 
 /// <summary>
-/// Entry point to the SQLite document store — the <see cref="DocumentStore"/> (Postgres)
+/// Entry point to the SQLite document store — the <c>DocumentStore</c> (Postgres)
 /// counterpart for a single-writer embedded kernel. Create once (with the startup-built
 /// <see cref="KernelModel"/>), open one <see cref="SqliteDocumentSession"/> per unit of work.
 /// </summary>

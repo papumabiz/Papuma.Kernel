@@ -39,8 +39,7 @@ public static class FeedThroughputProbe
     {
         Console.WriteLine($"Feed throughput probe — {DocumentCount:N0} documents, PostgreSQL 18 (Testcontainers)");
 
-        await using var container = new PostgreSqlBuilder()
-            .WithImage("postgres:18-alpine")
+        await using var container = new PostgreSqlBuilder("postgres:18-alpine")
             .Build();
         await container.StartAsync();
         await using var dataSource = NpgsqlDataSource.Create(container.GetConnectionString());

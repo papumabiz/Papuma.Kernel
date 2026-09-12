@@ -4,7 +4,7 @@
 namespace Papuma.Kernel.Store;
 
 /// <summary>
-/// Optional metadata for a <see cref="DocumentSession"/>. All change records written
+/// Optional metadata for a <c>DocumentSession</c>. All change records written
 /// by the session carry these values in their <c>metadata</c> column (architecture §5).
 /// </summary>
 public sealed record SessionOptions

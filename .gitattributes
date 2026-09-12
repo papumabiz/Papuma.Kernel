@@ -1,0 +1,11 @@
+* text=auto
+
+*.cs      text diff=csharp
+*.fs      text
+*.csproj  text
+*.fsproj  text
+*.slnx    text
+*.md      text
+*.sh      text eol=lf
+*.png     binary
+*.svg     text

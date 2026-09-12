@@ -7,6 +7,13 @@ on:
       - master
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test-pack:
     runs-on: ubuntu-latest
@@ -29,12 +36,16 @@ jobs:
       - name: Test
         run: dotnet test Papuma.Kernel.slnx --configuration Release --no-build --verbosity normal
 
+      # No --no-build here: symbol packages (IncludeSymbols) re-invoke the Build target,
+      # which NoBuild rejects (NETSDK1085).
       - name: Pack
-        run: dotnet pack Papuma.Kernel.slnx --configuration Release --no-build --output artifacts
+        run: dotnet pack Papuma.Kernel.slnx --configuration Release --output artifacts
 
-      - name: Upload NuGet package artifact
+      - name: Upload NuGet package artifacts
         uses: actions/upload-artifact@v4
         with:
           name: papuma-kernel-nupkg
-          path: artifacts/*.nupkg
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
           if-no-files-found: error

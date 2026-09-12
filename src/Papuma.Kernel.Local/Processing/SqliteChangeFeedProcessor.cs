@@ -19,7 +19,7 @@ namespace Papuma.Kernel.Processing;
 
 /// <summary>
 /// The change feed engine for a single-writer embedded store — SQLite counterpart of
-/// the Postgres kernel's <see cref="ChangeFeedProcessor"/> (referenced only in doc
+/// the Postgres kernel's <c>ChangeFeedProcessor</c> (referenced only in doc
 /// comments here; the type itself lives in <c>Papuma.Kernel</c> and is not reused,
 /// see docs/analyses/local-kernel-sqlite-sibling.md). Delivers committed changes to
 /// registered handlers in strict <c>seq</c> order with persisted checkpoints, retry with
