@@ -39,7 +39,14 @@ public sealed record ScopeContext
     /// <summary>
     /// Creates a validated tenant scope.
     /// </summary>
-    /// <param name="tenantId">The tenant identifier.</param>
+    /// <param name="tenantId">
+    /// The tenant identifier: a leading letter followed by 1–100 letters, digits or
+    /// underscores (<c>^[A-Za-z][A-Za-z0-9_]{1,100}$</c>). A raw GUID string does not
+    /// match — derive a valid id consistently, e.g. <c>$"t{guid:N}"</c>.
+    /// </param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="tenantId"/> does not match the pattern above.
+    /// </exception>
     public static ScopeContext Tenant(string tenantId)
     {
         if (!ValidTenantPattern.IsMatch(tenantId))

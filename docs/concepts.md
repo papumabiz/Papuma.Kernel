@@ -537,6 +537,18 @@ to stock 0 gets through without a single retry; after that, rejection is typed.
 ADR-012 rejected "conditional patches" as a catalog feature — this composition is
 the sanctioned route to conditional write semantics.
 
+**Safe against concurrency, not against duplicate commands.** `Increment` is not
+idempotent: a command retried after a timeout — a client retry, an agent calling
+through MCP, a message redelivered — applies the delta a second time, and nothing
+in the kernel can tell the retry from a genuine second purchase. Either make the
+*command* idempotent (a command id stored in the document or a dedicated
+document, checked before the patch), or use set semantics instead of a counter:
+a set of order ids (`orderIds` gains `o-42` twice → still one entry) whose size
+is the count. There is no set-add patch — the set is load + save with
+`expectedVersion`, and a retry re-decides on fresh state ("already in the set →
+nothing to do"). Counters fit where a duplicate is harmless or the caller is
+guaranteed to send once; sets fit where each contribution has an identity.
+
 Modeling: stock as its **own small document** per SKU (decouples content
 maintenance from stock movements — field-level LWW or not, the histories stay
 cleanly separated), cancellation as an `Increment(+1)` compensation. Free bonus:

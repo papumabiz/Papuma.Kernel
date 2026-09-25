@@ -53,6 +53,11 @@ The bootstrap registers `DocumentStore` + `KernelModel`, creates the schema
 idempotently at startup (tables, RLS, key indexes) and hosts the feed workers
 (NOTIFY-driven, polling as the truth) as well as the retention worker.
 
+Keys are **single-path** — always unique per tenant, but there is no composite
+key over several fields. For "number unique per project", store the combination
+in one field (`Key = $"{ProjectId}/{Number}"`) and declare that field as the
+`UniqueKey`, or make the combination the document id itself.
+
 ## 3. Writing — the session as unit of work
 
 ```csharp
@@ -81,6 +86,11 @@ await session.PatchWhereAsync<User>(x => x.Status, "inactive",
 await session.RollbackAsync<User>(user.Id, toVersion: 1, expectedVersion: 3);
 await session.CommitAsync();
 ```
+
+A tenant id must match `^[A-Za-z][A-Za-z0-9_]{1,100}$` — a leading letter,
+2–101 characters, no `-`. A raw GUID therefore fails; derive the id in one place,
+e.g. `ScopeContext.Tenant($"t{tenantGuid:N}")`, so every part of the application
+stores the same shape.
 
 Conflicts are typed (`ConcurrencyException` with expected and actual version,
 `UniqueKeyViolationException` with the key path, …) and local thanks to
@@ -130,6 +140,43 @@ builder.Services.AddHealthChecks().AddPapumaChangeFeedLag(maxAllowedLag: 1000);
 app.UseScopeResolution();   // tenant middleware (implement IScopeResolver)
 ```
 
-Further reading: [recipe: causation tracking](recipes/causation-tracking.md) ·
+## 7. Without a host (tests, tools, console apps)
+
+`AddPapumaKernel` is a convenience, not a requirement. The same store, built by
+hand:
+
+```csharp
+await using var dataSource = NpgsqlDataSource.Create(connectionString);
+
+var model = new KernelModelBuilder()
+    .Document<User>(d => d.UniqueKey(x => x.Email))
+    .Event<UserLoggedIn>()
+    .Build();
+
+await SchemaManager.EnsureSchemaAsync(dataSource, model);   // idempotent; pass the model, or no key indexes
+var store = new DocumentStore(dataSource, model);
+
+// Feed handlers without the hosted worker: one cycle on demand
+using var processor = new ChangeFeedProcessor(dataSource, [new UserProjection()]);
+await processor.ProcessOnceAsync();
+```
+
+For integration tests, the kernel's own suite uses this shape
+(`tests/Papuma.Kernel.Tests/Infrastructure/PostgresFixture.cs` in the repo):
+
+- **One `postgres:18` container per test run** (Testcontainers), shared by all
+  tests; `EnsureSchemaAsync` is idempotent, so every test class may call it.
+- **A fresh tenant per test** — `ScopeContext.Tenant($"t{Guid.NewGuid():N}")` —
+  isolates tests without truncating tables.
+- **Connect as a non-superuser role** when a test asserts isolation: superusers
+  bypass row-level security, so a superuser connection hides RLS bugs. Grant the
+  role access to the `papuma` schema after `EnsureSchemaAsync`.
+- **Feed handlers see every tenant.** In a shared database, give each test's
+  handler a unique `Name` (its own checkpoint) and filter on `change.Scope`, or
+  the handler also receives the other tests' changes.
+
+## Further reading
+
+[recipe: causation tracking](recipes/causation-tracking.md) ·
 [recipe: realtime UI notifications](recipes/realtime-ui-notifications.md) ·
 ADRs in [adr/](adr/)

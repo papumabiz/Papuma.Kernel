@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Docs: consumer feedback from jejak.** `getting-started.md` gains §7 "Without a
+  host" (hand-built store, `ChangeFeedProcessor.ProcessOnceAsync`, the integration-test
+  shape the kernel's own suite uses), the tenant id pattern and the single-path limit
+  of keys (with the flattening workaround). concepts §17 now states that `Increment` is
+  safe against concurrency but not against duplicate commands. The playbook carries
+  all four points and no longer links to files that are not shipped in the
+  `Papuma.Kernel` package; `ScopeContext.Tenant` documents its pattern and exception.
 - **Docs reorganised for the public repository.** The `vNEXT` working title is gone:
   `docs/vNEXT/*` moved up to `docs/` (guides flat, `docs/adr/`, `docs/recipes/`), and
   every frozen pre-1.0 document — the German v1 implementation set, the three v1-era

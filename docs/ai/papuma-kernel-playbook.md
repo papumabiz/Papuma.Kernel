@@ -38,7 +38,7 @@ This document is the entry map. The truth lives in the reference chain:
 | **Handlers are idempotent** (at-least-once!) and **never block** — no waiting for humans/external answers inside a handler. Human-in-the-loop = write a task document, done. | ADR-009; concepts §18/§19 |
 | **Checkpoint reset only for projections, never for effect handlers** (emails would be re-sent). The distinction is made when writing the handler. | concepts §19 |
 | **Events only for facts without state truth** (`UserLoggedIn`). State transitions belong in the document; triggers in handlers. Events have no upcasting — a new shape = a new event type. | ADR-011/013 |
-| **Bounded counters** (stock, quotas): `Increment` + a type validator — not load-check-save loops. | ADR-012; concepts §17 |
+| **Bounded counters** (stock, quotas): `Increment` + a type validator — not load-check-save loops. `Increment` is safe against concurrency, **not against duplicate commands**: a retried command counts twice. Make the command idempotent or use a set of ids instead of a counter. | ADR-012; concepts §17 |
 | **Conditional patches do not exist** and will not be added. Whoever needs conditions: load + save with `expectedVersion`. | ADR-012 |
 | **Never write directly into `papuma.*` tables.** Reading via a view is a deliberate exception (the 4 conditions from concepts §16) — the default derived read is a projection. | ADR-002 |
 | Mass updates via `PatchWhereAsync`/`PatchManyAsync`/`DeleteWhereAsync` — not N sessions in a loop. | ADR-014 |
@@ -98,6 +98,9 @@ Typed errors you should handle (not swallow): `ConcurrencyException`,
 | …ad-hoc SQL/BI, all 4 conditions met *(the exception)* | view with `security_invoker = on` (concepts §16) |
 | …change a single field without loading | `PatchAsync` (field-level LWW is deliberate there) |
 | …bound a stock (never oversell) | `Increment(-1)` + `Validate` (concepts §17) |
+| …enforce uniqueness over two fields ("number per project") | no composite keys — one field holding the combination (`$"{ProjectId}/{Number}"`) declared as `UniqueKey`, or the combination as the document id |
+| …use a GUID as tenant id | tenant ids must match `^[A-Za-z][A-Za-z0-9_]{1,100}$` — derive once, e.g. `ScopeContext.Tenant($"t{guid:N}")` |
+| …use the store in tests/tools without a host | `SchemaManager.EnsureSchemaAsync(dataSource, model)` + `new DocumentStore(dataSource, model)`; handlers via `ChangeFeedProcessor.ProcessOnceAsync()` ([getting-started §7](../getting-started.md#7-without-a-host-tests-tools-console-apps)) |
 | …react to "field X went Y→Z" | `change.IsFieldTransition(path, from, to)` in a handler (ADR-011) |
 | …add a human approval step | write a task document, handler returns; the decision = a normal write (concepts §18) |
 | …build a workflow/saga | workflow document + feed handlers + `expectedVersion`; timers = a `dueAt` poller (concepts §18) |
@@ -118,8 +121,8 @@ Typed errors you should handle (not swallow): `ConcurrencyException`,
   whether `PatchAsync` (independent fields) or `Increment` (counters) can replace
   the load-modify-save (concepts §4/§17).
 - **RLS errors / empty reads in workers**: check the `'All'` scope mechanism
-  (`SetAllScopesAsync` or `ScopeFilter.All()`), cross-cutting checklist in the
-  [historical implementation plan](../legacy/implementation-plan.md).
+  (`SetAllScopesAsync` or `ScopeFilter.All()`); why a missing scope yields empty
+  reads instead of an error: [concepts.md §23](../concepts.md#23-why-tenant-isolation-fails-closed-and-why-two-layers-not-one).
 - **Rollback fails typed**: diffs on the way back contain policy entries without
   values — that is intended (concepts §8); rethink the use case instead of
   removing the policy.
@@ -157,7 +160,8 @@ same hard rules above — with these engine-specific adjustments:
 Everything else on this page — `SaveAsync`/`PatchAsync`/`Increment`/handlers/
 GDPR/schema evolution/scope-binding — applies unchanged; it's the same code,
 shared via `Papuma.Kernel.Core`. Full reasoning for every difference above:
-[docs/analyses/local-kernel-sqlite-sibling.md](../analyses/local-kernel-sqlite-sibling.md).
+[docs/analyses/local-kernel-sqlite-sibling.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/analyses/local-kernel-sqlite-sibling.md)
+(shipped inside the `Papuma.Kernel.Local` package).
 
 ## Using `Papuma.Kernel.FSharp` (F#, additive facade)
 

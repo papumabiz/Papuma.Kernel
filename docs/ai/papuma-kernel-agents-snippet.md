@@ -122,7 +122,8 @@ derived automatically. NOT event sourcing, NOT an ORM, NO query DSL.
   Papuma.Kernel.Local" section (also shipped inside the NuGet package under
   docs/)
 - Design rationale (what's shared vs. deliberately different per engine):
-  docs/analyses/local-kernel-sqlite-sibling.md in the Papuma.Kernel repo
+  docs/analyses/local-kernel-sqlite-sibling.md (shipped in the
+  Papuma.Kernel.Local package)
 - Concepts (the why, applies to the shared surface of both kernels):
   docs/concepts.md §1–§20
 - GDPR tooling: docs/gdpr.md
