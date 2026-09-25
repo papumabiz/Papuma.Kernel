@@ -57,6 +57,19 @@ public sealed class SqlitePatchGdprHistoryRollbackTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PatchAsync_GetDocument_ReturnsIncrementedValue()
+    {
+        await using var session = _store.OpenSession(NewTenant());
+        var id = NewId();
+        var inserted = await session.SaveAsync(new Counter(id, "hits", Value: 41), 0);
+
+        var result = await session.PatchAsync<Counter>(id, p => p.Increment(x => x.Value));
+
+        Assert.Equal(new Counter(id, "hits", Value: 41), inserted.GetDocument<Counter>());
+        Assert.Equal(new Counter(id, "hits", Value: 42), result.GetDocument<Counter>());
+    }
+
+    [Fact]
     public async Task PatchAsync_SetAndRemove_ApplyBothOperations()
     {
         await using var session = _store.OpenSession(NewTenant());

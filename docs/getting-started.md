@@ -78,9 +78,10 @@ var loaded = await session.LoadAsync<User>(user.Id);
 await session.SaveAsync(loaded.Document with { Name = "Harald" }, loaded.Version);
 
 // Patch: single fields without loading, one statement (ADR-012)
-await session.PatchAsync<User>(user.Id, p => p
+var patched = await session.PatchAsync<User>(user.Id, p => p
     .Set(x => x.Name, "Harry")
     .Increment(x => x.LoginCount));
+var loginCount = patched.GetDocument<User>().LoginCount;   // the stored state, no second read
 
 // Bulk: the same patch across declared keys or id lists (ADR-014)
 await session.PatchWhereAsync<User>(x => x.Status, "inactive",

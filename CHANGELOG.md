@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **`SaveResult.GetDocument<T>()`** returns the document as persisted by the write —
+  in particular the value a `PatchAsync` `Increment` produced, without a second read and
+  without the conflict window of load + save (sequence numbers, ticket keys). Unlike
+  `Diff` it is not policy-applied and holds every field. Works for patch, save and
+  rollback results in both kernels; throws after a delete or for the wrong type.
+  concepts §17 gains a "sequence numbers" paragraph.
 - **Tenant ids accept GUIDs.** `ScopeContext.Tenant` now accepts
   `^[A-Za-z0-9][A-Za-z0-9_-]{1,100}$` (was `^[A-Za-z][A-Za-z0-9_]{1,100}$`): a leading
   digit and `-` are allowed, so GUID strings work without a prefix. Every previously

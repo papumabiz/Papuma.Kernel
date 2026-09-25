@@ -90,6 +90,53 @@ public sealed class PatchAndBulkTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Patch_GetDocument_ReturnsPersistedState_IncludingFieldsTheDiffOmits()
+    {
+        await using var session = _store.OpenSession(NewTenant());
+        var id = NewId();
+        await session.SaveAsync(new PatchDoc(id, "Harry", "active", LoginCount: 41), 0);
+
+        var result = await session.PatchAsync<PatchDoc>(id, p => p
+            .Increment(x => x.LoginCount)
+            .Set(x => x.PasswordHash, "secret-hash"));
+
+        var document = result.GetDocument<PatchDoc>();
+        Assert.Equal(42, document.LoginCount);          // the Increment's result, no second read
+        Assert.Equal("Harry", document.Name);           // unchanged, so absent from the diff
+        Assert.Equal("secret-hash", document.PasswordHash); // [TrackHash]: the diff carries only a hash
+        Assert.False(result.Diff.Entries.ContainsKey("name"));
+        Assert.Equal((await session.LoadAsync<PatchDoc>(id))!.Document, document);
+    }
+
+    [Fact]
+    public async Task Save_GetDocument_ReturnsPersistedState_ForInsertAndUpdate()
+    {
+        await using var session = _store.OpenSession(NewTenant());
+        var id = NewId();
+        var original = new PatchDoc(id, "Harry", "active");
+
+        var inserted = await session.SaveAsync(original, 0);
+        var updated = await session.SaveAsync(original with { Status = "archived" }, inserted.Version);
+
+        Assert.Equal(original, inserted.GetDocument<PatchDoc>());
+        Assert.Equal("archived", updated.GetDocument<PatchDoc>().Status);
+    }
+
+    [Fact]
+    public async Task GetDocument_Throws_AfterDelete_ForWrongType_AndWithoutSessionWrite()
+    {
+        await using var session = _store.OpenSession(NewTenant());
+        var id = NewId();
+        var saved = await session.SaveAsync(new PatchDoc(id, "Harry", "active"), 0);
+        var deleted = await session.DeleteAsync<PatchDoc>(id, saved.Version);
+
+        Assert.Throws<InvalidOperationException>(() => deleted.GetDocument<PatchDoc>());
+        Assert.Throws<InvalidOperationException>(() => saved.GetDocument<ValidatedDoc>());
+        Assert.Throws<InvalidOperationException>(() =>
+            new SaveResult(1, ChangeOperation.Insert, saved.Diff).GetDocument<PatchDoc>());
+    }
+
+    [Fact]
     public async Task Patch_OnDifferentFields_DoesNotConflict_VersionsStayLinear()
     {
         await using var session = _store.OpenSession(NewTenant());

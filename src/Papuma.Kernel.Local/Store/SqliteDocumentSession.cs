@@ -480,7 +480,10 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
         await InsertChangeRecordAsync(
             conn, tx, metadata, id, insertedVersion, ChangeOperation.Insert, diff, metadata.SchemaVersion, ct);
 
-        return new SaveResult(insertedVersion, ChangeOperation.Insert, diff);
+        return new SaveResult(insertedVersion, ChangeOperation.Insert, diff)
+        {
+            Stored = (newJson, metadata.ClrType),
+        };
     }
 
     private async Task<SaveResult> UpdateAsync(
@@ -574,7 +577,10 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
             conn, tx, metadata, id, newVersion, ChangeOperation.Update, diff,
             metadata.SchemaVersion, ct, extraMetadata);
 
-        return new SaveResult(newVersion, ChangeOperation.Update, diff);
+        return new SaveResult(newVersion, ChangeOperation.Update, diff)
+        {
+            Stored = (storedNewJson, metadata.ClrType),
+        };
     }
 
     private async Task InsertChangeRecordAsync(

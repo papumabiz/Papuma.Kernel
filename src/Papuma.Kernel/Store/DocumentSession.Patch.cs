@@ -106,7 +106,10 @@ public sealed partial class DocumentSession
             await InsertChangeRecordAsync(
                 conn, tx, metadata, id, newVersion, ChangeOperation.Update, diff, metadata.SchemaVersion, ct);
 
-            return new SaveResult(newVersion, ChangeOperation.Update, diff);
+            return new SaveResult(newVersion, ChangeOperation.Update, diff)
+            {
+                Stored = (storedNewJson, metadata.ClrType),
+            };
         }, ct);
         }
         catch (Exception ex) when (RecordFailure(activity, ex))

@@ -111,7 +111,10 @@ public sealed partial class SqliteDocumentSession
                 await InsertChangeRecordAsync(
                     conn, tx, metadata, id, version, ChangeOperation.Update, diff, metadata.SchemaVersion, ct);
 
-                return new SaveResult(version, ChangeOperation.Update, diff);
+                return new SaveResult(version, ChangeOperation.Update, diff)
+                {
+                    Stored = (patchedJson, metadata.ClrType),
+                };
             }, ct);
         }
         catch (Exception ex) when (RecordFailure(activity, ex))

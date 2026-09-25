@@ -549,6 +549,16 @@ is the count. There is no set-add patch — the set is load + save with
 nothing to do"). Counters fit where a duplicate is harmless or the caller is
 guaranteed to send once; sets fit where each contribution has an identity.
 
+**Sequence numbers** (ticket keys, invoice numbers) are the same primitive
+pointed the other way: a counter document per sequence, `Increment(+1)`, and the
+issued number read from the write's own result —
+`result.GetDocument<Sequence>().Next` returns the state `RETURNING new.data`
+persisted, so there is no second read and no window in which another writer
+could take the same number. Unlike a PostgreSQL sequence, the increment rolls
+back with the session, so an aborted command leaves no gap. The duplicate-command
+caveat still applies: a retried "create ticket" whose first attempt did commit
+creates a second ticket with the next number — make that command idempotent.
+
 Modeling: stock as its **own small document** per SKU (decouples content
 maintenance from stock movements — field-level LWW or not, the histories stay
 cleanly separated), cancellation as an `Increment(+1)` compensation. Free bonus:
