@@ -177,6 +177,10 @@ slice-by-slice translation: [slice-conventions.md](papuma-kernel-slice-conventio
 - **`Patch` needs quotations, not lambdas.** `x => x.Field` is C#-compiler
   magic F# doesn't have. Use `SetQ`/`RemoveQ`/`IncrementQ` with
   `<@ fun x -> x.Field @>` instead of `Set`/`Remove`/`Increment`.
+- **Keys take `box` lambdas; composite keys a tuple.** `d.UniqueKey(fun x -> box x.Email)`,
+`d.UniqueKey(fun x -> box (x.ProjectId, x.Number))` — not an anonymous record (F# sorts
+its fields). For `LoadByKeyAsync` with a composite key, annotate the values as
+`IReadOnlyList<obj>`, or F# picks the single-value overload.
 - **`trySaveAsync`/`tryPatchAsync` return `Result<'T, KernelError>`** for the
   three *expected* write outcomes (`VersionConflict`/`DocumentNotFound`/
   `UniqueKeyViolation`) instead of throwing — optional, not a replacement:

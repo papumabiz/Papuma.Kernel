@@ -8,6 +8,7 @@
     <Compile Include="Infrastructure.fs" />
     <Compile Include="PatchTests.fs" />
     <Compile Include="SessionTests.fs" />
+    <Compile Include="KeyTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

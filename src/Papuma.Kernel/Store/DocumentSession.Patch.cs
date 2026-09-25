@@ -405,7 +405,8 @@ public sealed partial class DocumentSession
         {
             throw new ArgumentException(
                 $"'{path}' is a composite key on {metadata.Name}; this operation matches single-field " +
-                "keys only. Load by the composite key with one value per component (ADR-020).",
+                "keys only. Load by the composite key with one value per component — the " +
+                "IReadOnlyList<object> overload; from F#, annotate the array: (values :> IReadOnlyList<obj>) (ADR-020).",
                 nameof(key));
         }
 

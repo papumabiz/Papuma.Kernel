@@ -116,6 +116,13 @@ internal static class JsonPathResolver
         return KernelJson.Options.PropertyNamingPolicy?.ConvertName(property.Name) ?? property.Name;
     }
 
-    private static Expression Unwrap(Expression expression) =>
-        expression is UnaryExpression { NodeType: ExpressionType.Convert } unary ? unary.Operand : expression;
+    // Strips the boxing a lambda to object introduces: C# emits Convert, F# emits a call to
+    // Operators.Box (`fun x -> box x.Email`). Matched by name so Core needs no FSharp.Core.
+    private static Expression Unwrap(Expression expression) => expression switch
+    {
+        UnaryExpression { NodeType: ExpressionType.Convert } unary => unary.Operand,
+        MethodCallExpression { Method.Name: "Box", Arguments.Count: 1 } call
+            when call.Method.DeclaringType?.FullName == "Microsoft.FSharp.Core.Operators" => call.Arguments[0],
+        _ => expression,
+    };
 }

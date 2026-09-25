@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **F#: key declarations from lambdas work.** F# lowers `fun x -> box x.Email` to a
+  call to `Operators.Box` instead of C#'s `Convert` node, so `UniqueKey`, `LookupKey`,
+  `Property`, `LoadByKeyAsync` and the key-based bulk operations rejected every F#
+  lambda; only `[<UniqueKey>]` attributes worked. The path resolver now unwraps F#'s
+  `box` too. Composite keys from F# use a tuple (`box (x.ProjectId, x.Number)`);
+  anonymous records are rejected, because F# sorts their fields. The F# README,
+  playbook and snippet show the forms; F# tests cover them end to end.
+- **Docs:** the AGENTS snippet names the RLS functions and the testing package in its
+  rules; slice conventions and the event-modeling recipe point to
+  `Papuma.Kernel.Testing`; `llms.txt` is current (32 concepts sections, 21 ADRs, the
+  testing package, the shared doc set).
 - **New package `Papuma.Kernel.Testing` (ADR-021).** `PapumaTestDatabase` starts
   PostgreSQL 18 via Testcontainers (or connects to an existing server) and adds a
   login role without superuser or `BYPASSRLS`, so tests exercise row-level security as

@@ -42,6 +42,26 @@ Same scope restriction as the C# API it mirrors: a simple property-access chain
 (`x.Field`, `x.Nested.Field`) — anything richer fails the same way the kernel's own
 `JsonPathResolver.Resolve` already rejects it on the C# side.
 
+## Keys from F# — `box` lambdas and tuples
+
+Key declarations and lookups take a lambda to `obj`; F# converts it at the method
+call. Box the property, and declare a composite key (ADR-020) with a **tuple**:
+
+```fsharp
+m.Document<Ticket>(fun d ->
+    d.UniqueKey(fun x -> box x.Email)                      // single field
+     .UniqueKey(fun x -> box (x.ProjectId, x.Number))      // composite: tuple, in key order
+    |> ignore)
+
+// F# picks the single-value overload for a bare array — annotate the values:
+let values: IReadOnlyList<obj> = [| "p1" :> obj; 42 :> obj |]
+let! ticket = session.LoadByKeyAsync<Ticket>((fun x -> box (x.ProjectId, x.Number)), values)
+```
+
+Anonymous records (`{| ProjectId = …; Number = … |}`) are rejected: F# sorts their
+fields alphabetically and lowers the construction to a block, so the declared order
+would not survive. `[<UniqueKey>]` on a record field keeps working for single-field keys.
+
 ## `Result` instead of exceptions — `trySaveAsync` / `tryPatchAsync`
 
 `Papuma.Kernel`/`Papuma.Kernel.Local` throw `ConcurrencyException`,

@@ -47,8 +47,12 @@ derived automatically. NOT event sourcing, NOT an ORM, NO query DSL.
    sent). State transitions belong in the document.
 9. Multi-tenancy: every session is scope-bound (`ScopeContext.Tenant(id)` /
    `Platform`). Never mix data across scopes; workers use the 'All'-scope
-   mechanism.
+   mechanism. Own tables in the same database (projection targets) get RLS via
+   `papuma.scope_visible`/`papuma.scope_writable` — never copy the setting names.
 10. Never write directly into `papuma.*` tables or alter their schema.
+11. Integration tests: `Papuma.Kernel.Testing` — stores and processors on
+    `AppDataSource` (non-superuser, RLS applies), `processor.DrainAsync()` to run
+    handlers; a fresh tenant per test.
 
 ### Placeholders (adjust)
 
@@ -149,6 +153,9 @@ change for F#, only the syntax for three of them:
   (`<@ fun x -> x.Field @>`), not `Set`/`Remove`/`Increment` with a lambda —
   F# has no compiler support for converting `x => x.Field` into an
   `Expression<Func<T,TValue>>`.
+- Keys: `d.UniqueKey(fun x -> box x.Email)`; composite keys with a tuple,
+  `box (x.ProjectId, x.Number)` — never an anonymous record. Composite
+  `LoadByKeyAsync` needs the values typed as `IReadOnlyList<obj>`.
 - `trySaveAsync`/`tryPatchAsync` return `Result<'T, KernelError>` for the
   three expected write outcomes instead of throwing — optional, not
   mandatory; the throwing API still works.

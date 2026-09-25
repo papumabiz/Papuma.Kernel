@@ -74,7 +74,8 @@ honest caveat:
   database, milliseconds. This is the bulk of your business logic and the bulk of
   your tests.
 - **The slice as a whole (Load → decide → Save): an integration test** against
-  real PostgreSQL (Testcontainers, the way the kernel tests itself). It verifies
+  real PostgreSQL (`Papuma.Kernel.Testing`, the package the kernel tests itself
+  with — [getting-started §7](../getting-started.md#integration-tests-papumakerneltesting)). It verifies
   the wiring and the derived change, not the business rule.
 
 Why this is not a step down from event sourcing: in ES you write `evolve`

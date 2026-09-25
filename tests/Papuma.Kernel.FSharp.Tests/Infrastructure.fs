@@ -14,6 +14,7 @@ open Microsoft.Extensions.DependencyInjection
 open Microsoft.Extensions.Hosting
 open Microsoft.Extensions.Logging
 open Papuma.Kernel.Hosting
+open Papuma.Kernel.Model
 open Papuma.Kernel.Store
 open Papuma.Kernel.Tenancy
 
@@ -21,10 +22,8 @@ let newId () = Guid.NewGuid().ToString("N")
 
 let newTenant () = ScopeContext.Tenant($"t{Guid.NewGuid():N}")
 
-/// Builds a store for the given document type <c>'T</c> (attribute-declared keys, e.g.
-/// <c>[&lt;UniqueKey&gt;]</c>, apply automatically — no explicit model configuration
-/// needed for the common case) and runs <paramref name="run"/> against it.
-let withStore<'T when 'T: not struct and 'T: not null> (run: SqliteDocumentStore -> Task) : Task =
+/// Builds a store for an explicitly configured model and runs <paramref name="run"/> against it.
+let withModel (configure: KernelModelBuilder -> unit) (run: SqliteDocumentStore -> Task) : Task =
     task {
         let dbPath = Path.Combine(Path.GetTempPath(), $"papuma_fsharp_test_{Guid.NewGuid():N}.db")
         let builder = Host.CreateApplicationBuilder()
@@ -32,7 +31,7 @@ let withStore<'T when 'T: not struct and 'T: not null> (run: SqliteDocumentStore
 
         builder.Services.AddPapumaKernelLocal(fun o ->
             o.DbPath <- dbPath
-            o.Model(fun m -> m.Document<'T>() |> ignore))
+            o.Model(fun m -> configure m))
         |> ignore
 
         use host = builder.Build()
@@ -51,3 +50,9 @@ let withStore<'T when 'T: not struct and 'T: not null> (run: SqliteDocumentStore
             if File.Exists dbPath then
                 File.Delete dbPath
     }
+
+/// Builds a store for the given document type <c>'T</c> (attribute-declared keys, e.g.
+/// <c>[&lt;UniqueKey&gt;]</c>, apply automatically — no explicit model configuration
+/// needed for the common case) and runs <paramref name="run"/> against it.
+let withStore<'T when 'T: not struct and 'T: not null> (run: SqliteDocumentStore -> Task) : Task =
+    withModel (fun m -> m.Document<'T>() |> ignore) run
