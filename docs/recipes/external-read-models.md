@@ -58,7 +58,8 @@ write transaction**:
 4. **The tenant belongs in the key (or the filter).** External systems know
    nothing about RLS — isolation must be re-established in the projection:
    tenant prefix in the document key, a tenant field as a mandatory filter, or
-   one index/collection per tenant.
+   one index/collection per tenant. (A table in the *same* PostgreSQL database
+   can keep RLS instead — see [read models in the same database](same-database-read-models.md).)
 5. **Rebuild = reset + replay, and it must be safe.** `ResetCheckpointAsync`
    replays everything (concepts §19); because of rules 1–3 that is idempotent.
    For a clean slate, truncate the external index first — it is a copy, never

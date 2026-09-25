@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Row-level security for your own tables (ADR-019).** `EnsureSchemaAsync` now creates
+  `papuma.scope_visible(scope, tenant_id)` and `papuma.scope_writable(scope, tenant_id)`
+  — the kernel's scope rules as SQL functions, to be used in RLS policies on
+  application tables (typically projection targets) in the same database. They are
+  the public contract; the underlying setting names stay internal. A test pins them to
+  the kernel's own policies. New recipe
+  [read models in the same database](docs/recipes/same-database-read-models.md),
+  verified by `ScopeFunctionTests`, and concepts §30.
 - **`SaveResult.GetDocument<T>()`** returns the document as persisted by the write —
   in particular the value a `PatchAsync` `Increment` produced, without a second read and
   without the conflict window of load + save (sequence numbers, ticket keys). Unlike

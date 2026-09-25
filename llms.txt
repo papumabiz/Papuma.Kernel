@@ -44,6 +44,7 @@ These files also ship inside the NuGet package under `docs/` — after
 - [Observability](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/observability.md): metrics, tracing, diagnostics APIs, MCP server
 - [GDPR tooling](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/gdpr.md): data inventory, subject export, history redaction, per-tenant erasure-vs-restriction pattern
 - [Recipe: AI consumers](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/recipes/ai-consumers.md): pgvector embeddings projection, natural-language audit, anomaly detection
+- [Recipe: read models in the same database](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/recipes/same-database-read-models.md): projection tables under row-level security via papuma.scope_visible/scope_writable
 - [Recipe: realtime UI notifications](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/recipes/realtime-ui-notifications.md): NOTIFY-driven UI updates
 
 ## Decisions

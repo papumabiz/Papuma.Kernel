@@ -213,5 +213,37 @@ internal static class SchemaDdl
                     AND scope = 'Platform'
                 )
             );
+
+        -- ── Scope predicates for application tables (ADR-019) ──────────────────────
+        -- The public contract for RLS on tables outside papuma.*: the same visibility
+        -- rules as the kernel's own policies, without exposing the GUC names. SQL,
+        -- STABLE, no SECURITY DEFINER, so the planner inlines them into policies.
+        -- A missing scope yields false (fail closed), never NULL.
+        CREATE OR REPLACE FUNCTION papuma.scope_visible(row_scope text, row_tenant_id text)
+            RETURNS boolean
+            LANGUAGE sql STABLE PARALLEL SAFE
+        AS $$
+            SELECT COALESCE(
+                current_setting('app.current_scope', true) = 'All'
+                OR (current_setting('app.current_scope', true) = 'Tenant'
+                    AND row_scope = 'Tenant'
+                    AND row_tenant_id = current_setting('app.current_tenant', true))
+                OR (current_setting('app.current_scope', true) = 'Platform'
+                    AND row_scope = 'Platform'),
+                false)
+        $$;
+
+        CREATE OR REPLACE FUNCTION papuma.scope_writable(row_scope text, row_tenant_id text)
+            RETURNS boolean
+            LANGUAGE sql STABLE PARALLEL SAFE
+        AS $$
+            SELECT COALESCE(
+                (current_setting('app.current_scope', true) = 'Tenant'
+                    AND row_scope = 'Tenant'
+                    AND row_tenant_id = current_setting('app.current_tenant', true))
+                OR (current_setting('app.current_scope', true) = 'Platform'
+                    AND row_scope = 'Platform'),
+                false)
+        $$;
         """;
 }

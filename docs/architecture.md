@@ -431,6 +431,7 @@ of documents and changes, the `DocumentSession` is always bound to a tenant, and
 | [016](adr/adr-016-policy-projected-reads.md) | Policy-projected reads (masked load) + the content MCP boundary; no generic projection MCP | Accepted (implemented) |
 | [017](adr/adr-017-actor-id-column.md) | Actor identity as a first-class column (actor_id, created_by, updated_by) | Accepted |
 | [018](adr/adr-018-causation-type-metadata.md) | Causation type as a metadata field (command name in JSONB, no schema change) | Accepted |
+| [019](adr/adr-019-scope-predicates-for-application-tables.md) | Scope predicates for application tables (papuma.scope_visible / scope_writable as the RLS contract) | Accepted |
 
 ## 13. Recipes (tutorial precursors)
 
@@ -449,6 +450,9 @@ Application patterns on top of the ADRs, as drafts for later tutorials:
 - [External read models](recipes/external-read-models.md)
   — the one projection pattern for search engines, vector stores and caches
   (Manticore, Qdrant, Redis), plus where DotNetCore.CAP does and does not fit.
+- [Read models in the same database](recipes/same-database-read-models.md)
+  — projection tables under the kernel's row-level security via
+  `papuma.scope_visible`/`scope_writable` (ADR-019).
 - [Field-level encryption](recipes/field-level-encryption.md)
   — storing values that must be decrypted at another trust boundary (bank
   accounts); ciphertext + Redact, envelope/KMS, and why the kernel stays out.

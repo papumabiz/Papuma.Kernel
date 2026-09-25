@@ -15,7 +15,7 @@ describe the PostgreSQL kernel unless they say otherwise; `Papuma.Kernel.Local`
 | Reference | |
 |---|---|
 | [architecture.md](architecture.md) | how the pieces fit together |
-| [adr/](adr/) | 18 Architecture Decision Records — each a single, dated, reversible choice |
+| [adr/](adr/) | 19 Architecture Decision Records — each a single, dated, reversible choice |
 | [recipes/](recipes/) | pattern guides on kernel primitives (sagas, read models, bridges, …) |
 | [gdpr.md](gdpr.md) | export, data inventory, history redaction |
 | [observability.md](observability.md) | diagnostics, health checks, the dashboard |

@@ -7,7 +7,7 @@ called out separately below).
 
 This document is the entry map. The truth lives in the reference chain:
 [getting-started.md](../getting-started.md) (the API in 5 minutes) →
-[concepts.md](../concepts.md) (the why, §1–§20) →
+[concepts.md](../concepts.md) (the why, §1–§30) →
 [ADRs](../adr/) (binding decisions) →
 [architecture.md](../architecture.md) (data model, namespaces).
 
@@ -95,6 +95,7 @@ Typed errors you should handle (not swallow): `ConcurrencyException`,
 |---|---|
 | …read one current document (login, business logic) | `LoadAsync` / `LoadByKeyAsync` (immediately consistent) |
 | …**any derived read** — list, join, aggregation, search, external *(the default)* | an `IChangeHandler` projection (eventual, lag observable) |
+| …keep tenant isolation on a projection table in the same database | RLS policy `USING (papuma.scope_visible(scope, tenant_id)) WITH CHECK (papuma.scope_writable(scope, tenant_id))`, handler sets `change.Scope` per change via `SetScopeAsync` — never copy the GUC names ([recipe](../recipes/same-database-read-models.md), ADR-019) |
 | …ad-hoc SQL/BI, all 4 conditions met *(the exception)* | view with `security_invoker = on` (concepts §16) |
 | …change a single field without loading | `PatchAsync` (field-level LWW is deliberate there) |
 | …bound a stock (never oversell) | `Increment(-1)` + `Validate` (concepts §17) |

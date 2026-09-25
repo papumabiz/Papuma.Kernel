@@ -1287,6 +1287,38 @@ prototype's convenience.
 
 ---
 
+## 30. Your own tables inside the isolation: scope predicates as the contract
+
+→ [ADR-019](adr/adr-019-scope-predicates-for-application-tables.md),
+[recipe: read models in the same database](recipes/same-database-read-models.md), §23
+
+§23 explains why the kernel's isolation fails closed. Before ADR-019 that guarantee
+stopped at `papuma.*` — and projections, the *default* derived read (§16), most
+often land in a table right next to it. The question from a consumer was
+whether their tables may reuse the kernel's mechanism: the transaction-local
+settings (PostgreSQL "GUCs", from *Grand Unified Configuration*, the system
+behind every `SET`/`SHOW`) that `SetScopeAsync` writes and the RLS policies read
+via `current_setting('app.current_tenant', true)`.
+
+Technically they always could — `SetScopeAsync` is public, and the §16 views
+depend on it. What was missing is a contract, and the naive one is wrong:
+declaring the setting *names* public would freeze an internal detail and make
+every consumer copy the three-branch policy expression. Worse, a later rename
+would not fail — the copied policies would quietly match nothing.
+
+So the contract is two SQL functions instead, `papuma.scope_visible(scope,
+tenant_id)` for `USING` and `papuma.scope_writable(scope, tenant_id)` for
+`WITH CHECK`. They encode the kernel's rules once (`All` reads everything and
+writes nothing; no scope sees nothing), a test pins them to the kernel's own
+policies, and the settings behind them stay free to change.
+
+The one habit that comes with it: a projection handler sets **the scope of the
+change it handles**, per change, in its own transaction — not `All`. That is not
+ceremony; with `scope_writable` in the policy it turns a wrong `tenant_id` in the
+handler into an RLS error instead of a row in someone else's tenant.
+
+---
+
 *Maintenance note: add new explainers from later phases here — this document is
 the collection point for the "why behind the how" and raw material for the
 tutorials (phase 9).*
