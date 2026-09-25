@@ -135,7 +135,7 @@ argument — so nothing is lost. A client that insists on sessions needs
 | `get_feed_failures` | `GetFailuresAsync()` of both processors | no |
 | `get_document_history` | `GetHistoryAsync` (scope-bound, policy-applied) | no |
 | `get_document` | `LoadMaskedAsync` by id (ADR-016: policy-masked, scope-bound, `ExposeToMcp()` types only) | no |
-| `get_document_by_key` | masked load by a **declared** key (no free-form query) | no |
+| `get_document_by_key` | masked load by a **declared** single-field key (no free-form query) | no |
 | `retry_feed_failure` | `RetryFailureAsync` | yes — only with `AllowMutations` |
 | `reset_feed_checkpoint` | `ResetCheckpointAsync` (projections only!) | yes — only with `AllowMutations` |
 

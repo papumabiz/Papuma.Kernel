@@ -8,7 +8,7 @@ runner. Design reasoning behind the facade:
 
 | Concept | Where in this sample |
 |---|---|
-| `[<UniqueKey>]` on a record field (no quotation needed to declare it) | [`Domain.fs`](Domain.fs) — `TodoItem.Slug` |
+| `[<UniqueKey>]` on a record field (the attribute form; `d.UniqueKey(fun x -> box x.Slug)` works too) | [`Domain.fs`](Domain.fs) — `TodoItem.Slug` |
 | `Set`/`Increment` with F# lambdas in one `Patch` call | `POST /todos/{id}/complete` — sets `Done`, atomically bumps `TouchCount` |
 | `trySaveAsync`/`tryPatchAsync` — `Result<T, KernelError>` instead of exceptions | every handler in [`Program.fs`](Program.fs); `UniqueKeyViolation`/`DocumentNotFound` map straight to HTTP 409/404 |
 | `runSession` — the `IAsyncDisposable` gap F#'s `use` doesn't cover | every handler wraps its body in `runSession` |

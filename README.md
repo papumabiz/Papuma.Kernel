@@ -108,12 +108,18 @@ implementations pretending to agree):
   transaction, same policies, per-type retention.
 - **Schema evolution** — lazy upcasting with version guards, same
   `Upcast(fromVersion, …)` registration on either kernel.
+- **Declared keys** — unique and lookup keys as partial expression indexes,
+  including composite keys over several fields
+  (`UniqueKey(x => new { x.ProjectId, x.Number })`, [ADR-020](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/adr/adr-020-composite-keys.md)).
 
 Postgres-only (`Papuma.Kernel`):
 
 - **Two-layer multi-tenancy** — explicit scope predicates **plus** PostgreSQL
   row-level security; fail-closed (a missing scope yields empty reads, never a
-  leak).
+  leak). Your own tables in the same database join in through
+  `papuma.scope_visible`/`scope_writable` ([ADR-019](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/adr/adr-019-scope-predicates-for-application-tables.md)).
+- **Testing that exercises RLS** — `Papuma.Kernel.Testing` runs tests as a
+  non-superuser role and drains feeds deterministically ([ADR-021](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/adr/adr-021-testing-package.md)).
 - **Multi-instance leader failover** via `FOR UPDATE SKIP LOCKED` — no extra
   infrastructure for concurrent processor instances.
 - **AI-ready** — an [MCP server](https://github.com/papumabiz/Papuma.Kernel/tree/master/src/Papuma.Kernel.Mcp) over the diagnostics and
@@ -179,7 +185,7 @@ Pattern guides on kernel primitives ([docs/recipes](https://github.com/papumabiz
 
 - **Start:** [tutorial.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/tutorial.md) — build one app end to end (guided) · [getting-started.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/getting-started.md) — the five-minute API tour · marketing one-pager: [factsheet.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/factsheet.md)
 - **Architecture:** [architecture.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/architecture.md) · the *why* behind every decision: [concepts.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/concepts.md)
-- **Decisions:** [18 ADRs](https://github.com/papumabiz/Papuma.Kernel/tree/master/docs/adr) — each a single, dated, reversible choice
+- **Decisions:** [the ADRs](https://github.com/papumabiz/Papuma.Kernel/tree/master/docs/adr) — each a single, dated, reversible choice
 - **`Papuma.Kernel.Local` (SQLite):** [design rationale and what's different per engine](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/analyses/local-kernel-sqlite-sibling.md) — no dedicated getting-started yet; the write/read API mirrors `Papuma.Kernel`'s (`SaveAsync`/`LoadAsync`/`PatchAsync`/… on `SqliteDocumentSession`, `AddPapumaKernelLocal` for hosting)
 - **Cross-language:** the [feed wire format](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/feed-wire-format.md) consumers rely on
 - **Agents:** [llms.txt](https://github.com/papumabiz/Papuma.Kernel/blob/master/llms.txt) and `docs/ai/` are shipped inside the NuGet package
@@ -189,8 +195,9 @@ Pattern guides on kernel primitives ([docs/recipes](https://github.com/papumabiz
 ## Maturity, stated plainly
 
 `1.2.1` — the Postgres kernel's design is complete (13 implementation phases,
-16 ADRs, every identified risk closed with a test or a measurement; **167
-integration tests against real PostgreSQL 18, green**), but it has **not yet
+every decision recorded as an ADR, every identified risk closed with a test or a
+measurement; **the full integration suite runs against real PostgreSQL 18 on
+every CI build**), but it has **not yet
 carried production traffic**. Best fit today: internal line-of-business
 systems and new products built by teams that control their PostgreSQL
 version. For regulated, mission-critical workloads, run a pilot first — the

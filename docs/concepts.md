@@ -481,7 +481,7 @@ The decision matrix:
 | Need | Tool | Consistency |
 |---|---|---|
 | Single document, strong consistency (login, business logic) | `LoadAsync` / `LoadByKeyAsync` | immediate |
-| **Default** — anything derived (joins, aggregation, search, external) | Projection via handler (ADR-009) | eventual (lag observable) |
+| **Default** — anything derived (joins, aggregation, search, external) | Projection via handler (ADR-009); a table in the same database keeps RLS via ADR-019 (§30) | eventual (lag observable) |
 | Exception — ad-hoc/reporting/BI, all four conditions met | View (read-only, `security_invoker`, schema-stable, non-sensitive) | immediate |
 
 Materialized views are the worst of both worlds: they bring staleness back
@@ -917,7 +917,7 @@ get a stable, intention-revealing contract instead of your document shapes.
 ## 23. Why tenant isolation fails closed (and why two layers, not one)
 
 → [ADR-007](adr/adr-007-privacy-policies.md), architecture §4/§10,
-§11 (the same `set_config` mechanics)
+§11 (the same `set_config` mechanics), §30 (extending it to application tables)
 
 Every kernel query carries two independent isolation layers: explicit
 `WHERE scope = @scope AND tenant_id = @tenantId` predicates (layer 1) **and**

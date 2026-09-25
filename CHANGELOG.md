@@ -75,7 +75,7 @@
   yields the canonical lowercase dashed form (ids compare case-sensitively) and rejects
   `Guid.Empty`. A null id now throws `ArgumentNullException` naming `tenantId`.
 - **Packaging: one doc set in every package, with no dangling links.** All packages
-  (`Papuma.Kernel`, `.Local`, `.FSharp`, `.AspNetCore`, `.Mcp`) now ship the same
+  (`Papuma.Kernel`, `.Local`, `.FSharp`, `.AspNetCore`, `.Mcp`, and the new `.Testing`) now ship the same
   `docs/` set — guides, ADRs, recipes, the `ai/` set and `analyses/` — defined once in
   `Directory.Build.targets`. Before, each package shipped its own subset, and links
   between documents dangled depending on the package (e.g. `concepts.md` →
@@ -88,12 +88,12 @@
   tells agents to read the docs from the package folder of the version they build
   against.
 - **Docs: consumer feedback from jejak.** `getting-started.md` gains §7 "Without a
-  host" (hand-built store, `ChangeFeedProcessor.ProcessOnceAsync`, the integration-test
-  shape the kernel's own suite uses), the tenant id pattern and the single-path limit
-  of keys (with the flattening workaround). concepts §17 now states that `Increment` is
-  safe against concurrency but not against duplicate commands. The playbook carries
-  all four points and no longer links to files that are not shipped in the
-  `Papuma.Kernel` package; `ScopeContext.Tenant` documents its pattern and exception.
+  host" (hand-built store, `ChangeFeedProcessor.ProcessOnceAsync`; the integration-test
+  part later moved to `Papuma.Kernel.Testing`) and documents the tenant id pattern and
+  keys (both later extended — GUID tenant ids, composite keys; see above). concepts §17
+  now states that `Increment` is safe against concurrency but not against duplicate
+  commands. The playbook carries these points and no longer links to files that are
+  not shipped in the `Papuma.Kernel` package.
 - **Docs reorganised for the public repository.** The `vNEXT` working title is gone:
   `docs/vNEXT/*` moved up to `docs/` (guides flat, `docs/adr/`, `docs/recipes/`), and
   every frozen pre-1.0 document — the German v1 implementation set, the three v1-era

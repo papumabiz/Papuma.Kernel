@@ -146,14 +146,23 @@ CREATE UNIQUE INDEX ux_change_document_version
 Both tables carry row-level-security policies (including the `'All'` scope for
 workers and `FORCE ROW LEVEL SECURITY`); the binding DDL lives in `SchemaDdl.cs`.
 
-Unique keys and lookup columns per document type are created as expression
-indexes from the metamodel, e.g.:
+Unique keys and lookup columns per document type are created as partial
+expression indexes from the metamodel (`SchemaManager.BuildKeyIndexDdl`) — one
+expression per key field, so a composite key (ADR-020) is one multi-column index:
 
 ```sql
-CREATE UNIQUE INDEX ux_user_email
-    ON papuma.document (tenant_id, (data ->> 'email'))
+CREATE UNIQUE INDEX IF NOT EXISTS ux_papuma_doc_user_email
+    ON papuma.document (scope, tenant_id, (data #>> '{email}'))
     WHERE document_type = 'User';
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_papuma_doc_ticket_projectid__number
+    ON papuma.document (scope, tenant_id, (data #>> '{projectId}'), (data #>> '{number}'))
+    WHERE document_type = 'Ticket';
 ```
+
+The schema also provides `papuma.scope_visible` / `papuma.scope_writable` — the
+scope rules of these policies as SQL functions, the contract for RLS on
+application tables (ADR-019).
 
 ---
 
@@ -386,7 +395,13 @@ conceptually ([ADR-007](adr/adr-007-privacy-policies.md)).
 
 Multi-tenancy stays first-class as in v1: `tenant_id` is part of the primary key
 of documents and changes, the `DocumentSession` is always bound to a tenant, and
-`Papuma.Kernel.AspNetCore` continues to provide tenant resolution.
+`Papuma.Kernel.AspNetCore` continues to provide tenant resolution. Tenant ids are
+whitelisted (`^[A-Za-z0-9][A-Za-z0-9_-]{1,100}$`, GUIDs fit; `ScopeContext.Tenant(Guid)`
+gives the canonical form) and only ever reach SQL as parameters. Application
+tables in the same database reuse the row-level security through
+`papuma.scope_visible`/`scope_writable` (ADR-019,
+[recipe](recipes/same-database-read-models.md)); integration tests run as a
+non-superuser role via `Papuma.Kernel.Testing` (ADR-021), so they exercise it.
 
 ---
 

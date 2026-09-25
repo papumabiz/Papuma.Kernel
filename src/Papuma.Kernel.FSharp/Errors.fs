@@ -23,7 +23,8 @@ type KernelError =
     | VersionConflict of documentType: string * documentId: string * expected: int64 * actual: int64
     /// An update or delete targeted a document that doesn't exist in the current scope.
     | DocumentNotFound of documentType: string * documentId: string
-    /// A declared unique key was violated by this write.
+    /// A declared unique key was violated by this write. For a composite key (ADR-020),
+    /// `keyPath` lists the component paths comma-separated, e.g. `projectId,number`.
     | UniqueKeyViolation of documentType: string * keyPath: string
 
 /// <summary>

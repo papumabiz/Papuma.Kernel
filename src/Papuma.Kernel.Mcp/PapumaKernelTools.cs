@@ -146,9 +146,10 @@ public sealed class PapumaKernelTools
     }
 
     [McpServerTool(Name = "get_document_by_key", ReadOnly = true)]
-    [Description("Loads one document by a declared key (ADR-006), policy-masked like " +
-        "get_document. The key path must be a declared key — there is no free-form " +
-        "query. Scope-bound; only ExposeToMcp() types are readable.")]
+    [Description("Loads one document by a declared single-field key (ADR-006), policy-masked " +
+        "like get_document. The key path must be a declared key — there is no free-form " +
+        "query, and composite keys are not supported here. Scope-bound; only ExposeToMcp() " +
+        "types are readable.")]
     public async Task<string> GetDocumentByKeyAsync(
         [Description("The logical document type name.")] string documentType,
         [Description("The declared key path (e.g. 'email').")] string keyPath,

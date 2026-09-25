@@ -375,7 +375,7 @@ handler**, with versioning and privacy built in. Pick your direction:
   Command/View/Automation slice each, with infrastructure-free tests. Entirely
   optional; the kernel does not require it.
 - **The reasoning.** [concepts.md](concepts.md) is the long-form *why*; the
-  [16 ADRs](adr/) are the individual decisions; [gdpr.md](gdpr.md) covers the
+  [ADRs](adr/) are the individual decisions; [gdpr.md](gdpr.md) covers the
   data-subject obligations.
 
 Tear down the tutorial container when done: `docker rm -f papuma-tut`.

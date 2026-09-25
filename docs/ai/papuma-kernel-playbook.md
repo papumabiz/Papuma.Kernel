@@ -49,15 +49,17 @@ This document is the entry map. The truth lives in the reference chain:
 // Bootstrap (application)
 services.AddPapumaKernel(o => { o.ConnectionString = …; o.Model(m => m
     .Document<User>(d => d.UniqueKey(x => x.Email).Validate(u => …))
+    .Document<Ticket>(d => d.UniqueKey(x => new { x.ProjectId, x.Number }))   // composite (ADR-020)
     .Event<UserLoggedIn>(e => e.Retention(TimeSpan.FromDays(90)))); })
   .AddChangeHandler<UserProjection>()
   .AddEventHandler<LoginAudit>();
 
 // Writing (session = UoW; scope is mandatory)
-await using var s = store.OpenSession(ScopeContext.Tenant("acme"),
+await using var s = store.OpenSession(ScopeContext.Tenant("acme"),   // or Tenant(guid)
     new SessionOptions { ActorId = "harry", CausationId = "cmd-42", CausationType = "PlaceOrder" });
 await s.SaveAsync(doc, expectedVersion);            // 0 = insert
-await s.PatchAsync<User>(id, p => p.Set(x => x.Name, "H").Increment(x => x.LoginCount));
+var patched = await s.PatchAsync<User>(id, p => p.Set(x => x.Name, "H").Increment(x => x.LoginCount));
+patched.GetDocument<User>().LoginCount;             // the persisted state, no reload
 await s.PatchWhereAsync<User>(x => x.Status, "old", p => p.Set(x => x.Status, "new"));
 await s.DeleteAsync<User>(id, expectedVersion);
 await s.RollbackAsync<User>(id, toVersion, expectedVersion);   // append-only
@@ -67,6 +69,7 @@ await s.CommitAsync();                              // otherwise: rollback on di
 // Reading (strong consistency)
 var r = await s.LoadAsync<User>(id);                // r.Document, r.Version
 var byKey = await s.LoadByKeyAsync<User>(x => x.Email, "x@y.de");
+var ticket = await s.LoadByKeyAsync<Ticket>(x => new { x.ProjectId, x.Number }, ["p1", 42]);
 var history = await s.GetHistoryAsync<User>(id, fromVersion: 3);
 
 // Reacting
@@ -80,6 +83,11 @@ public sealed class UserProjection : IChangeHandler
 await processor.GetLagAsync(); await processor.GetFailuresAsync();
 await processor.RetryFailureAsync(name, seq); await processor.ResetCheckpointAsync(name);
 DataInventory.Build(model);                         // Art. 30 + policy review
+
+// Tests (Papuma.Kernel.Testing, ADR-021)
+await using var db = await PapumaTestDatabase.StartAsync();   // non-superuser app role: RLS applies
+var testStore = await db.CreateStoreAsync(model);
+await processor.DrainAsync();                                  // throws if a handler failed
 await GdprExport.ExportAsync(store, scope, docRefs, eventSelectors);
 await s.RedactHistoryAsync<User>(id, reason, paths);
 ```

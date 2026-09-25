@@ -24,6 +24,12 @@ CREATE TABLE app.product_embedding (
     embedding vector(1536) NOT NULL,
     PRIMARY KEY (scope, tenant_id, document_id)
 );
+-- Same tenant isolation as papuma.* (ADR-019):
+ALTER TABLE app.product_embedding ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app.product_embedding FORCE ROW LEVEL SECURITY;
+CREATE POLICY scope_isolation ON app.product_embedding
+    USING (papuma.scope_visible(scope, tenant_id))
+    WITH CHECK (papuma.scope_writable(scope, tenant_id));
 ```
 
 ```csharp
@@ -66,7 +72,10 @@ Notes: embedding API calls are slow → this handler dominates
 `papuma.feed.handler.duration`; when lag grows, look here first (concepts §14)
 and consider writing only a marker document + separate batch processing. The RAG
 query itself is ordinary SQL (`ORDER BY embedding <=> @query`) with explicit
-scope predicates.
+scope predicates. With the policy above, the handler's write needs the change's
+scope set on its own transaction (`SetScopeAsync(tx, change.Scope)`), and the
+query runs under the reader's scope — the full pattern, verified against
+PostgreSQL 18, is the [same-database read-model recipe](same-database-read-models.md).
 
 ## 2. Natural-language audit: `GetHistoryAsync` + LLM
 
