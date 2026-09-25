@@ -127,8 +127,9 @@ public sealed class PackagedDocsLinkTests
                 continue;
             }
 
+            // MSBuild paths use '\' on every OS; Linux does not treat it as a separator.
             var include = document.Descendants("None")
-                .Select(e => (string?)e.Attribute("Include"))
+                .Select(e => ((string?)e.Attribute("Include"))?.Replace('\\', '/'))
                 .Single(i => i is not null && Path.GetFileName(i) == readmeName)!;
             readmes.Add(ToRepoPath(Path.GetFullPath(Path.Combine(Path.GetDirectoryName(project)!, include))));
         }
