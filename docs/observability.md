@@ -122,6 +122,12 @@ builder.Services
     // .WithPapumaKernel(o => o with { AllowMutations = true });
 ```
 
+Over HTTP the server is **stateless** (the default since the MCP C# SDK 2.0): every
+request stands alone, no `Mcp-Session-Id` is issued, and a request carrying one is
+rejected with 400. The Papuma tools keep no session state — scope comes as a tool
+argument — so nothing is lost. A client that insists on sessions needs
+`.WithHttpTransport(o => o.Stateless = false)`.
+
 | Tool | Corresponds to | Mutating? |
 |---|---|---|
 | `get_model_inventory` | `DataInventory.Build(model)` (Art.-30 inventory, policies, keys) | no |

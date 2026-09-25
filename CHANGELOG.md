@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Dependencies:** `ModelContextProtocol` 1.4 → 2.2 (`Papuma.Kernel.Mcp`, sample),
+  `Microsoft.Extensions.*` 10.0.0 → 10.0.12, `Microsoft.Data.Sqlite` 10.0.10 → 10.0.12
+  (the `SQLitePCLRaw` 3.0.5 pin stays), test tooling (Test SDK 18, xunit runner 4,
+  coverlet 10), GitHub Actions (checkout v7, setup-dotnet v6, upload-artifact v7).
+  **MCP over HTTP is now stateless by default** — no `Mcp-Session-Id`, and a request
+  carrying one gets 400. The Papuma tools hold no session state; clients that need
+  sessions set `Stateless = false` (observability.md). The sample's
+  `diagnostics.http` drops the session-header handshake.
 - **F#: `SetQ`/`RemoveQ`/`IncrementQ` deprecated.** They rested on the premise that F#
   cannot turn lambdas into LINQ expressions; it can. The real obstacle was the
   unrecognized F# `box` (fixed below), so the kernel's own Patch API now works from F#:

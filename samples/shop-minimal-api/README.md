@@ -44,7 +44,8 @@ Easiest: open [requests/shop.http](requests/shop.http) with
 [httpYAC](https://httpyac.github.io/) (VS Code extension or CLI) and send the
 requests top to bottom — named responses chain the ids automatically.
 [requests/diagnostics.http](requests/diagnostics.http) adds the health check
-and the full MCP handshake (initialize → session header → tools). Environment:
+and the MCP calls (stateless Streamable HTTP: every request stands alone, no
+session header). Environment:
 `requests/http-client.env.json` (`dev`, port 5099 — fixed via launchSettings).
 
 The same flow with curl:

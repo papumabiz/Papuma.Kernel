@@ -1,17 +1,18 @@
 # Papuma.Kernel Sample — diagnostics and the MCP endpoint via httpYAC.
 #
-# The MCP section uses the Streamable-HTTP protocol: initialize → (session id
-# from the Mcp-Session-Id response header, captured by the script block) →
-# tools. Responses arrive as text/event-stream — httpYAC displays them fine.
+# The MCP section uses the Streamable-HTTP protocol, stateless (the default since
+# the MCP C# SDK 2.0): every request stands alone — no Mcp-Session-Id header, and
+# the server rejects one with 400. `initialize` is optional; it shows the
+# negotiated protocol and capabilities. Responses arrive as text/event-stream —
+# httpYAC displays them fine.
 
 ### Health (includes the change-feed lag check)
 GET {{host}}/health
 
 ### ─────────────────────────────────────────────────────────────────────────────
-### MCP handshake (observability.md: the diagnostics surface for AI agents)
+### MCP (observability.md: the diagnostics surface for AI agents)
 
-### MCP 1: initialize — note the Mcp-Session-Id response header
-# @name mcpInit
+### MCP 1: initialize (optional in stateless mode — protocol and capabilities)
 POST {{host}}/mcp
 Content-Type: application/json
 Accept: application/json, text/event-stream
@@ -27,26 +28,10 @@ Accept: application/json, text/event-stream
   }
 }
 
-{{
-  exports.mcpSession = response.headers['mcp-session-id'];
-}}
-
-### MCP 2: initialized notification (completes the handshake)
+### MCP 2: list the Papuma tools
 POST {{host}}/mcp
 Content-Type: application/json
 Accept: application/json, text/event-stream
-Mcp-Session-Id: {{mcpSession}}
-
-{
-  "jsonrpc": "2.0",
-  "method": "notifications/initialized"
-}
-
-### MCP 3: list the Papuma tools
-POST {{host}}/mcp
-Content-Type: application/json
-Accept: application/json, text/event-stream
-Mcp-Session-Id: {{mcpSession}}
 
 {
   "jsonrpc": "2.0",
@@ -54,11 +39,10 @@ Mcp-Session-Id: {{mcpSession}}
   "method": "tools/list"
 }
 
-### MCP 4: feed lag per handler (both feeds)
+### MCP 3: feed lag per handler (both feeds)
 POST {{host}}/mcp
 Content-Type: application/json
 Accept: application/json, text/event-stream
-Mcp-Session-Id: {{mcpSession}}
 
 {
   "jsonrpc": "2.0",
@@ -70,11 +54,10 @@ Mcp-Session-Id: {{mcpSession}}
   }
 }
 
-### MCP 5: the Art.-30 model inventory (types, policies, keys, retentions)
+### MCP 4: the Art.-30 model inventory (types, policies, keys, retentions)
 POST {{host}}/mcp
 Content-Type: application/json
 Accept: application/json, text/event-stream
-Mcp-Session-Id: {{mcpSession}}
 
 {
   "jsonrpc": "2.0",
@@ -86,13 +69,12 @@ Mcp-Session-Id: {{mcpSession}}
   }
 }
 
-### MCP 6: a document history, scope-bound and policy-applied
+### MCP 5: a document history, scope-bound and policy-applied
 # Paste an order id from shop.http here:
 @orderId = paste-an-order-id-here
 POST {{host}}/mcp
 Content-Type: application/json
 Accept: application/json, text/event-stream
-Mcp-Session-Id: {{mcpSession}}
 
 {
   "jsonrpc": "2.0",
@@ -108,11 +90,10 @@ Mcp-Session-Id: {{mcpSession}}
   }
 }
 
-### MCP 7: failure table of both feeds (poison candidates)
+### MCP 6: failure table of both feeds (poison candidates)
 POST {{host}}/mcp
 Content-Type: application/json
 Accept: application/json, text/event-stream
-Mcp-Session-Id: {{mcpSession}}
 
 {
   "jsonrpc": "2.0",
