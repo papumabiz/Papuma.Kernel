@@ -3,6 +3,10 @@
 Status: verified against the implemented API (2026-06-11) ·
 Prerequisite: **PostgreSQL ≥ 18** ([ADR-001](adr/adr-001-postgresql-18-only.md))
 
+> **PostgreSQL kernel only.** With `Papuma.Kernel.Local` (SQLite) the model,
+> session and handler API are the same, but bootstrap and engine details differ —
+> read the playbook's [Differences section](ai/papuma-kernel-playbook.md#differences-when-using-papumakernellocal-sqlite-embedded) instead of section 2.
+
 The kernel in five minutes: define the model, bootstrap, write, react to changes.
 Background in [architecture.md](architecture.md) and [concepts.md](concepts.md).
 

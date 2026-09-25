@@ -2,6 +2,10 @@
 
 Status: verified against the implemented API (phase 11, 2026-06-12)
 
+> **Mostly PostgreSQL kernel.** `KernelDiagnostics` metrics and traces are shared
+> with `Papuma.Kernel.Local`; the dashboard and the feed-lag health check are not —
+> see the playbook's [Differences section](ai/papuma-kernel-playbook.md#differences-when-using-papumakernellocal-sqlite-embedded).
+
 The kernel instruments with **BCL primitives** (`System.Diagnostics.Metrics.Meter`
 + `ActivitySource`, both under the name `Papuma.Kernel`) — without vendor
 dependencies. OpenTelemetry, Prometheus exporters, `dotnet-counters` or

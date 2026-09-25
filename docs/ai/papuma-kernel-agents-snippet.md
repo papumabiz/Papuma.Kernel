@@ -58,9 +58,12 @@ derived automatically. NOT event sourcing, NOT an ORM, NO query DSL.
 
 ### Reference
 
-- Playbook: docs/ai/papuma-kernel-playbook.md in the Papuma.Kernel repo
-  (also shipped inside the NuGet package under docs/)
-- Concepts (the why): docs/concepts.md §1–§20
+Read the docs of the version this app builds against, not copies or the web:
+`~/.nuget/packages/papuma.kernel/<version>/docs/` (Windows: `%USERPROFILE%\.nuget\packages\...`;
+`$NUGET_PACKAGES` overrides the root; `<version>` is the PackageReference in the project file).
+
+- Playbook: docs/ai/papuma-kernel-playbook.md
+- Concepts (the why): docs/concepts.md
 - GDPR tooling: docs/gdpr.md · Diagnostics: docs/observability.md
 ```
 
@@ -118,14 +121,17 @@ derived automatically. NOT event sourcing, NOT an ORM, NO query DSL.
 
 ### Reference
 
+Read the docs of the version this app builds against, not copies or the web:
+`~/.nuget/packages/papuma.kernel.local/<version>/docs/` (Windows: `%USERPROFILE%\.nuget\packages\...`;
+`$NUGET_PACKAGES` overrides the root; `<version>` is the PackageReference in the project file).
+
 - Playbook: docs/ai/papuma-kernel-playbook.md, "Differences when using
-  Papuma.Kernel.Local" section (also shipped inside the NuGet package under
-  docs/)
+  Papuma.Kernel.Local" section — read it first; other pages describe the
+  PostgreSQL kernel unless they say otherwise
 - Design rationale (what's shared vs. deliberately different per engine):
-  docs/analyses/local-kernel-sqlite-sibling.md (shipped in the
-  Papuma.Kernel.Local package)
+  docs/analyses/local-kernel-sqlite-sibling.md
 - Concepts (the why, applies to the shared surface of both kernels):
-  docs/concepts.md §1–§20
+  docs/concepts.md
 - GDPR tooling: docs/gdpr.md
 ```
 
@@ -155,7 +161,11 @@ change for F#, only the syntax for three of them:
 
 ### Reference
 
-- `Papuma.Kernel.FSharp` package README (also shipped inside the NuGet package)
+Read the docs of the version this app builds against, not copies or the web:
+`~/.nuget/packages/papuma.kernel.fsharp/<version>/docs/` (Windows: `%USERPROFILE%\.nuget\packages\...`;
+`$NUGET_PACKAGES` overrides the root; `<version>` is the PackageReference in the project file).
+
+- `Papuma.Kernel.FSharp` package README (package root)
 - Playbook: docs/ai/papuma-kernel-playbook.md, "Using Papuma.Kernel.FSharp" section
 - Slice conventions in F#: docs/ai/papuma-kernel-slice-conventions.md, "Using Papuma.Kernel.FSharp" section
 - Concepts §29 (the why): docs/concepts.md

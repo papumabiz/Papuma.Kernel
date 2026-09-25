@@ -12,25 +12,6 @@
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
-  <!-- Agent-readable documentation ships with the package (phase 13): after restore it
-       sits in the consumer's global packages folder, so coding agents can read the
-       playbook and concepts locally instead of guessing from compiled metadata.
-       PackagePaths mirror the repo layout so relative links keep working. -->
-  <ItemGroup>
-    <None Include="..\..\docs\ai\papuma-kernel-playbook.md" Pack="true" PackagePath="docs\ai\" />
-    <None Include="..\..\docs\ai\papuma-kernel-agents-snippet.md" Pack="true" PackagePath="docs\ai\" />
-    <None Include="..\..\docs\ai\papuma-kernel-slice-conventions.md" Pack="true" PackagePath="docs\ai\" />
-    <None Include="..\..\docs\tutorial.md" Pack="true" PackagePath="docs\" />
-    <None Include="..\..\docs\getting-started.md" Pack="true" PackagePath="docs\" />
-    <None Include="..\..\docs\concepts.md" Pack="true" PackagePath="docs\" />
-    <None Include="..\..\docs\architecture.md" Pack="true" PackagePath="docs\" />
-    <None Include="..\..\docs\observability.md" Pack="true" PackagePath="docs\" />
-    <None Include="..\..\docs\gdpr.md" Pack="true" PackagePath="docs\" />
-    <None Include="..\..\docs\feed-wire-format.md" Pack="true" PackagePath="docs\" />
-    <None Include="..\..\docs\adr\*.md" Pack="true" PackagePath="docs\adr\" />
-    <None Include="..\..\docs\recipes\*.md" Pack="true" PackagePath="docs\recipes\" />
-  </ItemGroup>
-
   <ItemGroup>
     <InternalsVisibleTo Include="Papuma.Kernel.Tests" />
     <InternalsVisibleTo Include="Papuma.Kernel.Mcp" />

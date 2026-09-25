@@ -9,7 +9,7 @@ masked reads, history, rollback, feed processing, hosting), 48 SQLite tests
 green alongside the existing 167 Postgres + 4 sample tests. Companion to
 [offline-sync-and-projection-conflicts.md](offline-sync-and-projection-conflicts.md)
 (the sync/conflict side of the same question — not started, no live
-requirement yet) and to [chat-2.md](../chats/chat-2.md) (the original
+requirement yet) and to [chat-2.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/chats/chat-2.md) (the original
 brainstorm this grew out of).
 
 Origin: while building a desktop application on Papuma Kernel, a Postgres
@@ -61,7 +61,7 @@ language, *produce* it from a second, independent storage engine.
 ## 2. The contract is largely already storage-neutral
 
 Checked against the current code, not just the docs — `ChangeRecord`
-([src/Papuma.Kernel/Changes/ChangeRecord.cs](../../src/Papuma.Kernel.Core/Changes/ChangeRecord.cs))
+([src/Papuma.Kernel/Changes/ChangeRecord.cs](https://github.com/papumabiz/Papuma.Kernel/blob/master/src/Papuma.Kernel.Core/Changes/ChangeRecord.cs))
 is already a plain C# record: `Seq`, `Scope`, `DocumentType`, `DocumentId`,
 `Version`, `SchemaVersion`, `Operation`, `Diff` (a `DocumentDiff` of
 `System.Text.Json.Nodes` values), `ActorId`, `Metadata`, `OccurredAt`. No

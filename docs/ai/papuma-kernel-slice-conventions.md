@@ -211,7 +211,7 @@ The slice *shape* above is language-neutral — DTO/Decider/Handler/Endpoint/
 Registration/Test stays the same anatomy across both languages. Only the
 concrete syntax changes, and in exactly one place (Patch) it changes because
 F# lacks a C# compiler feature, not because the kernel behaves differently.
-See [Papuma.Kernel.FSharp](../../src/Papuma.Kernel.FSharp/README.md) and
+See [Papuma.Kernel.FSharp](https://github.com/papumabiz/Papuma.Kernel/blob/master/src/Papuma.Kernel.FSharp/README.md) and
 [concepts.md §29](../concepts.md#29-f-as-a-facade-not-a-rewrite--and-why-the-wire-format-stays-closed)
 for the reasoning; this section is the slice-shape translation only.
 
@@ -334,7 +334,7 @@ let ``PlaceOrder over stock is rejected`` () =
    file, concepts, ADRs, wire format). After `dotnet restore` they are on disk.
 2. **Copy the [AGENTS.md snippet](papuma-kernel-agents-snippet.md)** into the
    generator project's `AGENTS.md`/`CLAUDE.md` so the rules are always in context.
-3. **Read this file** as the slice spec and the [sample](../../samples/shop-minimal-api/README.md)
+3. **Read this file** as the slice spec and the [sample](https://github.com/papumabiz/Papuma.Kernel/blob/master/samples/shop-minimal-api/README.md)
    as the few-shot example.
 4. Optionally point an agent at the running app's **MCP** `get_model_inventory`
    for the live type/policy/key list.

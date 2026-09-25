@@ -2,6 +2,9 @@
 
 Status: current (1.2.x) · Background: [concepts.md](concepts.md) (the "why behind the how", narrative)
 
+> **Describes the PostgreSQL kernel.** Engine differences of `Papuma.Kernel.Local`
+> (SQLite) are in the playbook's [Differences section](ai/papuma-kernel-playbook.md#differences-when-using-papumakernellocal-sqlite-embedded).
+
 This document describes the reboot of Papuma.Kernel as **document-sourced CQRS**:
 JSON documents are the truth, the change feed arises automatically as a diff,
 projections are deliberately dumb change handlers. There is no migration path
@@ -329,7 +332,7 @@ one with a higher `seq`. The engine therefore reads snapshot-based: only changes
 whose `txid` lies before `pg_snapshot_xmin(pg_current_snapshot())` count as
 visibly stable. LISTEN/NOTIFY serves only as the wakeup; polling remains the
 truth ([ADR-010](adr/adr-010-feed-consumption.md), building on
-[polling-vs-listen-analysis.md](legacy/polling-vs-listen-analysis.md)).
+[polling-vs-listen-analysis.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/legacy/polling-vs-listen-analysis.md)).
 
 ### Convenience on top, not underneath
 
@@ -439,7 +442,7 @@ Application patterns on top of the ADRs, as drafts for later tutorials:
   — pgvector embeddings, natural-language audit, anomaly detection.
 - [Workflows and sagas on kernel primitives](recipes/workflow-saga.md)
   — human-in-the-loop, compensation, the dueAt timer; backed by the runnable
-  [sample app](../samples/shop-minimal-api/README.md).
+  [sample app](https://github.com/papumabiz/Papuma.Kernel/blob/master/samples/shop-minimal-api/README.md).
 - [The NATS bridge](recipes/nats-bridge.md)
   — publishing both feeds to JetStream with seq-based dedup; runnable in the
   sample via `Nats:Url`.
@@ -459,4 +462,4 @@ Application patterns on top of the ADRs, as drafts for later tutorials:
 
 The cross-language contract for consuming the feeds directly is specified in
 [feed-wire-format.md](feed-wire-format.md), with runnable Python/Go clients in
-[samples/polyglot-consumers](../samples/polyglot-consumers/README.md).
+[samples/polyglot-consumers](https://github.com/papumabiz/Papuma.Kernel/blob/master/samples/polyglot-consumers/README.md).

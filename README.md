@@ -1,6 +1,6 @@
 # Papuma Kernel
 
-<p align="center"><img src="assets/logo.png" width="300" /></p>
+<p align="center"><img src="https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/assets/logo.png" width="300" /></p>
 
 <p align="center">
   <a href="https://github.com/papumabiz/Papuma.Kernel/actions/workflows/ci.yml"><img src="https://github.com/papumabiz/Papuma.Kernel/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
@@ -32,12 +32,12 @@ is derived from it (never the other way around).
 - **`Papuma.Kernel.Local`** — SQLite, no server. Same documents, same
   reversible diffs, same change feed, same privacy policies — for
   single-writer desktop and mobile apps that have no business running a
-  database server. See [the design rationale](docs/analyses/local-kernel-sqlite-sibling.md)
+  database server. See [the design rationale](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/analyses/local-kernel-sqlite-sibling.md)
   for what's shared and what's deliberately different per engine.
 
 > **The 1.0 reboot** — rebuilt from scratch on PostgreSQL ≥ 18; no migration path
-> from 0.x (see [CHANGELOG](CHANGELOG.md)). The marketing one-pager with diagrams
-> and measured numbers lives in [docs/factsheet.md](docs/factsheet.md).
+> from 0.x (see [CHANGELOG](https://github.com/papumabiz/Papuma.Kernel/blob/master/CHANGELOG.md)). The marketing one-pager with diagrams
+> and measured numbers lives in [docs/factsheet.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/factsheet.md).
 
 ## Sixty seconds to running
 
@@ -85,7 +85,7 @@ dotnet build Papuma.Kernel.slnx
 dotnet test  Papuma.Kernel.slnx   # Postgres suite needs Docker/Podman; SQLite suite needs nothing extra
 ```
 
-Learn by building: [docs/tutorial.md](docs/tutorial.md) · terse API tour: [docs/getting-started.md](docs/getting-started.md).
+Learn by building: [docs/tutorial.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/tutorial.md) · terse API tour: [docs/getting-started.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/getting-started.md).
 
 ## What ships in the box
 
@@ -99,9 +99,9 @@ implementations pretending to agree):
 - **Privacy by construction** — field policies (`Redact`/`Hash`/`Reference`/
   `DoNotTrack`) applied *inside* the write transaction, so sensitive values never
   reach the feed, the logs, the traces, or AI consumers. The same policies
-  project onto masked reads ([ADR-016](docs/adr/adr-016-policy-projected-reads.md)).
+  project onto masked reads ([ADR-016](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/adr/adr-016-policy-projected-reads.md)).
 - **GDPR tooling** — Art.-30 data inventory from the metamodel, Art.-15/20 subject
-  export, history redaction with a mandatory audit trail ([gdpr.md](docs/gdpr.md)).
+  export, history redaction with a mandatory audit trail ([gdpr.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/gdpr.md)).
 - **Processing engine** — strict per-handler ordering, persisted checkpoints,
   retry/backoff, poison handling, one-call rebuild.
 - **Event log** — first-class facts (`UserLoggedIn`) beside state changes, same
@@ -116,7 +116,7 @@ Postgres-only (`Papuma.Kernel`):
   leak).
 - **Multi-instance leader failover** via `FOR UPDATE SKIP LOCKED` — no extra
   infrastructure for concurrent processor instances.
-- **AI-ready** — an [MCP server](src/Papuma.Kernel.Mcp) over the diagnostics and
+- **AI-ready** — an [MCP server](https://github.com/papumabiz/Papuma.Kernel/tree/master/src/Papuma.Kernel.Mcp) over the diagnostics and
   scope-bound, policy-masked reads (read-only by default).
 - **Observability** — BCL `Meter` + `ActivitySource` (zero vendor deps),
   OpenTelemetry-ready, feed-lag health check, and an **embedded live dashboard**
@@ -133,7 +133,7 @@ SQLite-only (`Papuma.Kernel.Local`):
   reading, verified empirically, not assumed.
 - Genuinely simpler where the single-writer topology allows it: no RLS
   machinery, no gapless-read snapshot logic — see the
-  [design rationale](docs/analyses/local-kernel-sqlite-sibling.md) for exactly
+  [design rationale](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/analyses/local-kernel-sqlite-sibling.md) for exactly
   what's dropped and why that's safe, not a shortcut.
 
 ## Packages
@@ -144,7 +144,7 @@ SQLite-only (`Papuma.Kernel.Local`):
 | `Papuma.Kernel.Local` | SQLite kernel — same model, single-writer embedded/desktop use, no server |
 | `Papuma.Kernel.AspNetCore` | optional ASP.NET Core integration — tenant middleware, feed-lag health check, embedded dashboard |
 | `Papuma.Kernel.Mcp` | optional MCP server — read-only diagnostics + masked content tools for agents |
-| `Papuma.Kernel.FSharp` | optional F# facade — quotation-based Patch, `Result`-returning writes; works with either kernel ([details](src/Papuma.Kernel.FSharp/README.md)) |
+| `Papuma.Kernel.FSharp` | optional F# facade — quotation-based Patch, `Result`-returning writes; works with either kernel ([details](https://github.com/papumabiz/Papuma.Kernel/blob/master/src/Papuma.Kernel.FSharp/README.md)) |
 
 `Papuma.Kernel.Core` (diff engine, policies, model, validation) is shared
 internally by the two kernels; it is not independently published — its
@@ -154,35 +154,35 @@ assembly ships embedded inside whichever kernel package you install.
 
 | Sample | Shows |
 |---|---|
-| [shop-minimal-api](samples/shop-minimal-api) | the breadth — a mini shop touching every kernel concept: approval workflows with humans in the loop, saga compensation, inventory that cannot oversell, realtime UI push, the MCP endpoint and the dashboard |
-| [event-modeled-slices](samples/event-modeled-slices) | the *shape* — one vertical slice of each Event Modeling type (Command/View/Automation) with a pure, infrastructure-free Decider test |
-| [polyglot-consumers](samples/polyglot-consumers) | the feed as a cross-language contract — Python (psycopg3) and Go (pgx) consumers, ~50 lines each |
-| [fsharp-local-todo](samples/fsharp-local-todo) | `Papuma.Kernel.FSharp` end to end, on `Papuma.Kernel.Local` (SQLite — no server, no Docker) |
+| [shop-minimal-api](https://github.com/papumabiz/Papuma.Kernel/tree/master/samples/shop-minimal-api) | the breadth — a mini shop touching every kernel concept: approval workflows with humans in the loop, saga compensation, inventory that cannot oversell, realtime UI push, the MCP endpoint and the dashboard |
+| [event-modeled-slices](https://github.com/papumabiz/Papuma.Kernel/tree/master/samples/event-modeled-slices) | the *shape* — one vertical slice of each Event Modeling type (Command/View/Automation) with a pure, infrastructure-free Decider test |
+| [polyglot-consumers](https://github.com/papumabiz/Papuma.Kernel/tree/master/samples/polyglot-consumers) | the feed as a cross-language contract — Python (psycopg3) and Go (pgx) consumers, ~50 lines each |
+| [fsharp-local-todo](https://github.com/papumabiz/Papuma.Kernel/tree/master/samples/fsharp-local-todo) | `Papuma.Kernel.FSharp` end to end, on `Papuma.Kernel.Local` (SQLite — no server, no Docker) |
 
 The first three samples run against `Papuma.Kernel` (Postgres);
 `fsharp-local-todo` is the first sample against `Papuma.Kernel.Local`.
 
 ## Recipes
 
-Pattern guides on kernel primitives ([docs/recipes](docs/recipes)):
-[workflow-saga](docs/recipes/workflow-saga.md) ·
-[realtime-ui-notifications](docs/recipes/realtime-ui-notifications.md) ·
-[external-read-models](docs/recipes/external-read-models.md) (search/vector/cache) ·
-[nats-bridge](docs/recipes/nats-bridge.md) ·
-[field-level-encryption](docs/recipes/field-level-encryption.md) ·
-[event-modeling-slices](docs/recipes/event-modeling-slices.md) ·
-[ai-consumers](docs/recipes/ai-consumers.md).
+Pattern guides on kernel primitives ([docs/recipes](https://github.com/papumabiz/Papuma.Kernel/tree/master/docs/recipes)):
+[workflow-saga](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/recipes/workflow-saga.md) ·
+[realtime-ui-notifications](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/recipes/realtime-ui-notifications.md) ·
+[external-read-models](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/recipes/external-read-models.md) (search/vector/cache) ·
+[nats-bridge](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/recipes/nats-bridge.md) ·
+[field-level-encryption](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/recipes/field-level-encryption.md) ·
+[event-modeling-slices](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/recipes/event-modeling-slices.md) ·
+[ai-consumers](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/recipes/ai-consumers.md).
 
 ## Documentation map
 
-- **Start:** [tutorial.md](docs/tutorial.md) — build one app end to end (guided) · [getting-started.md](docs/getting-started.md) — the five-minute API tour · marketing one-pager: [factsheet.md](docs/factsheet.md)
-- **Architecture:** [architecture.md](docs/architecture.md) · the *why* behind every decision: [concepts.md](docs/concepts.md)
-- **Decisions:** [18 ADRs](docs/adr) — each a single, dated, reversible choice
-- **`Papuma.Kernel.Local` (SQLite):** [design rationale and what's different per engine](docs/analyses/local-kernel-sqlite-sibling.md) — no dedicated getting-started yet; the write/read API mirrors `Papuma.Kernel`'s (`SaveAsync`/`LoadAsync`/`PatchAsync`/… on `SqliteDocumentSession`, `AddPapumaKernelLocal` for hosting)
-- **Cross-language:** the [feed wire format](docs/feed-wire-format.md) consumers rely on
-- **Agents:** [llms.txt](llms.txt) and `docs/ai/` are shipped inside the NuGet package
-- **Recipes:** [pattern guides](docs/recipes) on kernel primitives
-- Frozen 0.x/v1 material (German, unmaintained) lives under [docs/legacy](docs/legacy).
+- **Start:** [tutorial.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/tutorial.md) — build one app end to end (guided) · [getting-started.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/getting-started.md) — the five-minute API tour · marketing one-pager: [factsheet.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/factsheet.md)
+- **Architecture:** [architecture.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/architecture.md) · the *why* behind every decision: [concepts.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/concepts.md)
+- **Decisions:** [18 ADRs](https://github.com/papumabiz/Papuma.Kernel/tree/master/docs/adr) — each a single, dated, reversible choice
+- **`Papuma.Kernel.Local` (SQLite):** [design rationale and what's different per engine](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/analyses/local-kernel-sqlite-sibling.md) — no dedicated getting-started yet; the write/read API mirrors `Papuma.Kernel`'s (`SaveAsync`/`LoadAsync`/`PatchAsync`/… on `SqliteDocumentSession`, `AddPapumaKernelLocal` for hosting)
+- **Cross-language:** the [feed wire format](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/feed-wire-format.md) consumers rely on
+- **Agents:** [llms.txt](https://github.com/papumabiz/Papuma.Kernel/blob/master/llms.txt) and `docs/ai/` are shipped inside the NuGet package
+- **Recipes:** [pattern guides](https://github.com/papumabiz/Papuma.Kernel/tree/master/docs/recipes) on kernel primitives
+- Frozen 0.x/v1 material (German, unmaintained) lives under [docs/legacy](https://github.com/papumabiz/Papuma.Kernel/tree/master/docs/legacy).
 
 ## Maturity, stated plainly
 
@@ -214,17 +214,17 @@ way.
   `Papuma.Kernel` exploits PostgreSQL ≥ 18 without apology; `Papuma.Kernel.Local`
   is an independent SQLite implementation sharing the model, not a storage
   seam bolted under one codebase — see
-  [why that's a different (and deliberate) design](docs/analyses/local-kernel-sqlite-sibling.md#1-why-this-doesnt-reopen-adr-001).
+  [why that's a different (and deliberate) design](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/analyses/local-kernel-sqlite-sibling.md#1-why-this-doesnt-reopen-adr-001).
 - **Not a workflow/BPMN engine** — durable state machines and timers are
   documented patterns on kernel primitives (with running sample code).
 
 ## Contributing
 
-Issues and pull requests are welcome — start with [CONTRIBUTING.md](CONTRIBUTING.md);
+Issues and pull requests are welcome — start with [CONTRIBUTING.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/CONTRIBUTING.md);
 it covers the build prerequisites (Docker for the PostgreSQL suite), the conventions,
 and when a change needs an ADR. Security reports go through
-[SECURITY.md](SECURITY.md), never a public issue.
+[SECURITY.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/SECURITY.md), never a public issue.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](https://github.com/papumabiz/Papuma.Kernel/blob/master/LICENSE).

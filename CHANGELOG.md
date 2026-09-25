@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Packaging: one doc set in every package, with no dangling links.** All packages
+  (`Papuma.Kernel`, `.Local`, `.FSharp`, `.AspNetCore`, `.Mcp`) now ship the same
+  `docs/` set — guides, ADRs, recipes, the `ai/` set and `analyses/` — defined once in
+  `Directory.Build.targets`. Before, each package shipped its own subset, and links
+  between documents dangled depending on the package (e.g. `concepts.md` →
+  `getting-started.md` inside `Papuma.Kernel.Local`). PostgreSQL-only pages now say so at
+  the top and point `Papuma.Kernel.Local` users to the playbook's Differences section.
+  Links to files outside the set (samples, `legacy/`, repo files) are absolute GitHub
+  URLs; the package READMEs link only absolutely, since nuget.org resolves no relative
+  link (this also fixes the logo there). A new test (`PackagedDocsLinkTests`) fails on
+  any link or heading anchor that would dangle inside a package. The AGENTS snippet now
+  tells agents to read the docs from the package folder of the version they build
+  against.
 - **Docs: consumer feedback from jejak.** `getting-started.md` gains §7 "Without a
   host" (hand-built store, `ChangeFeedProcessor.ProcessOnceAsync`, the integration-test
   shape the kernel's own suite uses), the tenant id pattern and the single-path limit

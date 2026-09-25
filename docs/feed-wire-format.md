@@ -2,10 +2,14 @@
 
 Status: verified against `SchemaDdl.cs` and the diff engine (2026-06-13)
 
+> **PostgreSQL kernel only.** `Papuma.Kernel.Local` stores its feed in an embedded
+> SQLite file that no second process reads; this contract does not apply to it —
+> see the playbook's [Differences section](ai/papuma-kernel-playbook.md#differences-when-using-papumakernellocal-sqlite-embedded).
+
 This is the contract for consuming the change feed and event log from **any
 language** (concepts §21). The feed is two ordinary PostgreSQL tables; this
 document is everything you need to write a correct consumer without the .NET
-library. Runnable references: [samples/polyglot-consumers](../samples/polyglot-consumers/README.md).
+library. Runnable references: [samples/polyglot-consumers](https://github.com/papumabiz/Papuma.Kernel/blob/master/samples/polyglot-consumers/README.md).
 
 The kernel guarantees this format is stable; treat it as the public API it is.
 

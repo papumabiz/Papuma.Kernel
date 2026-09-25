@@ -3,6 +3,10 @@
 Status: verified end-to-end against the implemented API (2026-06-13, PostgreSQL
 18 via container).
 
+> **PostgreSQL kernel only.** Building on `Papuma.Kernel.Local` (SQLite)? The
+> domain steps carry over, the setup does not — read the playbook's
+> [Differences section](ai/papuma-kernel-playbook.md#differences-when-using-papumakernellocal-sqlite-embedded) first.
+
 This is the **learning-oriented** path: you will build one small application from
 an empty folder to a running app where a change you make to a document flows —
 untouched by any wiring of yours — into a live read model. By the end you will
@@ -361,12 +365,12 @@ You now know the core loop: **document → session/commit → derived feed →
 handler**, with versioning and privacy built in. Pick your direction:
 
 - **Breadth — every feature as running code.** The
-  [shop-minimal-api sample](../samples/shop-minimal-api) extends exactly this
+  [shop-minimal-api sample](https://github.com/papumabiz/Papuma.Kernel/tree/master/samples/shop-minimal-api) extends exactly this
   loop with approval workflows, saga compensation, a bounded counter that cannot
   oversell, realtime UI push, the MCP endpoint and the dashboard. Pair it with
   the [recipes](recipes/).
 - **An architecture to build *this* way.** If you like vertical slices and Event
-  Modeling (Dymitruk/Dilger), the [event-modeled-slices sample](../samples/event-modeled-slices)
+  Modeling (Dymitruk/Dilger), the [event-modeled-slices sample](https://github.com/papumabiz/Papuma.Kernel/tree/master/samples/event-modeled-slices)
   and the [slice recipe](recipes/event-modeling-slices.md) show the shape — one
   Command/View/Automation slice each, with infrastructure-free tests. Entirely
   optional; the kernel does not require it.

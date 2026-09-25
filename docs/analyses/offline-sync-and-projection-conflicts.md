@@ -136,7 +136,7 @@ UIs").
 ### 2.5 What would need to be built
 
 One additive extension package — same shape as the existing
-[ChangeFeed DSL](../legacy/change-feed-architecture.md), i.e. a new project
+[ChangeFeed DSL](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/legacy/change-feed-architecture.md), i.e. a new project
 referencing `Papuma.Kernel`, touching nothing inside it:
 
 - Local outbox storage on the desktop client (not a kernel concern).

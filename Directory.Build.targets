@@ -4,4 +4,18 @@
   <ItemGroup Condition="'$(IsPackable)' == 'true'">
     <None Include="$(MSBuildThisFileDirectory)assets/logo.png" Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>
+
+  <!-- Agent-readable documentation: every package ships the same doc set, so after restore
+       a coding agent finds the docs of exactly the version it builds against in the global
+       packages folder, whichever Papuma package it references. PackagePaths mirror the repo
+       layout, so relative links resolve inside the package; links to anything outside this
+       set must be absolute. PackagedDocsLinkTests reads this item group (by its label) and
+       fails on any link that would dangle in the package. -->
+  <ItemGroup Label="PackagedDocs" Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)docs/*.md" Pack="true" PackagePath="docs\" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)docs/adr/*.md" Pack="true" PackagePath="docs\adr\" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)docs/ai/*.md" Pack="true" PackagePath="docs\ai\" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)docs/analyses/*.md" Pack="true" PackagePath="docs\analyses\" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)docs/recipes/*.md" Pack="true" PackagePath="docs\recipes\" Visible="false" />
+  </ItemGroup>
 </Project>

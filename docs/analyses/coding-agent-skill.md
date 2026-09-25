@@ -21,7 +21,7 @@ itself, not to design a maximal one.
 
 ## 1. What already exists, and what a Skill mechanically adds
 
-`docs/ai/` today: [llms.txt](../../llms.txt) as an index, a
+`docs/ai/` today: [llms.txt](https://github.com/papumabiz/Papuma.Kernel/blob/master/llms.txt) as an index, a
 [playbook](../ai/papuma-kernel-playbook.md) (mental model + hard rules +
 decision tree + troubleshooting), an
 [AGENTS.md snippet](../ai/papuma-kernel-agents-snippet.md) meant to be copied

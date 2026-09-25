@@ -1,5 +1,11 @@
 # Papuma Kernel — Documentation
 
+The same doc set ships inside every Papuma NuGet package under `docs/`, so a
+coding agent can read the docs of exactly the version it builds against. Pages
+describe the PostgreSQL kernel unless they say otherwise; `Papuma.Kernel.Local`
+(SQLite) differences are collected in the playbook's
+[Differences section](ai/papuma-kernel-playbook.md#differences-when-using-papumakernellocal-sqlite-embedded).
+
 | Start here | |
 |---|---|
 | [tutorial.md](tutorial.md) | build one application end to end, guided |
@@ -17,7 +23,7 @@
 
 | Other | |
 |---|---|
-| [ai/](ai/) | the coding-agent doc set, shipped inside the NuGet packages (see also [llms.txt](../llms.txt)) |
+| [ai/](ai/) | the coding-agent doc set, shipped inside the NuGet packages (see also [llms.txt](https://github.com/papumabiz/Papuma.Kernel/blob/master/llms.txt)) |
 | [analyses/](analyses/) | explorations that are not decisions — ideas, trade-offs, open questions |
 | [factsheet.md](factsheet.md) · [factsheet-technical.md](factsheet-technical.md) | one-pagers |
-| [legacy/](legacy/) | frozen 0.x/v1 material, mostly German, unmaintained |
+| [legacy/](https://github.com/papumabiz/Papuma.Kernel/tree/master/docs/legacy) | frozen 0.x/v1 material, mostly German, unmaintained |

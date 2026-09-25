@@ -1,7 +1,7 @@
 # Papuma Kernel — Concepts Explained
 
 Status: living document (started 2026-06-11) ·
-[Deutsche Fassung (eingefroren, 2026-06-12)](legacy/concepts.de.md)
+[Deutsche Fassung (eingefroren, 2026-06-12)](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/legacy/concepts.de.md)
 
 The ADRs record *decisions* — this document explains the *mechanisms behind them*,
 with the examples and lines of thought from the design and implementation phase.
@@ -782,7 +782,7 @@ are two consumption paths, with a clear decision rule.
 replicates the poll loop in ~50 lines and may even keep its position in the
 same `papuma.checkpoint` table (`handler_name` is just text — pick a unique
 one). Runnable Python and Go clients live in
-[samples/polyglot-consumers](../samples/polyglot-consumers/README.md),
+[samples/polyglot-consumers](https://github.com/papumabiz/Papuma.Kernel/blob/master/samples/polyglot-consumers/README.md),
 verified against the real feed. Three things such a consumer must take
 seriously:
 
@@ -1205,7 +1205,7 @@ projections and audit trails remain complete.
 
 ## 29. F# as a facade, not a rewrite — and why the wire format stays closed
 
-→ [src/Papuma.Kernel.FSharp](../src/Papuma.Kernel.FSharp) (prototype),
+→ [src/Papuma.Kernel.FSharp](https://github.com/papumabiz/Papuma.Kernel/tree/master/src/Papuma.Kernel.FSharp) (prototype),
 §21 (polyglot consumers, the same "one deterministic wire format" argument)
 
 The kernel is authored in C#, and stays that way — not by default, by choice.
