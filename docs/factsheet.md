@@ -65,15 +65,18 @@ reversible field diff.
 
 | | |
 |---|---|
-| **Write primitives** | Save/Delete with mandatory version check · single-statement patches (`Set`/`Remove`/`Increment`) · set-based bulk operations · append-only rollback · the atomic bounded counter (never oversell — proven under 12-way concurrency) |
-| **Multi-tenancy** | Two independent isolation layers: explicit scope predicates in every query **plus** PostgreSQL row-level security. An erasure in tenant A provably cannot touch tenant B. |
+| **Write primitives** | Save/Delete with mandatory version check · single-statement patches (`Set`/`Remove`/`Increment`) · set-based bulk operations · append-only rollback · the atomic bounded counter (never oversell — proven under 12-way concurrency) · every write hands back the persisted document — the next ticket number without a second read |
+| **Declared keys** | Unique and lookup keys as partial expression indexes — including **composite keys** ("number unique per project") without a helper field to keep in sync |
+| **Multi-tenancy** | Two independent isolation layers: explicit scope predicates in every query **plus** PostgreSQL row-level security. An erasure in tenant A provably cannot touch tenant B — and your own read-model tables in the same database get the same row-level security through two SQL functions. |
 | **Privacy by construction** | Field policies (`Redact`/`Hash`/`Reference`/`DoNotTrack`) applied **inside the write transaction** — sensitive values never reach the feed, the logs, the traces, or your AI consumers. |
 | **GDPR tooling** | Art.-30 data inventory from the metamodel · Art.-15/20 subject export (one consistent snapshot) · history redaction with mandatory audit trail for the Art.-17 edge cases |
 | **Processing engine** | Strict per-handler ordering · persisted checkpoints · retry with backoff · poison handling · rebuild = one call · leader failover via `FOR UPDATE SKIP LOCKED` — no ZooKeeper, no extra infrastructure |
 | **Event log** | First-class facts (`UserLoggedIn`) next to state changes, same transaction, same policies, per-type retention |
 | **Schema evolution** | Lazy upcasting with version guards — class changes are a tested function, not a migration weekend |
 | **Observability** | BCL `Meter` + `ActivitySource` (zero vendor dependencies) · OpenTelemetry-ready · feed-lag health check · trace propagation from request to projection · **embedded live dashboard** (`MapPapumaDashboard()`) for the day before Prometheus exists |
-| **AI-ready** | MCP server over the diagnostics APIs **and scope-bound, policy-masked reads** (read-only by default) · agent playbook and docs shipped inside the NuGet package · the policy-minimized feed is safe LLM reading material by construction |
+| **AI-ready** | MCP server over the diagnostics APIs **and scope-bound, policy-masked reads** (read-only by default) · agent playbook and docs shipped inside every NuGet package, for exactly the version you build against · the policy-minimized feed is safe LLM reading material by construction |
+| **Testing that doesn't lie** | `Papuma.Kernel.Testing` runs your integration tests as a non-superuser role — so row-level security is actually exercised, not silently bypassed — and drains feeds deterministically, failing loudly when a handler throws. Works with any test framework. |
+| **F#, first-class** | `Papuma.Kernel.FSharp`: `Result` instead of exceptions for the expected outcomes, plain F# lambdas for patches and keys, on either kernel |
 
 ---
 
@@ -88,8 +91,8 @@ Measured on commodity hardware (i7, local PG-18 container; reusable probes in
 | Feed engine ceiling (delivery overhead per change) | ~37 µs |
 | Realistic projection handler (1 SQL upsert per change) | ~1,400 changes/s |
 | Diff engine, 1,000-field document | ~0.3 ms |
-| Integration tests against real PostgreSQL 18 | 167, green |
-| Architecture decision records | 16 |
+| Test suite against real PostgreSQL 18, every CI build | 207, green |
+| Architecture decision records | 21 |
 
 Scaling limits are not hidden — they are documented with the metric that
 detects them and the designed escape route for each
@@ -106,12 +109,13 @@ detects them and the designed escape route for each
   into exactly-once with one line of dedup.
 - **SQL stays a first-class citizen** — views over the JSONB store are a
   sanctioned read lens; reporting and BI need no export pipeline.
-- **Three runnable samples** carry it from breadth to shape to reach: a
+- **Four runnable samples** carry it from breadth to shape to reach: a
   mini-shop Minimal API exercising every concept (approval workflows with humans
   in the loop, saga compensation, inventory that cannot oversell, realtime UI
   push, the MCP endpoint and the dashboard); a set of event-modeled vertical
   slices (one Command/View/Automation each, with an infrastructure-free Decider
-  test); and Python + Go feed consumers proving the cross-language wire format.
+  test); Python + Go feed consumers proving the cross-language wire format; and
+  an F# API on the SQLite kernel.
 
 ---
 
@@ -135,7 +139,7 @@ Honesty is cheaper than disappointment:
 
 ## Maturity, stated plainly
 
-`1.1.0` — the design is complete (13 implementation phases, 16 ADRs,
+`1.2.1` — the design is complete (13 implementation phases, 21 ADRs,
 every identified risk closed with tests or measurements), but it has **not yet
 carried production traffic**. Best fit today: internal line-of-business
 systems and new products built by teams that control their PostgreSQL version.
@@ -189,7 +193,7 @@ Every one of these is documented with the reasoning, not just the diff — see
 [docs/analyses/local-kernel-sqlite-sibling.md](analyses/local-kernel-sqlite-sibling.md).
 
 **Maturity, stated with the same honesty as above:** newer than the Postgres
-kernel. Full API parity, **58 tests green against the real SQLite engine**
+kernel. Full API parity, **62 tests green against the real SQLite engine**
 (including empirically pinned driver behavior — WAL mode, busy timeouts,
 expression-index matching — not assumed), but no production hours yet and no
 throughput benchmarks, only correctness. Right tool for local desktop/mobile
@@ -236,7 +240,8 @@ Schema, indexes and row-level security are created idempotently at startup.
 There is no migration step. There is no step two.
 
 **Packages:** `Papuma.Kernel` (Postgres) · `Papuma.Kernel.Local` (SQLite) ·
-`Papuma.Kernel.AspNetCore` · `Papuma.Kernel.Mcp`
+`Papuma.Kernel.AspNetCore` · `Papuma.Kernel.Mcp` · `Papuma.Kernel.Testing` ·
+`Papuma.Kernel.FSharp`
 **Docs:** shipped inside the package under `docs/`, and at
 [github.com/papumabiz/Papuma.Kernel](https://github.com/papumabiz/Papuma.Kernel)
 — start with `docs/getting-started.md` (Postgres) or

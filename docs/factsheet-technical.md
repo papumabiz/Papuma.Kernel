@@ -1,6 +1,7 @@
 # Papuma Kernel — Technical Factsheet
 
-Version `1.1.0` · Target framework .NET 10 · MIT licensed
+Version `1.2.1` · Target framework .NET 10 · MIT licensed · reflects `master`, including
+the changes listed under *Unreleased* in the CHANGELOG
 
 Two persistence kernels for .NET, sharing one document-sourced model:
 `Papuma.Kernel` (requires PostgreSQL ≥ 18, for servers) and
@@ -59,16 +60,19 @@ Three properties follow directly from this, rather than from added machinery:
 
 | Area | Contents |
 |---|---|
-| Write primitives | `SaveAsync`/`DeleteAsync` with mandatory version check; single-statement patches (`Set`/`Remove`/`Increment`); set-based bulk operations (`PatchWhereAsync`/`DeleteWhereAsync`); append-only `RollbackAsync`; an atomic bounded counter (validated under 12-way concurrency). |
-| Reads | `LoadAsync`/`LoadByKeyAsync` over declared, indexed keys — transactionally consistent, no feed involvement. `LoadMaskedAsync` returns a document with field policies applied on read (ADR-016). Derived and aggregated reads are projections; SQL views over the JSONB store are a supported but gated read lens. |
+| Write primitives | `SaveAsync`/`DeleteAsync` with mandatory version check; single-statement patches (`Set`/`Remove`/`Increment`); set-based bulk operations (`PatchWhereAsync`/`DeleteWhereAsync`); append-only `RollbackAsync`; an atomic bounded counter (validated under 12-way concurrency). Every write result exposes the persisted document (`SaveResult.GetDocument<T>()`) — e.g. the value an `Increment` produced, without a second read. |
+| Keys | Unique and lookup keys declared in the metamodel, materialized as partial expression indexes — single-field or composite over several fields (`UniqueKey(x => new { x.ProjectId, x.Number })`, ADR-020). A violation is a typed `UniqueKeyViolationException`. |
+| Reads | `LoadAsync`/`LoadByKeyAsync` over declared, indexed keys (composite keys with one value per component) — transactionally consistent, no feed involvement. `LoadMaskedAsync` returns a document with field policies applied on read (ADR-016). Derived and aggregated reads are projections; SQL views over the JSONB store are a supported but gated read lens. |
 | Processing engine | Strict per-handler ordering; persisted per-handler checkpoints (`papuma.checkpoint`); retry with backoff; poison-record skip with alarm; rebuild via checkpoint reset + replay; multi-instance leader failover via `FOR UPDATE SKIP LOCKED`. NOTIFY-driven with polling as the correctness floor. No external coordinator. |
-| Multi-tenancy | Two independent isolation layers: explicit scope predicates in every query, plus PostgreSQL row-level security. Every session is scope-bound (`Platform` or `Tenant(id)`). |
+| Multi-tenancy | Two independent isolation layers: explicit scope predicates in every query, plus PostgreSQL row-level security; fail-closed. Every session is scope-bound (`Platform` or `Tenant(id)`; GUID tenant ids via `Tenant(Guid)`). Application tables in the same database join the row-level security through `papuma.scope_visible`/`scope_writable` (ADR-019). |
 | Field policies | `Redact` / `Hash` / `Reference` / `DoNotTrack`, applied inside the write transaction. Sensitive values do not enter the feed, logs, traces, or downstream consumers. The same policy definition is enforced on the masked read path. |
 | GDPR tooling | Art. 30 data inventory built from the metamodel; Art. 15/20 subject export as one consistent snapshot; history redaction with a mandatory audit trail for Art. 17 cases. |
 | Event log | First-class facts (e.g. `UserLoggedIn`) alongside state changes — same transaction, same policies, per-type retention. Events have no upcasting; a new shape is a new type. |
 | Schema evolution | Lazy upcasting with version guards. A class change is a registered `Upcast(fromVersion, …)` function; additive changes need none. Persistence follows on the next save. |
 | Observability | BCL `Meter` + `ActivitySource` (no vendor SDK), OpenTelemetry-compatible; feed-lag health check; trace propagation from request to projection; an embedded dashboard via `MapPapumaDashboard()`. |
-| MCP surface | `Papuma.Kernel.Mcp` exposes the diagnostics APIs and scope-bound, policy-masked reads (read-only, opt-in per document type). The policy-minimized feed is low-PII by construction. |
+| MCP surface | `Papuma.Kernel.Mcp` exposes the diagnostics APIs and scope-bound, policy-masked reads (read-only, opt-in per document type), over stateless Streamable HTTP or stdio. The policy-minimized feed is low-PII by construction. |
+| Testing | `Papuma.Kernel.Testing`: a PostgreSQL 18 test database (Testcontainers or an existing server) with a non-superuser application role, so tests exercise row-level security; `DrainAsync()` runs feed handlers deterministically and fails on handler errors. Test-framework agnostic (ADR-021). |
+| F# | `Papuma.Kernel.FSharp`: `Result`-returning writes for the expected outcomes and an `IAsyncDisposable`-safe session runner; patches and keys take plain F# lambdas. Works with either kernel. |
 
 ---
 
@@ -83,7 +87,7 @@ Commodity hardware (i7, local PostgreSQL 18 container). The probes are in
 | Feed delivery overhead per change | ~37 µs |
 | Projection handler, 1 SQL upsert per change | ~1,400 changes/s |
 | Diff of a 1,000-field document | ~0.3 ms |
-| Integration tests against real PostgreSQL 18 | 167, passing |
+| Test suite against real PostgreSQL 18 (per CI build) | 207, passing |
 
 Known scaling limits are documented alongside the metric that detects each and
 the intended mitigation (`docs/concepts.md §14`) rather than left implicit.
@@ -101,6 +105,9 @@ the intended mitigation (`docs/concepts.md §14`) rather than left implicit.
 - **SQL reporting.** Views over the JSONB store serve reporting and BI without an
   export pipeline, subject to `security_invoker = on` and the read-lens
   conditions in `concepts.md §16`.
+- **Read models in the same database.** Projection tables keep the kernel's
+  row-level security via the ADR-019 scope functions — a query that forgets its
+  tenant filter returns nothing rather than another tenant's rows.
 
 ---
 
@@ -123,15 +130,16 @@ the intended mitigation (`docs/concepts.md §14`) rather than left implicit.
 
 ## 6. Maturity (`Papuma.Kernel`)
 
-The design is complete: 13 implementation phases, 16 ADRs, each identified risk
-closed with a test or a measurement. It has **not yet run production traffic**.
+The design is complete: 13 implementation phases, 21 ADRs, each identified risk
+closed with a test or a measurement; the full suite runs against real
+PostgreSQL 18 on every CI build. It has **not yet run production traffic**.
 Suitable today for internal line-of-business systems and new products by teams
 that control their PostgreSQL version. For regulated or mission-critical
 workloads, run a pilot first; the observability needed to evaluate it is built
 in.
 
 `Papuma.Kernel.Local` is newer and earlier-stage: full API parity with the
-Postgres kernel's write/read/patch/GDPR/rollback/feed-processing surface, 58
+Postgres kernel's write/read/patch/GDPR/rollback/feed-processing surface, 62
 tests green against the real SQLite engine (including empirically pinned
 driver behavior — WAL mode, busy timeouts, expression-index matching — not
 assumed), but zero production hours and no throughput measurements yet, only
@@ -199,7 +207,7 @@ solve multi-writer problems:
 | Row isolation | explicit scope predicates **plus** PostgreSQL row-level security | explicit scope predicates only — no second process to defend against |
 | Leader coordination | `FOR UPDATE SKIP LOCKED` across concurrent processor instances | not needed — a single-writer store has exactly one instance |
 | Patch application | generated `jsonb_set`/`#-` SQL expressions | applied in-process against the loaded JSON (`JsonPatchApplier`), then written back |
-| Declared-key indexes | `data #>> '{path,segments}'` expression index | `json_extract(data,'$.path')` expression index, with the path interpolated as a SQL literal, not bound as a parameter — SQLite's planner only matches an expression index when the query text is identical to the index definition |
+| Declared-key indexes | `data #>> '{path,segments}'` expression index, one expression per component of a composite key | `json_extract(data,'$.path')` expression index (likewise per component), with the path interpolated as a SQL literal, not bound as a parameter — SQLite's planner only matches an expression index when the query text is identical to the index definition |
 | Unique-violation detection | structured Postgres constraint name | `SqliteErrorCode == 19` + regex-extracted index name from `ex.Message` (no structured constraint-name property in the driver) |
 
 Two correctness details worth calling out because they were bugs, not design
@@ -242,7 +250,8 @@ empirically (`SqliteConnectionFactoryTests`), not assumed.
 See §6 — same statement, not repeated with different numbers.
 
 **Packages:** `Papuma.Kernel` (Postgres) · `Papuma.Kernel.Local` (SQLite) ·
-`Papuma.Kernel.AspNetCore` · `Papuma.Kernel.Mcp` · `Papuma.Kernel.Testing`
+`Papuma.Kernel.AspNetCore` · `Papuma.Kernel.Mcp` · `Papuma.Kernel.Testing` ·
+`Papuma.Kernel.FSharp`
 **Documentation:** shipped in the package under `docs/` and at
 [github.com/papumabiz/Papuma.Kernel](https://github.com/papumabiz/Papuma.Kernel);
 start with `docs/getting-started.md` (Postgres) or
