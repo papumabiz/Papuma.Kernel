@@ -168,19 +168,52 @@ using var processor = new ChangeFeedProcessor(dataSource, [new UserProjection()]
 await processor.ProcessOnceAsync();
 ```
 
-For integration tests, the kernel's own suite uses this shape
-(`tests/Papuma.Kernel.Tests/Infrastructure/PostgresFixture.cs` in the repo):
+### Integration tests: `Papuma.Kernel.Testing`
 
-- **One `postgres:18` container per test run** (Testcontainers), shared by all
-  tests; `EnsureSchemaAsync` is idempotent, so every test class may call it.
-- **A fresh tenant per test** — `ScopeContext.Tenant(Guid.NewGuid())` —
-  isolates tests without truncating tables.
-- **Connect as a non-superuser role** when a test asserts isolation: superusers
-  bypass row-level security, so a superuser connection hides RLS bugs. Grant the
-  role access to the `papuma` schema after `EnsureSchemaAsync`.
-- **Feed handlers see every tenant.** In a shared database, give each test's
-  handler a unique `Name` (its own checkpoint) and filter on `change.Scope`, or
-  the handler also receives the other tests' changes.
+The package sets up what a test database needs and runs feeds deterministically
+(ADR-021); the kernel's own suite runs on it. Test-framework agnostic — here as an
+xUnit collection fixture:
+
+```csharp
+public sealed class DatabaseFixture : IAsyncLifetime
+{
+    public PapumaTestDatabase Database { get; private set; } = null!;
+    public async Task InitializeAsync() => Database = await PapumaTestDatabase.StartAsync();   // postgres:18 via Testcontainers
+    public async Task DisposeAsync() => await Database.DisposeAsync();
+}
+
+// in a test class
+var store = await fixture.Database.CreateStoreAsync(model);          // schema + grants, runs as the app role
+await using var session = store.OpenSession(ScopeContext.Tenant(Guid.NewGuid()));
+// … write …
+
+using var processor = new ChangeFeedProcessor(fixture.Database.AppDataSource, [new UserProjection()]);
+await processor.DrainAsync();   // until nothing is left; throws FeedDrainException if a handler failed
+```
+
+Why it is more than convenience:
+
+- **`AppDataSource` is not a superuser.** Superusers bypass row-level security, so
+  a test suite on the container's default user passes even when tenant isolation
+  is broken. Build stores and processors on `AppDataSource`; use
+  `OwnerDataSource` only for setup and inspection. After creating tables of your
+  own (ADR-019), call `GrantAppRoleAsync("your_schema")`.
+- **`DrainAsync` surfaces handler failures.** A throwing handler stops its feed
+  and a cycle simply delivers nothing — a hand-written "process until 0" loop
+  reports success over the exception.
+
+No container runtime? `PapumaTestDatabase.ConnectAsync(ownerConnectionString)`
+uses an existing server (a CI service container, say).
+
+Tests share one database, so isolate them by data:
+
+- **A fresh tenant per test** — `ScopeContext.Tenant(Guid.NewGuid())`.
+- **A unique handler `Name` per processor** (its own checkpoint), filtering on
+  `change.Scope` — feed handlers see every tenant, and a new handler starts at the
+  beginning of the feed.
+- **Document type names unique across test classes** — key indexes are per
+  document type and database-wide, so two test classes with a `Ticket` type and
+  different keys constrain each other.
 
 ## Further reading
 

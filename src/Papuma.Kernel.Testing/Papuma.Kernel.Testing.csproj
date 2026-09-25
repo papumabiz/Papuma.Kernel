@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Papuma.Kernel.Testing</PackageId>
+    <Description>Integration-test support for applications on Papuma.Kernel — a PostgreSQL 18 test database (Testcontainers or an existing server) with a non-superuser application role so row-level security is actually exercised, and feed draining for change and event handlers. Test-framework agnostic.</Description>
+    <PackageTags>testing;testcontainers;postgresql;row-level-security;change-feed</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Testcontainers.PostgreSql" Version="4.15.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Papuma.Kernel\Papuma.Kernel.csproj" />
+    <!-- Compiles directly against Core types (e.g. KernelModel, FeedFailure); PrivateAssets
+         suppresses a phantom nuspec dependency on the unpublished Papuma.Kernel.Core —
+         Core.dll already reaches consumers via the Papuma.Kernel package dependency. -->
+    <ProjectReference Include="..\Papuma.Kernel.Core\Papuma.Kernel.Core.csproj">
+      <PrivateAssets>all</PrivateAssets>
+    </ProjectReference>
+  </ItemGroup>
+
+</Project>

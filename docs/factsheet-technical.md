@@ -242,7 +242,7 @@ empirically (`SqliteConnectionFactoryTests`), not assumed.
 See §6 — same statement, not repeated with different numbers.
 
 **Packages:** `Papuma.Kernel` (Postgres) · `Papuma.Kernel.Local` (SQLite) ·
-`Papuma.Kernel.AspNetCore` · `Papuma.Kernel.Mcp`
+`Papuma.Kernel.AspNetCore` · `Papuma.Kernel.Mcp` · `Papuma.Kernel.Testing`
 **Documentation:** shipped in the package under `docs/` and at
 [github.com/papumabiz/Papuma.Kernel](https://github.com/papumabiz/Papuma.Kernel);
 start with `docs/getting-started.md` (Postgres) or

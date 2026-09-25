@@ -7,7 +7,7 @@ called out separately below).
 
 This document is the entry map. The truth lives in the reference chain:
 [getting-started.md](../getting-started.md) (the API in 5 minutes) →
-[concepts.md](../concepts.md) (the why, §1–§31) →
+[concepts.md](../concepts.md) (the why, §1–§32) →
 [ADRs](../adr/) (binding decisions) →
 [architecture.md](../architecture.md) (data model, namespaces).
 
@@ -102,7 +102,8 @@ Typed errors you should handle (not swallow): `ConcurrencyException`,
 | …hand out sequential numbers (ticket keys, invoices) | `PatchAsync(id, p => p.Increment(x => x.Next))`, then `result.GetDocument<T>().Next` — atomic, no reload; make the command idempotent, or a retry issues a second number (concepts §17) |
 | …enforce uniqueness over two fields ("number per project") | composite key `UniqueKey(x => new { x.ProjectId, x.Number })`; lookup `LoadByKeyAsync<T>(x => new { … }, ["p1", 42])` — no flattened helper field (ADR-020) |
 | …use a GUID as tenant id | `ScopeContext.Tenant(guid)` — canonical lowercase dashed form; string ids match `^[A-Za-z0-9][A-Za-z0-9_-]{1,100}$` and compare case-sensitively |
-| …use the store in tests/tools without a host | `SchemaManager.EnsureSchemaAsync(dataSource, model)` + `new DocumentStore(dataSource, model)`; handlers via `ChangeFeedProcessor.ProcessOnceAsync()` ([getting-started §7](../getting-started.md#7-without-a-host-tests-tools-console-apps)) |
+| …use the store in tools without a host | `SchemaManager.EnsureSchemaAsync(dataSource, model)` + `new DocumentStore(dataSource, model)`; handlers via `ChangeFeedProcessor.ProcessOnceAsync()` ([getting-started §7](../getting-started.md#7-without-a-host-tests-tools-console-apps)) |
+| …write integration tests | `Papuma.Kernel.Testing`: `PapumaTestDatabase.StartAsync()`, `CreateStoreAsync(model)` (runs as a non-superuser role — RLS applies), `processor.DrainAsync()` (throws on handler failures); fresh tenant per test, unique handler and type names ([getting-started §7](../getting-started.md#integration-tests-papumakerneltesting), ADR-021) |
 | …react to "field X went Y→Z" | `change.IsFieldTransition(path, from, to)` in a handler (ADR-011) |
 | …add a human approval step | write a task document, handler returns; the decision = a normal write (concepts §18) |
 | …build a workflow/saga | workflow document + feed handlers + `expectedVersion`; timers = a `dueAt` poller (concepts §18) |

@@ -7,7 +7,6 @@
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageReference Include="Testcontainers.PostgreSql" Version="4.15.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
   </ItemGroup>
@@ -29,6 +28,7 @@
     <ProjectReference Include="..\..\src\Papuma.Kernel\Papuma.Kernel.csproj" />
     <ProjectReference Include="..\..\src\Papuma.Kernel.AspNetCore\Papuma.Kernel.AspNetCore.csproj" />
     <ProjectReference Include="..\..\src\Papuma.Kernel.Mcp\Papuma.Kernel.Mcp.csproj" />
+    <ProjectReference Include="..\..\src\Papuma.Kernel.Testing\Papuma.Kernel.Testing.csproj" />
   </ItemGroup>
 
 </Project>

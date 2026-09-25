@@ -52,7 +52,7 @@ This document defines the working rules for GitHub Copilot and other agents in t
 
 ## Repository Conventions
 
-- Production code lives under `src/` (`Papuma.Kernel`, `.Local`, `.Core`, `.AspNetCore`, `.Mcp`, `.FSharp`).
+- Production code lives under `src/` (`Papuma.Kernel`, `.Local`, `.Core`, `.AspNetCore`, `.Mcp`, `.FSharp`, `.Testing`).
 - Tests live under `tests/`, mirroring the project they cover.
 - Documentation lives under `docs/` — [`docs/README.md`](docs/README.md) is the map.
   `docs/legacy/` is frozen pre-1.0 material; never cite it as current.

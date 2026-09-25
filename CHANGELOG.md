@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **New package `Papuma.Kernel.Testing` (ADR-021).** `PapumaTestDatabase` starts
+  PostgreSQL 18 via Testcontainers (or connects to an existing server) and adds a
+  login role without superuser or `BYPASSRLS`, so tests exercise row-level security as
+  production does — a superuser connection passes even when isolation is broken.
+  `CreateStoreAsync(model)` applies schema and grants; `GrantAppRoleAsync(schema)`
+  covers application tables. `DrainAsync()` on `ChangeFeedProcessor` and
+  `EventFeedProcessor` runs a feed to quiescence and throws `FeedDrainException` when a
+  handler failed (a stopped feed otherwise just delivers nothing) or the feed does not
+  settle. Test-framework agnostic; the kernel's own suite now runs on it. A broader
+  package (framework adapters, change assertions) is deferred against objective
+  triggers named in the ADR. getting-started §7 and concepts §32 describe the setup.
 - **Composite keys (ADR-020).** `UniqueKey`/`LookupKey` accept an anonymous type —
   `.UniqueKey(x => new { x.ProjectId, x.Number })` — materialized as one multi-expression
   partial index on PostgreSQL and SQLite. New overload

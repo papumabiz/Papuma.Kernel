@@ -93,6 +93,7 @@ Papuma.Kernel
 └── Papuma.Kernel.Hosting      AddPapumaKernel bootstrap, hosted feed workers
 
 Papuma.Kernel.AspNetCore       tenant resolution, change-feed-lag health check
+Papuma.Kernel.Testing          test database with a non-superuser role, feed draining (ADR-021)
 ```
 
 The split into `Store / Changes / Processing` follows the sketch from the design
@@ -433,6 +434,7 @@ of documents and changes, the `DocumentSession` is always bound to a tenant, and
 | [018](adr/adr-018-causation-type-metadata.md) | Causation type as a metadata field (command name in JSONB, no schema change) | Accepted |
 | [019](adr/adr-019-scope-predicates-for-application-tables.md) | Scope predicates for application tables (papuma.scope_visible / scope_writable as the RLS contract) | Accepted |
 | [020](adr/adr-020-composite-keys.md) | Composite keys (uniqueness and lookup over several fields, one multi-expression index) | Accepted |
+| [021](adr/adr-021-testing-package.md) | A narrow, test-framework-agnostic testing package; broader one deferred against objective triggers | Accepted |
 
 ## 13. Recipes (tutorial precursors)
 

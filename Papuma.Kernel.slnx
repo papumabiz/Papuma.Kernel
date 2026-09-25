@@ -6,6 +6,7 @@
     <Project Path="src/Papuma.Kernel.Mcp/Papuma.Kernel.Mcp.csproj" />
     <Project Path="src/Papuma.Kernel.Local/Papuma.Kernel.Local.csproj" />
     <Project Path="src/Papuma.Kernel.FSharp/Papuma.Kernel.FSharp.fsproj" />
+    <Project Path="src/Papuma.Kernel.Testing/Papuma.Kernel.Testing.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Papuma.Kernel.Tests/Papuma.Kernel.Tests.csproj" />

@@ -3,85 +3,49 @@
 
 using Npgsql;
 
-using Testcontainers.PostgreSql;
+using Papuma.Kernel.Testing;
 
 namespace Papuma.Kernel.Tests.Infrastructure;
 
 /// <summary>
-/// Shared PostgreSQL 18 container for all integration tests in the collection.
-/// Exposes a superuser data source plus a non-superuser application role so that
-/// RLS behavior (which superusers bypass) can be tested realistically.
+/// Shared PostgreSQL 18 container for all integration tests in the collection — built on
+/// <see cref="PapumaTestDatabase"/>, so the kernel tests itself with the same setup its
+/// consumers get. Exposes the superuser data source plus a non-superuser application role
+/// so that RLS behavior (which superusers bypass) can be tested realistically.
 /// </summary>
 public sealed class PostgresFixture : IAsyncLifetime
 {
     /// <summary>Login role subject to RLS (no superuser, not table owner).</summary>
-    public const string AppRoleName = "papuma_app";
-    private const string AppRolePassword = "papuma_app_pw";
+    public const string AppRoleName = PapumaTestDatabase.DefaultAppRoleName;
 
-    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:18-alpine")
-        .Build();
+    private PapumaTestDatabase? _database;
 
-    private NpgsqlDataSource? _dataSource;
-    private NpgsqlDataSource? _appRoleDataSource;
+    /// <summary>Gets the test database.</summary>
+    public PapumaTestDatabase Database =>
+        _database ?? throw new InvalidOperationException("Fixture not initialized.");
 
     /// <summary>Gets the superuser data source (RLS does not apply).</summary>
-    public NpgsqlDataSource DataSource =>
-        _dataSource ?? throw new InvalidOperationException("Fixture not initialized.");
+    public NpgsqlDataSource DataSource => Database.OwnerDataSource;
 
     /// <summary>Gets a data source connecting as the non-superuser application role (RLS applies).</summary>
-    public NpgsqlDataSource AppRoleDataSource =>
-        _appRoleDataSource ?? throw new InvalidOperationException("Fixture not initialized.");
+    public NpgsqlDataSource AppRoleDataSource => Database.AppDataSource;
 
     /// <inheritdoc />
-    public async Task InitializeAsync()
-    {
-        await _container.StartAsync();
-        _dataSource = NpgsqlDataSource.Create(_container.GetConnectionString());
-
-        await using var conn = await _dataSource.OpenConnectionAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"""
-            CREATE ROLE {AppRoleName} LOGIN PASSWORD '{AppRolePassword}';
-            """;
-        await cmd.ExecuteNonQueryAsync();
-
-        var appRoleBuilder = new NpgsqlConnectionStringBuilder(_container.GetConnectionString())
-        {
-            Username = AppRoleName,
-            Password = AppRolePassword,
-        };
-        _appRoleDataSource = NpgsqlDataSource.Create(appRoleBuilder.ConnectionString);
-    }
+    public async Task InitializeAsync() => _database = await PapumaTestDatabase.StartAsync();
 
     /// <summary>
     /// Grants the application role access to all current tables in the papuma schema.
     /// Call after <c>EnsureSchemaAsync</c> so the grants cover the created tables.
     /// </summary>
-    public async Task GrantAppRoleAccessAsync()
-    {
-        await using var conn = await DataSource.OpenConnectionAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"""
-            GRANT USAGE ON SCHEMA papuma TO {AppRoleName};
-            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA papuma TO {AppRoleName};
-            """;
-        await cmd.ExecuteNonQueryAsync();
-    }
+    public Task GrantAppRoleAccessAsync() => Database.GrantAppRoleAsync("papuma");
 
     /// <inheritdoc />
     public async Task DisposeAsync()
     {
-        if (_appRoleDataSource is not null)
+        if (_database is not null)
         {
-            await _appRoleDataSource.DisposeAsync();
+            await _database.DisposeAsync();
         }
-
-        if (_dataSource is not null)
-        {
-            await _dataSource.DisposeAsync();
-        }
-
-        await _container.DisposeAsync();
     }
 }
 

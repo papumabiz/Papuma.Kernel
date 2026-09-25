@@ -1345,6 +1345,30 @@ declaration is the one place that defines them.
 
 ---
 
+## 32. Testing support: narrow now, open by structure
+
+→ [ADR-021](adr/adr-021-testing-package.md), [getting-started §7](getting-started.md#integration-tests-papumakerneltesting)
+
+The request was a testing package with fixtures and GIVEN/WHEN/THEN assertions.
+What made it worth building was smaller and sharper: two traps that turn a
+test suite into false confidence. A Testcontainers database connects as a
+superuser, and superusers bypass row-level security — every isolation test
+passes, broken or not. And a throwing feed handler stops its feed, so a loop
+"process until nothing is delivered" ends quietly over the exception.
+`Papuma.Kernel.Testing` fixes exactly those two, in tested code the kernel's
+own suite runs on.
+
+The assertions DSL was deliberately not built. The event-modeling recipe
+already keeps decision logic in in-memory tests, and a DSL written before real
+usage exists fixes an API around guesses. Keeping the option open is a matter
+of structure, not intent: the package binds to no test framework (adapters
+would be separate packages), exposes no base classes a later extension must
+keep compatible, and ADR-021 names the triggers — two consumer repos with the
+same helper, or a feedback entry with the code it would replace — so "later"
+is a condition someone can check, not a mood.
+
+---
+
 *Maintenance note: add new explainers from later phases here — this document is
 the collection point for the "why behind the how" and raw material for the
 tutorials (phase 9).*
