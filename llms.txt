@@ -8,8 +8,9 @@
 > event log. Multi-tenancy is two-layer (predicates + row-level security) on
 > Postgres, predicates-only on SQLite (single writer, nothing else to defend
 > against). NOT an ORM, NOT event sourcing, NO query DSL. Optional additive
-> facade: `Papuma.Kernel.FSharp` — quotation-based Patch and `Result`-returning
-> writes for F# consumers of either kernel, no kernel change. Optional
+> facade: `Papuma.Kernel.FSharp` — `Result`-returning writes and a session
+> runner for F# consumers of either kernel, no kernel change (Patch and keys take
+> plain F# lambdas). Optional
 > `Papuma.Kernel.Testing` — a PostgreSQL 18 test database with a non-superuser
 > role (so tests exercise row-level security) and deterministic feed draining.
 
@@ -37,7 +38,7 @@ are in the playbook.
 - [AGENTS.md snippet](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/ai/papuma-kernel-agents-snippet.md): copy-paste block for AGENTS.md/CLAUDE.md of consuming applications — one variant per kernel, plus an F# addendum
 - [`Papuma.Kernel.Local` design rationale](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/analyses/local-kernel-sqlite-sibling.md): what's shared code vs. deliberately different per engine, and why
 - [Slice conventions](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/ai/papuma-kernel-slice-conventions.md): canonical shape of command/view/automation/translation slices — drives scaffolding and code generators; includes the F# translation
-- [`Papuma.Kernel.FSharp` README](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/src/Papuma.Kernel.FSharp/README.md): the F# facade package itself — `SetQ`/`RemoveQ`/`IncrementQ`, `trySaveAsync`/`tryPatchAsync`, `runSession`
+- [`Papuma.Kernel.FSharp` README](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/src/Papuma.Kernel.FSharp/README.md): the F# facade package itself — Patch and keys with F# lambdas, `trySaveAsync`/`tryPatchAsync`, `runSession` (`SetQ`/`RemoveQ`/`IncrementQ` deprecated)
 - [Tutorial](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/tutorial.md): learning-oriented, build one app from empty folder to a feed-driven read model (document → session → feed → handler), style-neutral
 - [Getting started](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/getting-started.md): bootstrap, write path, keys (incl. composite), handlers, schema evolution, use without a host, integration tests with `Papuma.Kernel.Testing`
 - [Concepts](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/concepts.md): 32 explanatory sections — the "why behind the how" (concurrency, feeds, checkpoints, snapshots, workflows, GDPR, the F# facade at §29, RLS for application tables §30, composite keys §31, testing support §32)

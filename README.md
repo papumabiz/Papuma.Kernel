@@ -145,7 +145,7 @@ SQLite-only (`Papuma.Kernel.Local`):
 | `Papuma.Kernel.AspNetCore` | optional ASP.NET Core integration — tenant middleware, feed-lag health check, embedded dashboard |
 | `Papuma.Kernel.Mcp` | optional MCP server — read-only diagnostics + masked content tools for agents |
 | `Papuma.Kernel.Testing` | optional integration-test support — PostgreSQL 18 test database with a non-superuser role (RLS applies), feed draining; test-framework agnostic |
-| `Papuma.Kernel.FSharp` | optional F# facade — quotation-based Patch, `Result`-returning writes; works with either kernel ([details](https://github.com/papumabiz/Papuma.Kernel/blob/master/src/Papuma.Kernel.FSharp/README.md)) |
+| `Papuma.Kernel.FSharp` | optional F# facade — `Result`-returning writes, an `IAsyncDisposable`-safe session runner; works with either kernel ([details](https://github.com/papumabiz/Papuma.Kernel/blob/master/src/Papuma.Kernel.FSharp/README.md)) |
 
 `Papuma.Kernel.Core` (diff engine, policies, model, validation) is shared
 internally by the two kernels; it is not independently published — its

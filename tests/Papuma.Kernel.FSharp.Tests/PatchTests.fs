@@ -8,6 +8,9 @@
 /// those two cases.
 module Papuma.Kernel.FSharp.Tests.PatchTests
 
+// SetQ/RemoveQ/IncrementQ are deprecated but supported until 2.0 — keep testing them.
+#nowarn "44"
+
 open System.Threading.Tasks
 open Papuma.Kernel.FSharp
 open Papuma.Kernel.FSharp.Tests.Infrastructure
@@ -78,6 +81,41 @@ let ``IncrementQ is atomic and cumulative`` () : Task =
                 match loaded with
                 | null -> Assert.Fail("expected the document to still exist")
                 | loaded -> Assert.Equal(5, loaded.Document.Value)
+            finally
+                session.DisposeAsync().AsTask() |> Async.AwaitTask |> Async.RunSynchronously
+        })
+
+/// Plain F# lambdas work against the C# Patch API as well: F# converts a lambda to a LINQ
+/// expression at the method call; `box` (needed for the object-typed Remove/Increment
+/// parameters) lowers to a call to Operators.Box, which the kernel's path resolver unwraps.
+[<Fact>]
+let ``plain F# lambdas apply through the C# Patch API`` () : Task =
+    withStore<Counter> (fun store ->
+        task {
+            let session = store.OpenSession(newTenant ())
+
+            try
+                let id = newId ()
+                let! _ = session.SaveAsync({ Id = id; Name = "hits"; Value = 0; Note = "old" }, 0L)
+
+                let! _ =
+                    session.PatchAsync<Counter>(
+                        id,
+                        fun p ->
+                            p.Set((fun x -> x.Name), "renamed")
+                             .Remove(fun x -> box x.Note)
+                             .Increment((fun x -> box x.Value), 3L)
+                            |> ignore
+                    )
+
+                let! loaded = session.LoadAsync<Counter>(id)
+
+                match loaded with
+                | null -> Assert.Fail("expected the document to still exist")
+                | loaded ->
+                    Assert.Equal("renamed", loaded.Document.Name)
+                    Assert.Null(loaded.Document.Note)
+                    Assert.Equal(3, loaded.Document.Value)
             finally
                 session.DisposeAsync().AsTask() |> Async.AwaitTask |> Async.RunSynchronously
         })

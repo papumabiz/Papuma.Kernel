@@ -20,27 +20,30 @@ dotnet add package Papuma.Kernel.Local    # or Papuma.Kernel
 dotnet add package Papuma.Kernel.FSharp
 ```
 
-## Quotation-based Patch — `SetQ` / `RemoveQ` / `IncrementQ`
+## Patch with F# lambdas
 
-C#'s `x => x.Field` lambdas convert to `Expression<Func<T,TValue>>` by compiler magic
-F# doesn't have. These extension members on `PatchBuilder<T>` take a plain quotation
-instead, converted by a small hand-rolled walker (not
-`LeafExpressionConverter` — that helper only bridges quotations that already construct
-a `System.Func`, which is more ceremony than this needs):
+The kernel's `PatchBuilder<T>` works from F# as it is: F# converts a lambda to a LINQ
+expression at the method call. `Remove` and `Increment` take an `obj`-typed lambda, so
+`box` the field — the kernel unwraps F#'s `box` like C#'s implicit conversion:
 
 ```fsharp
-open Papuma.Kernel.FSharp
-
 session.PatchAsync<Order>(id, fun p ->
-    p.SetQ(<@ fun x -> x.Status @>, "shipped")
-     .RemoveQ(<@ fun x -> x.DraftNote @>)
-     .IncrementQ(<@ fun x -> x.RevisionCount @>, 1L)
+    p.Set((fun x -> x.Status), "shipped")
+     .Remove(fun x -> box x.DraftNote)
+     .Increment((fun x -> box x.RevisionCount), 1L)
     |> ignore)
 ```
 
-Same scope restriction as the C# API it mirrors: a simple property-access chain
-(`x.Field`, `x.Nested.Field`) — anything richer fails the same way the kernel's own
-`JsonPathResolver.Resolve` already rejects it on the C# side.
+A simple property-access chain (`x.Field`, `x.Nested.Field`), same as from C#. Where the
+document type is not fixed by a type argument — `tryPatchAsync`, or several record types
+sharing a field name — annotate the parameter, `(fun (x: Order) -> x.Status)`: F# infers
+a record type from a field name by picking the most recently declared one.
+
+> **Deprecated: `SetQ` / `RemoveQ` / `IncrementQ`.** The quotation-based members
+> (`p.SetQ(<@ fun x -> x.Status @>, "shipped")`) were built on the premise that F#
+> cannot produce LINQ expressions from lambdas. It can; the actual obstacle was the
+> kernel not recognizing F#'s `box`, now fixed. They still work, are marked
+> `[<Obsolete>]`, and are planned for removal in 2.0 — switch to the lambda form above.
 
 ## Keys from F# — `box` lambdas and tuples
 
@@ -91,7 +94,7 @@ because I don't care"):
 ```fsharp
 let! outcome =
     tryPatchAsync session id
-        (fun p -> p.SetQ(<@ fun x -> x.Status @>, "shipped") |> ignore)
+        (fun p -> p.Set((fun (x: Order) -> x.Status), "shipped") |> ignore)
         None
 ```
 

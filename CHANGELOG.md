@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **F#: `SetQ`/`RemoveQ`/`IncrementQ` deprecated.** They rested on the premise that F#
+  cannot turn lambdas into LINQ expressions; it can. The real obstacle was the
+  unrecognized F# `box` (fixed below), so the kernel's own Patch API now works from F#:
+  `p.Set((fun x -> x.Name), v).Remove(fun x -> box x.Note).Increment((fun x -> box x.Count), n)`.
+  The quotation members still work, are marked `[<Obsolete>]` and are planned for
+  removal in 2.0. Docs, the slice conventions and the `fsharp-local-todo` sample use
+  the lambda form; concepts §29 records the correction. One F# habit comes with it:
+  annotate the lambda parameter (`fun (x: TodoItem) -> x.Done`) unless a type argument
+  fixes the document type — F# otherwise infers the most recently declared record type
+  with that field name (running the sample caught exactly this).
 - **F#: key declarations from lambdas work.** F# lowers `fun x -> box x.Email` to a
   call to `Operators.Box` instead of C#'s `Convert` node, so `UniqueKey`, `LookupKey`,
   `Property`, `LoadByKeyAsync` and the key-based bulk operations rejected every F#

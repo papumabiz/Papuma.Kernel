@@ -1230,19 +1230,22 @@ F# facade on top is the standard shape for this in the wider .NET ecosystem
 (Giraffe/Saturn sit on ASP.NET Core the same way) — not a compromise, the
 right tool for a kernel meant to reach the widest .NET audience.
 
-**Where the friction actually lives.** Two APIs lean on C#-compiler magic F#
-doesn't have: `Expression<Func<T,TValue>>` in the model builder (`UniqueKey`,
-`HasId`) and in `PatchBuilder<T>.Set/Remove/Increment` (ADR-012). The model
-builder side turns out to need nothing extra — `[UniqueKey]`/`[LookupKey]`
-attributes on a record field work unchanged from F#. The `Patch` side does:
-F# quotations (`<@ fun x -> x.Field @>`) don't convert to LINQ expression
-trees the way C# lambdas do. `Microsoft.FSharp.Linq.RuntimeHelpers.LeafExpressionConverter`
-bridges this, but only for a quotation that already constructs a `System.Func`
-(`<@ Func<_,_>(fun x -> ...) @>`) — a plain quotation carries an F# closure
-type it can't cast from. A ~15-line hand-rolled quotation walker (pattern-match
-`Lambda`/`PropertyGet`/`Var`, build the `System.Linq.Expressions` nodes
-directly) drops that wrapper entirely, landing on `p.SetQ(<@ fun x -> x.Name @>, v)`
-— visually almost the C# original.
+**Where the friction actually lived — a correction.** The APIs that take
+`Expression<Func<T,…>>` — the model builder (`UniqueKey`, `LookupKey`,
+`Property`) and `PatchBuilder<T>.Set/Remove/Increment` (ADR-012) — were first
+assumed to need C# compiler support F# lacks, so the facade shipped
+quotation-based `SetQ`/`RemoveQ`/`IncrementQ`. The assumption was wrong: F#
+converts a lambda to a LINQ expression tree at a method call just as C# does.
+What actually failed was narrower. For the `obj`-typed parameters, F#'s `box`
+lowers to a call to `Operators.Box`, where C# emits a `Convert` node — and the
+kernel's path resolver only unwrapped `Convert`. `Set`, which needs no `box`,
+worked from F# all along; `Remove`, `Increment` and every key declaration did
+not. The resolver now unwraps F#'s `box` too (by name, no FSharp.Core
+reference), so `p.Increment((fun x -> box x.Count), 1L)` and
+`d.UniqueKey(fun x -> box (x.ProjectId, x.Number))` work from F# unchanged,
+and the quotation members are deprecated. The original claim had been
+checked against a helper (`LeafExpressionConverter`), not against the API it
+was about.
 
 **Where F# convention actually diverges from the C# API, not just its
 syntax.** C# throws (`ConcurrencyException`, `DocumentNotFoundException`,

@@ -3,7 +3,7 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>Papuma.Kernel.FSharp</PackageId>
-    <Description>F#-idiomatic facade over Papuma Kernel's write path: quotation-based Patch (SetQ/RemoveQ/IncrementQ — no Expression&lt;Func&lt;T,TValue&gt;&gt; ceremony), Result&lt;T,KernelError&gt; instead of exceptions for the three expected write outcomes (ADR-003/ADR-006), and an IAsyncDisposable-safe session runner. Works with either kernel — reference Papuma.Kernel (PostgreSQL) or Papuma.Kernel.Local (SQLite) alongside this package.</Description>
+    <Description>F#-idiomatic facade over Papuma Kernel's write path: Result&lt;T,KernelError&gt; instead of exceptions for the three expected write outcomes (ADR-003/ADR-006), and an IAsyncDisposable-safe session runner. Works with either kernel — reference Papuma.Kernel (PostgreSQL) or Papuma.Kernel.Local (SQLite) alongside this package.</Description>
     <PackageTags>fsharp;documents;cqrs;patch;quotations;result</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>

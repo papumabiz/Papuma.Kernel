@@ -144,15 +144,16 @@ Read the docs of the version this app builds against, not copies or the web:
 ## Addendum for F# apps (either block above, plus `Papuma.Kernel.FSharp`)
 
 Append this to whichever block above matches your kernel — the rules don't
-change for F#, only the syntax for three of them:
+change for F#, only the syntax of some:
 
 ```markdown
 ### Additions for F# (Papuma.Kernel.FSharp)
 
-- Rule 3 (Patch/Increment): use `SetQ`/`RemoveQ`/`IncrementQ` with a quotation
-  (`<@ fun x -> x.Field @>`), not `Set`/`Remove`/`Increment` with a lambda —
-  F# has no compiler support for converting `x => x.Field` into an
-  `Expression<Func<T,TValue>>`.
+- Rule 3 (Patch/Increment): F# lambdas, `box` where the parameter is `obj` —
+  `p.Set((fun x -> x.Name), v)`, `p.Remove(fun x -> box x.Note)`,
+  `p.Increment((fun x -> box x.Count), n)`; annotate `x` (`fun (x: Order) -> …`)
+  unless a type argument fixes the document type. Never `SetQ`/`RemoveQ`/`IncrementQ`
+  (deprecated quotation form).
 - Keys: `d.UniqueKey(fun x -> box x.Email)`; composite keys with a tuple,
   `box (x.ProjectId, x.Number)` — never an anonymous record. Composite
   `LoadByKeyAsync` needs the values typed as `IReadOnlyList<obj>`.

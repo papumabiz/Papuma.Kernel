@@ -17,11 +17,12 @@ open Papuma.Kernel.Store
 ///     |&gt; ignore)
 /// </code>
 ///
-/// Prototype, not a decided product surface (2026-09-04 chat) — companion to
-/// docs/analyses/offline-sync-and-projection-conflicts.md in spirit: additive, no kernel
-/// change. Same scope restriction as the C# API it mirrors: a quotation must be a simple
-/// property-access chain (<c>x.Field</c>, <c>x.Nested.Field</c>) — anything richer fails
-/// the same way <c>JsonPathResolver.Resolve</c> already rejects it on the C# side.
+/// <b>Deprecated.</b> The C# API works from F# directly: F# converts a lambda to a LINQ
+/// expression at the method call, and the kernel unwraps F#'s <c>box</c> —
+/// <c>p.Set((fun x -&gt; x.Name), v).Remove(fun x -&gt; box x.Note).Increment((fun x -&gt; box x.Count), n)</c>.
+/// These members were built on the mistaken premise that F# lacks that conversion; the
+/// real obstacle was the unrecognized <c>box</c> call, fixed in the kernel. They keep
+/// working until their planned removal in 2.0.
 /// </summary>
 [<AutoOpen>]
 module PatchExtensions =
@@ -37,12 +38,15 @@ module PatchExtensions =
     type PatchBuilder<'T when 'T: not struct and 'T: not null> with
 
         /// Quotation counterpart of <see cref="PatchBuilder{T}.Set"/>.
+        [<System.Obsolete("Use PatchBuilder.Set/Remove/Increment with an F# lambda: p.Set((fun x -> x.Name), v), p.Remove(fun x -> box x.Note), p.Increment((fun x -> box x.Count), n). Removal planned for 2.0.")>]
         member this.SetQ(property: Expr<'T -> 'a>, value: 'a) : PatchBuilder<'T> =
             this.Set(QuotationExpr.toExpression property, value)
 
         /// Quotation counterpart of <see cref="PatchBuilder{T}.Remove"/>.
+        [<System.Obsolete("Use PatchBuilder.Set/Remove/Increment with an F# lambda: p.Set((fun x -> x.Name), v), p.Remove(fun x -> box x.Note), p.Increment((fun x -> box x.Count), n). Removal planned for 2.0.")>]
         member this.RemoveQ(property: Expr<'T -> 'a>) : PatchBuilder<'T> = this.Remove(toBoxedLambda property)
 
         /// Quotation counterpart of <see cref="PatchBuilder{T}.Increment"/>.
+        [<System.Obsolete("Use PatchBuilder.Set/Remove/Increment with an F# lambda: p.Set((fun x -> x.Name), v), p.Remove(fun x -> box x.Note), p.Increment((fun x -> box x.Count), n). Removal planned for 2.0.")>]
         member this.IncrementQ(property: Expr<'T -> 'a>, ?by: int64) : PatchBuilder<'T> =
             this.Increment(toBoxedLambda property, defaultArg by 1L)

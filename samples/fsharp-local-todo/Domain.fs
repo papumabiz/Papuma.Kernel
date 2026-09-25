@@ -13,7 +13,7 @@ type TodoItem =
       [<UniqueKey>]
       Slug: string
       Done: bool
-      /// Bumped by IncrementQ every time the item is touched — demonstrates atomic
+      /// Bumped by Increment every time the item is touched — demonstrates atomic
       /// Increment (ADR-012), not just Set.
       TouchCount: int }
 

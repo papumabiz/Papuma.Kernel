@@ -174,9 +174,12 @@ applies unchanged; this section is only what an F# consumer needs on top.
 Full reasoning: [concepts.md §29](../concepts.md#29-f-as-a-facade-not-a-rewrite--and-why-the-wire-format-stays-closed);
 slice-by-slice translation: [slice-conventions.md](papuma-kernel-slice-conventions.md#using-papumakernelfsharp-f).
 
-- **`Patch` needs quotations, not lambdas.** `x => x.Field` is C#-compiler
-  magic F# doesn't have. Use `SetQ`/`RemoveQ`/`IncrementQ` with
-  `<@ fun x -> x.Field @>` instead of `Set`/`Remove`/`Increment`.
+- **`Patch` takes F# lambdas.** `p.Set((fun x -> x.Name), v)`,
+  `p.Remove(fun x -> box x.Note)`, `p.Increment((fun x -> box x.Count), n)` — `box`
+  where the parameter is `obj`. Annotate the parameter (`fun (x: Order) -> …`)
+  unless a type argument fixes it — F# otherwise infers the most recently declared
+  record type with that field name. `SetQ`/`RemoveQ`/`IncrementQ` (quotations) are
+  deprecated; do not write new code with them.
 - **Keys take `box` lambdas; composite keys a tuple.** `d.UniqueKey(fun x -> box x.Email)`,
 `d.UniqueKey(fun x -> box (x.ProjectId, x.Number))` — not an anonymous record (F# sorts
 its fields). For `LoadByKeyAsync` with a composite key, annotate the values as

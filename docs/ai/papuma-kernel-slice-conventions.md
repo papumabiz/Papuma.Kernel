@@ -210,8 +210,8 @@ any business logic — it is not mechanical.
 
 The slice *shape* above is language-neutral — DTO/Decider/Handler/Endpoint/
 Registration/Test stays the same anatomy across both languages. Only the
-concrete syntax changes, and in exactly one place (Patch) it changes because
-F# lacks a C# compiler feature, not because the kernel behaves differently.
+concrete syntax changes: lambdas to `obj` need an explicit `box`, and expected
+write outcomes can come back as `Result` instead of exceptions.
 See [Papuma.Kernel.FSharp](https://github.com/papumabiz/Papuma.Kernel/blob/master/src/Papuma.Kernel.FSharp/README.md) and
 [concepts.md §29](../concepts.md#29-f-as-a-facade-not-a-rewrite--and-why-the-wire-format-stays-closed)
 for the reasoning; this section is the slice-shape translation only.
@@ -248,8 +248,7 @@ module PlaceOrderDecider =
 // PlaceOrderHandler — INVARIANT: load → decide → write, one session, one
 // commit (don't skip CommitAsync — nothing a session writes is visible
 // anywhere else until it's called; see samples/fsharp-local-todo's README).
-// The one line that's more than a syntax translation: Patch needs
-// SetQ/IncrementQ (a quotation, not `x => x.Field`), and trySaveAsync/
+// Patch takes F# lambdas (`box` where the parameter is obj), and trySaveAsync/
 // tryPatchAsync return Result instead of throwing — DocumentNotFoundException
 // becomes a match arm, not a try/catch.
 let handle (store: SqliteDocumentStore) (scope: ScopeContext) (cmd: PlaceOrder) : Task<Result<Order, KernelError>> =
@@ -266,7 +265,7 @@ let handle (store: SqliteDocumentStore) (scope: ScopeContext) (cmd: PlaceOrder) 
                     tryPatchAsync
                         session
                         cmd.ProductId
-                        (fun p -> p.IncrementQ(<@ fun (x: Inventory) -> x.Stock @>, int64 -cmd.Quantity) |> ignore)
+                        (fun p -> p.Increment((fun (x: Inventory) -> box x.Stock), int64 -cmd.Quantity) |> ignore)
                         None
 
                 match stockOutcome with
@@ -317,8 +316,8 @@ module OrderingRegistration =
 
 Same translation pattern as the Command slice — `LoadAsync` is unchanged,
 `IChangeHandler` is a plain interface F# implements natively (see
-`TodoChangeLogger` in the sample), and only a slice's own *Patch* calls need
-`SetQ`/`IncrementQ`. No slice type needs a second write-up here.
+`TodoChangeLogger` in the sample), and a slice's *Patch* calls take F# lambdas
+like everywhere else. No slice type needs a second write-up here.
 
 ### Tests — backtick names instead of PascalCase methods
 

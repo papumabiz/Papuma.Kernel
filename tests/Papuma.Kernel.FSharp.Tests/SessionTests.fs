@@ -64,7 +64,7 @@ let ``trySaveAsync returns Ok on a normal insert and Error VersionConflict on a 
                 }))
 
 [<Fact>]
-let ``tryPatchAsync applies through SetQ and reports DocumentNotFound for a missing id`` () : Task =
+let ``tryPatchAsync applies a patch and reports DocumentNotFound for a missing id`` () : Task =
     withStore<Account> (fun store ->
         runSession
             (store.OpenSession(newTenant ()))
@@ -74,7 +74,7 @@ let ``tryPatchAsync applies through SetQ and reports DocumentNotFound for a miss
                     let! _ = trySaveAsync session ({ Id = id; Owner = "Harry"; Balance = 100 }: Account) 0L
 
                     let! patched =
-                        tryPatchAsync session id (fun p -> p.SetQ(<@ fun (x: Account) -> x.Owner @>, "Renamed") |> ignore) None
+                        tryPatchAsync session id (fun p -> p.Set((fun (x: Account) -> x.Owner), "Renamed") |> ignore) None
 
                     Assert.True(Result.isOk patched)
 
@@ -88,7 +88,7 @@ let ``tryPatchAsync applies through SetQ and reports DocumentNotFound for a miss
                         tryPatchAsync
                             session
                             (newId ())
-                            (fun p -> p.SetQ(<@ fun (x: Account) -> x.Owner @>, "Nobody") |> ignore)
+                            (fun p -> p.Set((fun (x: Account) -> x.Owner), "Nobody") |> ignore)
                             None
 
                     match missing with

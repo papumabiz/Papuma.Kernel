@@ -96,8 +96,10 @@ let private completeTodo (ctx: HttpContext) : Task =
                         session
                         id
                         (fun p ->
-                            p.SetQ(<@ fun (x: TodoItem) -> x.Done @>, true)
-                             .IncrementQ(<@ fun (x: TodoItem) -> x.TouchCount @>, 1L)
+                            // Annotate x: TodoResponse also has Done/TouchCount, and F# infers
+                            // the most recently declared record type from a field name.
+                            p.Set((fun (x: TodoItem) -> x.Done), true)
+                             .Increment((fun (x: TodoItem) -> box x.TouchCount), 1L)
                             |> ignore)
                         None
 

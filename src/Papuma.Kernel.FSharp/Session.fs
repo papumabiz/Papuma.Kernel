@@ -40,7 +40,7 @@ module Session =
                 session.DisposeAsync().AsTask().GetAwaiter().GetResult()
         }
 
-    /// Quotation-based <see cref="KernelError"/> counterpart of <c>SaveAsync</c>.
+    /// <see cref="KernelError"/>-returning counterpart of <c>SaveAsync</c>.
     let inline trySaveAsync< ^Session, 'T
         when ^Session: (member SaveAsync: 'T * int64 * CancellationToken -> Task<SaveResult>)>
         (session: ^Session)
@@ -55,7 +55,7 @@ module Session =
             | KernelErrorClassifier.Known err -> return Error err
         }
 
-    /// Quotation-based <see cref="KernelError"/> counterpart of <c>PatchAsync</c>.
+    /// <see cref="KernelError"/>-returning counterpart of <c>PatchAsync</c>.
     /// <paramref name="expectedVersion"/> follows ADR-012: <c>None</c> means deliberate
     /// field-level last-writer-wins, not "don't care about conflicts entirely".
     let inline tryPatchAsync< ^Session, 'T
