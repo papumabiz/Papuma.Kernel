@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10" />
   <img src="https://img.shields.io/badge/PostgreSQL-%E2%89%A518-336791" alt="PostgreSQL 18+" />
   <img src="https://img.shields.io/badge/SQLite-embedded-003B57" alt="SQLite embedded" />
-  <img src="https://img.shields.io/badge/version-1.2.1-blue" alt="1.2.1" />
+  <img src="https://img.shields.io/badge/version-1.3.0-blue" alt="1.3.0" />
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT" />
 </p>
 
@@ -194,7 +194,7 @@ Pattern guides on kernel primitives ([docs/recipes](https://github.com/papumabiz
 
 ## Maturity, stated plainly
 
-`1.2.1` — the Postgres kernel's design is complete (13 implementation phases,
+`1.3.0` — the Postgres kernel's design is complete (13 implementation phases,
 every decision recorded as an ADR, every identified risk closed with a test or a
 measurement; **the full integration suite runs against real PostgreSQL 18 on
 every CI build**), but it has **not yet

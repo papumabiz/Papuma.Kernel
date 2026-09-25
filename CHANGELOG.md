@@ -1,36 +1,23 @@
 # Changelog
 
-## Unreleased
+## 1.3.0 (2026-09-26)
 
-- **Dependencies:** `ModelContextProtocol` 1.4 → 2.2 (`Papuma.Kernel.Mcp`, sample),
-  `Microsoft.Extensions.*` 10.0.0 → 10.0.12, `Microsoft.Data.Sqlite` 10.0.10 → 10.0.12
-  (the `SQLitePCLRaw` 3.0.5 pin stays), test tooling (Test SDK 18, xunit runner 4,
-  coverlet 10), GitHub Actions (checkout v7, setup-dotnet v6, upload-artifact v7).
-  **MCP over HTTP is now stateless by default** — no `Mcp-Session-Id`, and a request
-  carrying one gets 400. The Papuma tools hold no session state; clients that need
-  sessions set `Stateless = false` (observability.md). The sample's
-  `diagnostics.http` drops the session-header handshake.
-- **F#: `SetQ`/`RemoveQ`/`IncrementQ` deprecated.** They rested on the premise that F#
-  cannot turn lambdas into LINQ expressions; it can. The real obstacle was the
-  unrecognized F# `box` (fixed below), so the kernel's own Patch API now works from F#:
-  `p.Set((fun x -> x.Name), v).Remove(fun x -> box x.Note).Increment((fun x -> box x.Count), n)`.
-  The quotation members still work, are marked `[<Obsolete>]` and are planned for
-  removal in 2.0. Docs, the slice conventions and the `fsharp-local-todo` sample use
-  the lambda form; concepts §29 records the correction. One F# habit comes with it:
-  annotate the lambda parameter (`fun (x: TodoItem) -> x.Done`) unless a type argument
-  fixes the document type — F# otherwise infers the most recently declared record type
-  with that field name (running the sample caught exactly this).
-- **F#: key declarations from lambdas work.** F# lowers `fun x -> box x.Email` to a
-  call to `Operators.Box` instead of C#'s `Convert` node, so `UniqueKey`, `LookupKey`,
-  `Property`, `LoadByKeyAsync` and the key-based bulk operations rejected every F#
-  lambda; only `[<UniqueKey>]` attributes worked. The path resolver now unwraps F#'s
-  `box` too. Composite keys from F# use a tuple (`box (x.ProjectId, x.Number)`);
-  anonymous records are rejected, because F# sorts their fields. The F# README,
-  playbook and snippet show the forms; F# tests cover them end to end.
-- **Docs:** the AGENTS snippet names the RLS functions and the testing package in its
-  rules; slice conventions and the event-modeling recipe point to
-  `Papuma.Kernel.Testing`; `llms.txt` is current (32 concepts sections, 21 ADRs, the
-  testing package, the shared doc set).
+Upgrade notes — what a consumer of 1.2.x can notice:
+
+- **MCP over HTTP is stateless** (ModelContextProtocol 2.x): no `Mcp-Session-Id` is
+  issued, and a request carrying one gets 400. Set `Stateless = false` on
+  `WithHttpTransport` if a client needs sessions.
+- **`SetQ`/`RemoveQ`/`IncrementQ` (F#) are obsolete** — compiler warnings, still
+  working; switch to `p.Set((fun (x: T) -> x.Field), v)` and friends.
+- **`KeyPath` of a composite key is comma-separated** (`projectId,number`) — code
+  that parses `UniqueKeyViolationException.KeyPath` as one dot-path should use
+  `KeyPaths`. Single-field keys are unchanged.
+- **`ScopeContext.Tenant(null)` throws `ArgumentNullException`** naming `tenantId`;
+  the accepted id pattern only widened.
+- **Packaged docs moved** from `docs/vNEXT/` to `docs/`.
+
+Changes:
+
 - **New package `Papuma.Kernel.Testing` (ADR-021).** `PapumaTestDatabase` starts
   PostgreSQL 18 via Testcontainers (or connects to an existing server) and adds a
   login role without superuser or `BYPASSRLS`, so tests exercise row-level security as
@@ -74,6 +61,31 @@
   tenant ids only reach SQL as parameters. New overload `ScopeContext.Tenant(Guid)`
   yields the canonical lowercase dashed form (ids compare case-sensitively) and rejects
   `Guid.Empty`. A null id now throws `ArgumentNullException` naming `tenantId`.
+- **F#: key declarations from lambdas work.** F# lowers `fun x -> box x.Email` to a
+  call to `Operators.Box` instead of C#'s `Convert` node, so `UniqueKey`, `LookupKey`,
+  `Property`, `LoadByKeyAsync` and the key-based bulk operations rejected every F#
+  lambda; only `[<UniqueKey>]` attributes worked. The path resolver now unwraps F#'s
+  `box` too. Composite keys from F# use a tuple (`box (x.ProjectId, x.Number)`);
+  anonymous records are rejected, because F# sorts their fields. The F# README,
+  playbook and snippet show the forms; F# tests cover them end to end.
+- **F#: `SetQ`/`RemoveQ`/`IncrementQ` deprecated.** They rested on the premise that F#
+  cannot turn lambdas into LINQ expressions; it can. The real obstacle was the
+  unrecognized F# `box` (fixed above), so the kernel's own Patch API now works from F#:
+  `p.Set((fun x -> x.Name), v).Remove(fun x -> box x.Note).Increment((fun x -> box x.Count), n)`.
+  The quotation members still work, are marked `[<Obsolete>]` and are planned for
+  removal in 2.0. Docs, the slice conventions and the `fsharp-local-todo` sample use
+  the lambda form; concepts §29 records the correction. One F# habit comes with it:
+  annotate the lambda parameter (`fun (x: TodoItem) -> x.Done`) unless a type argument
+  fixes the document type — F# otherwise infers the most recently declared record type
+  with that field name (running the sample caught exactly this).
+- **Dependencies:** `ModelContextProtocol` 1.4 → 2.2 (`Papuma.Kernel.Mcp`, sample),
+  `Microsoft.Extensions.*` 10.0.0 → 10.0.12, `Microsoft.Data.Sqlite` 10.0.10 → 10.0.12
+  (the `SQLitePCLRaw` 3.0.5 pin stays), test tooling (Test SDK 18, xunit runner 4,
+  coverlet 10), GitHub Actions (checkout v7, setup-dotnet v6, upload-artifact v7).
+  **MCP over HTTP is now stateless by default** — no `Mcp-Session-Id`, and a request
+  carrying one gets 400. The Papuma tools hold no session state; clients that need
+  sessions set `Stateless = false` (observability.md). The sample's
+  `diagnostics.http` drops the session-header handshake.
 - **Packaging: one doc set in every package, with no dangling links.** All packages
   (`Papuma.Kernel`, `.Local`, `.FSharp`, `.AspNetCore`, `.Mcp`, and the new `.Testing`) now ship the same
   `docs/` set — guides, ADRs, recipes, the `ai/` set and `analyses/` — defined once in
@@ -87,6 +99,9 @@
   any link or heading anchor that would dangle inside a package. The AGENTS snippet now
   tells agents to read the docs from the package folder of the version they build
   against.
+- **Packaging**: packages now carry the project icon, a README, Source Link metadata
+  (`PublishRepositoryUrl`, `EmbedUntrackedSources`, deterministic CI builds), XML
+  documentation for IntelliSense, and a `.snupkg` symbol package.
 - **Docs: consumer feedback from jejak.** `getting-started.md` gains §7 "Without a
   host" (hand-built store, `ChangeFeedProcessor.ProcessOnceAsync`; the integration-test
   part later moved to `Papuma.Kernel.Testing`) and documents the tenant id pattern and
@@ -94,6 +109,10 @@
   now states that `Increment` is safe against concurrency but not against duplicate
   commands. The playbook carries these points and no longer links to files that are
   not shipped in the `Papuma.Kernel` package.
+- **Docs:** the AGENTS snippet names the RLS functions and the testing package in its
+  rules; slice conventions and the event-modeling recipe point to
+  `Papuma.Kernel.Testing`; `llms.txt` is current (32 concepts sections, 21 ADRs, the
+  testing package, the shared doc set).
 - **Docs reorganised for the public repository.** The `vNEXT` working title is gone:
   `docs/vNEXT/*` moved up to `docs/` (guides flat, `docs/adr/`, `docs/recipes/`), and
   every frozen pre-1.0 document — the German v1 implementation set, the three v1-era
@@ -103,9 +122,6 @@
   [`docs/README.md`](docs/README.md) is the new map. **Links into `docs/vNEXT/` or
   `docs/v1/` no longer resolve**; the packaged doc set moved the same way
   (`docs/vNEXT/concepts.md` → `docs/concepts.md` inside the NuGet packages).
-- **Packaging**: packages now carry the project icon, a README, Source Link metadata
-  (`PublishRepositoryUrl`, `EmbedUntrackedSources`, deterministic CI builds), XML
-  documentation for IntelliSense, and a `.snupkg` symbol package.
 - **Dependencies**: `Testcontainers.PostgreSql` 4.1.0 → 4.15.0, which drops the
   transitively vulnerable `SSH.NET` 2024.1.0 (GHSA-q939-rpr3-3284). Test-only.
 - **Build is warning-free again**: resolved XML `cref` references that broke once

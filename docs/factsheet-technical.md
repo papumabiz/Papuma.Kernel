@@ -1,7 +1,6 @@
 # Papuma Kernel — Technical Factsheet
 
-Version `1.2.1` · Target framework .NET 10 · MIT licensed · reflects `master`, including
-the changes listed under *Unreleased* in the CHANGELOG
+Version `1.3.0` · Target framework .NET 10 · MIT licensed
 
 Two persistence kernels for .NET, sharing one document-sourced model:
 `Papuma.Kernel` (requires PostgreSQL ≥ 18, for servers) and

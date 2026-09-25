@@ -139,7 +139,7 @@ Honesty is cheaper than disappointment:
 
 ## Maturity, stated plainly
 
-`1.2.1` — the design is complete (13 implementation phases, 21 ADRs,
+`1.3.0` — the design is complete (13 implementation phases, 21 ADRs,
 every identified risk closed with tests or measurements), but it has **not yet
 carried production traffic**. Best fit today: internal line-of-business
 systems and new products built by teams that control their PostgreSQL version.
