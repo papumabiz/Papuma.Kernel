@@ -64,15 +64,17 @@ public static class SqliteSchemaManager
         {
             foreach (var key in metadata.Keys)
             {
-                foreach (var segment in key.PathSegments)
+                foreach (var segment in key.ComponentSegments.SelectMany(s => s))
                 {
                     InputValidator.ValidateDocumentType(segment); // same identifier pattern as type names
                 }
 
-                var jsonPath = "$." + string.Join('.', key.PathSegments);
+                // One expression per component, in declaration order (composite keys, ADR-020).
+                var columns = string.Join(", ", key.ComponentSegments
+                    .Select(segments => $"json_extract(data, '$.{string.Join('.', segments)}')"));
                 var unique = key.Unique ? "UNIQUE " : string.Empty;
                 ddl.AppendLine($"CREATE {unique}INDEX IF NOT EXISTS {key.IndexName}");
-                ddl.AppendLine($"    ON document (scope, tenant_id, json_extract(data, '{jsonPath}'))");
+                ddl.AppendLine($"    ON document (scope, tenant_id, {columns})");
                 ddl.AppendLine($"    WHERE document_type = '{metadata.Name}';");
             }
         }

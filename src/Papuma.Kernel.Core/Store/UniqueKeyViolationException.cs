@@ -11,8 +11,14 @@ public sealed class UniqueKeyViolationException : Exception
     /// <summary>Gets the logical document type name.</summary>
     public string DocumentType { get; }
 
-    /// <summary>Gets the dot-separated JSON path of the violated key.</summary>
+    /// <summary>
+    /// Gets the dot-separated JSON path of the violated key; for a composite key the
+    /// component paths comma-separated, e.g. <c>projectId,number</c> (ADR-020).
+    /// </summary>
     public string KeyPath { get; }
+
+    /// <summary>Gets the component paths of the violated key — one entry for a single-field key.</summary>
+    public IReadOnlyList<string> KeyPaths { get; }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="UniqueKeyViolationException"/> class.
@@ -25,5 +31,6 @@ public sealed class UniqueKeyViolationException : Exception
     {
         DocumentType = documentType;
         KeyPath = keyPath;
+        KeyPaths = keyPath.Split(Model.KeyMetadata.ComponentSeparator);
     }
 }

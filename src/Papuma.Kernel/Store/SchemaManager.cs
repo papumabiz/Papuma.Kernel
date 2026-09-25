@@ -84,15 +84,17 @@ public static class SchemaManager
         {
             foreach (var key in metadata.Keys)
             {
-                foreach (var segment in key.PathSegments)
+                foreach (var segment in key.ComponentSegments.SelectMany(s => s))
                 {
                     InputValidator.ValidateDocumentType(segment); // same identifier pattern as type names
                 }
 
-                var pathLiteral = string.Join(',', key.PathSegments);
+                // One expression per component, in declaration order (composite keys, ADR-020).
+                var columns = string.Join(", ", key.ComponentSegments
+                    .Select(segments => $"(data #>> '{{{string.Join(',', segments)}}}')"));
                 var unique = key.Unique ? "UNIQUE " : string.Empty;
                 ddl.AppendLine($"CREATE {unique}INDEX IF NOT EXISTS {key.IndexName}");
-                ddl.AppendLine($"    ON papuma.document (scope, tenant_id, (data #>> '{{{pathLiteral}}}'))");
+                ddl.AppendLine($"    ON papuma.document (scope, tenant_id, {columns})");
                 ddl.AppendLine($"    WHERE document_type = '{metadata.Name}';");
             }
         }

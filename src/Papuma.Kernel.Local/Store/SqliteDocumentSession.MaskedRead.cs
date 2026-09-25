@@ -50,6 +50,13 @@ public sealed partial class SqliteDocumentSession
                 $"'{keyPath}' is not a declared key on {metadata.Name}. " +
                 "Masked reads are limited to declared keys — there is no free-form query (ADR-009).",
                 nameof(keyPath));
+        if (key.IsComposite)
+        {
+            throw new ArgumentException(
+                $"'{keyPath}' is a composite key on {metadata.Name}; masked reads by key match " +
+                "single-field keys only (ADR-020).",
+                nameof(keyPath));
+        }
 
         var (conn, tx) = await EnsureTransactionAsync(ct);
         await using var cmd = conn.CreateCommand();

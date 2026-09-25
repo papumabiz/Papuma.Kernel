@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-06-11)
+Accepted (2026-06-11) — amended by [ADR-020](adr-020-composite-keys.md) (composite keys)
 
 ## Context
 

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Composite keys (ADR-020).** `UniqueKey`/`LookupKey` accept an anonymous type —
+  `.UniqueKey(x => new { x.ProjectId, x.Number })` — materialized as one multi-expression
+  partial index on PostgreSQL and SQLite. New overload
+  `LoadByKeyAsync<T>(key, IReadOnlyList<object> values)` looks up with one value per
+  component. Like single-field keys, a composite key is enforced only for documents
+  that carry every component. `PatchWhereAsync`, `DeleteWhereAsync` and masked reads by
+  key stay single-field and reject composite keys. `KeyMetadata` gains `Paths`,
+  `IsComposite` and `ComponentSegments`; `UniqueKeyViolationException` gains `KeyPaths`.
+  For composite keys, `Path`/`KeyPath` hold the component paths comma-separated;
+  single-field keys are unchanged. The kernel never drops indexes: replacing a
+  flattened helper-field key leaves its old index until you drop it.
 - **Row-level security for your own tables (ADR-019).** `EnsureSchemaAsync` now creates
   `papuma.scope_visible(scope, tenant_id)` and `papuma.scope_writable(scope, tenant_id)`
   — the kernel's scope rules as SQL functions, to be used in RLS policies on

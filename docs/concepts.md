@@ -1319,6 +1319,32 @@ handler into an RLS error instead of a row in someone else's tenant.
 
 ---
 
+## 31. Composite keys: an integrity rule, not a query language
+
+→ [ADR-020](adr/adr-020-composite-keys.md), [ADR-006](adr/adr-006-keys-and-constraints.md)
+
+ADR-006 guards against the slow return to the relational world — no query DSL,
+no foreign keys, reporting in projections. Composite keys looked like a step in
+that direction and were left out at first. They are not: "ticket number unique
+per project" is an *integrity rule*, the same kind of thing as "email unique per
+tenant", only with a parent inside the tenant. Nothing about it adds a way to
+query.
+
+The workaround it replaces is the real risk. A flattened helper field
+(`Key = "p1/42"`) duplicates state, and duplicated state drifts: move a ticket to
+another project, forget the helper, and uniqueness now checks a combination that
+no longer exists — silently. With a composite key the index reads the real
+fields, so it cannot disagree with them.
+
+Two choices keep composite keys predictable. **Missing components are not
+enforced**, exactly as for single-field keys — a draft ticket without a number
+never collides; the stricter `NULLS NOT DISTINCT` would make the two kinds of key
+behave differently and does not exist in SQLite. And **order is part of the key**:
+components are index columns and lookup values in declaration order, so the
+declaration is the one place that defines them.
+
+---
+
 *Maintenance note: add new explainers from later phases here — this document is
 the collection point for the "why behind the how" and raw material for the
 tutorials (phase 9).*

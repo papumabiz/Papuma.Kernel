@@ -388,18 +388,28 @@ public sealed partial class DocumentSession
         return expression.ToString();
     }
 
-    private KeyMetadata ResolveDeclaredKey<T>(Expression<Func<T, object?>> key)
+    private KeyMetadata ResolveDeclaredKey<T>(Expression<Func<T, object?>> key, bool singleFieldOnly = true)
         where T : class
     {
         ArgumentNullException.ThrowIfNull(key);
         var metadata = _model.GetRequired<T>();
-        var path = JsonPathResolver.Resolve(key);
+        var path = JsonPathResolver.ResolveKey(key);
 
-        return metadata.Keys.FirstOrDefault(k => k.Path == path)
+        var declared = metadata.Keys.FirstOrDefault(k => k.Path == path)
             ?? throw new ArgumentException(
                 $"'{path}' is not a declared key on {metadata.Name}. " +
                 "Declare it via [UniqueKey]/[LookupKey] or UniqueKey()/LookupKey() (ADR-006).",
                 nameof(key));
+
+        if (singleFieldOnly && declared.IsComposite)
+        {
+            throw new ArgumentException(
+                $"'{path}' is a composite key on {metadata.Name}; this operation matches single-field " +
+                "keys only. Load by the composite key with one value per component (ADR-020).",
+                nameof(key));
+        }
+
+        return declared;
     }
 
     private static void EnsurePatchableSchema(DocumentTypeMetadata metadata, string id, int storedSchemaVersion)

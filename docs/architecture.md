@@ -418,7 +418,7 @@ of documents and changes, the `DocumentSession` is always bound to a tenant, and
 | [003](adr/adr-003-write-path-concurrency.md) | Atomic write path with optimistic concurrency and RETURNING OLD/NEW | Accepted |
 | [004](adr/adr-004-changerecord-diff-only.md) | ChangeRecord stores a reversible diff, no snapshots | Accepted |
 | [005](adr/adr-005-schema-evolution.md) | Schema evolution via schema_version and upcasters | Accepted |
-| [006](adr/adr-006-keys-and-constraints.md) | Keys and constraints via metamodel and expression indexes | Accepted |
+| [006](adr/adr-006-keys-and-constraints.md) | Keys and constraints via metamodel and expression indexes | Accepted; amended by ADR-020 |
 | [007](adr/adr-007-privacy-policies.md) | Privacy policies: attributes as defaults, fluent as override | Accepted |
 | [008](adr/adr-008-rollback-is-update.md) | Rollback is an update with metadata | Accepted |
 | [009](adr/adr-009-projections-as-dumb-handlers.md) | Projections as dumb change handlers | Accepted |
@@ -432,6 +432,7 @@ of documents and changes, the `DocumentSession` is always bound to a tenant, and
 | [017](adr/adr-017-actor-id-column.md) | Actor identity as a first-class column (actor_id, created_by, updated_by) | Accepted |
 | [018](adr/adr-018-causation-type-metadata.md) | Causation type as a metadata field (command name in JSONB, no schema change) | Accepted |
 | [019](adr/adr-019-scope-predicates-for-application-tables.md) | Scope predicates for application tables (papuma.scope_visible / scope_writable as the RLS contract) | Accepted |
+| [020](adr/adr-020-composite-keys.md) | Composite keys (uniqueness and lookup over several fields, one multi-expression index) | Accepted |
 
 ## 13. Recipes (tutorial precursors)
 

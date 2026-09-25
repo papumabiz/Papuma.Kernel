@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.Linq.Expressions;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -156,40 +157,87 @@ public sealed partial class DocumentSession : IAsyncDisposable
     }
 
     /// <summary>
-    /// Loads a document by a declared key (ADR-006), or returns <c>null</c> when no
-    /// document matches. Throws when the key matches more than one document — declare
-    /// the key unique if single-match semantics are required.
+    /// Loads a document by a declared single-field key (ADR-006), or returns <c>null</c>
+    /// when no document matches. Throws when the key matches more than one document —
+    /// declare the key unique if single-match semantics are required.
     /// </summary>
     /// <typeparam name="T">The document CLR type.</typeparam>
     /// <param name="key">The key property (must be declared via attribute or fluent config).</param>
     /// <param name="value">The key value to match.</param>
     /// <param name="ct">A cancellation token.</param>
-    public async Task<DocumentResult<T>?> LoadByKeyAsync<T>(
+    public Task<DocumentResult<T>?> LoadByKeyAsync<T>(
         Expression<Func<T, object?>> key,
         object value,
         CancellationToken ct = default)
         where T : class
     {
         ArgumentNullException.ThrowIfNull(value);
+        return LoadByKeyCoreAsync<T>(ResolveDeclaredKey(key), [value], ct);
+    }
 
+    /// <summary>
+    /// Loads a document by a declared composite key (ADR-020), e.g.
+    /// <c>LoadByKeyAsync&lt;Ticket&gt;(x =&gt; new { x.ProjectId, x.Number }, ["p1", 42])</c>,
+    /// or returns <c>null</c> when no document matches. Throws when the key matches more
+    /// than one document.
+    /// </summary>
+    /// <typeparam name="T">The document CLR type.</typeparam>
+    /// <param name="key">The declared key, as declared: an anonymous type of its properties.</param>
+    /// <param name="values">One value per key component, in declaration order.</param>
+    /// <param name="ct">A cancellation token.</param>
+    public Task<DocumentResult<T>?> LoadByKeyAsync<T>(
+        Expression<Func<T, object?>> key,
+        IReadOnlyList<object> values,
+        CancellationToken ct = default)
+        where T : class
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        var keyMetadata = ResolveDeclaredKey(key, singleFieldOnly: false);
+        if (values.Count != keyMetadata.Paths.Count)
+        {
+            throw new ArgumentException(
+                $"Key {keyMetadata.Path} has {keyMetadata.Paths.Count} components; {values.Count} values were given.",
+                nameof(values));
+        }
+
+        for (var i = 0; i < values.Count; i++)
+        {
+            if (values[i] is null)
+            {
+                throw new ArgumentException($"Key component {keyMetadata.Paths[i]} has no value.", nameof(values));
+            }
+        }
+
+        return LoadByKeyCoreAsync<T>(keyMetadata, values, ct);
+    }
+
+    private async Task<DocumentResult<T>?> LoadByKeyCoreAsync<T>(
+        KeyMetadata keyMetadata,
+        IReadOnlyList<object> values,
+        CancellationToken ct)
+        where T : class
+    {
         var metadata = _model.GetRequired<T>();
-        var keyMetadata = ResolveDeclaredKey(key);
-
         var (conn, tx) = await EnsureTransactionAsync(ct);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText = """
+        var predicates = new StringBuilder();
+        for (var i = 0; i < values.Count; i++)
+        {
+            predicates.Append($" AND data #>> @path{i} = @value{i}");
+            cmd.Parameters.AddWithValue($"path{i}", keyMetadata.ComponentSegments[i]);
+            cmd.Parameters.AddWithValue($"value{i}", ToKeyText(values[i]));
+        }
+
+        cmd.CommandText = $"""
             SELECT id, data::text, version, schema_version
             FROM papuma.document
             WHERE scope = @scope AND tenant_id = @tenantId
-              AND document_type = @type
-              AND data #>> @path = @value
+              AND document_type = @type{predicates}
             LIMIT 2
             """;
         AddScopeParameters(cmd, metadata.Name);
-        cmd.Parameters.AddWithValue("path", keyMetadata.PathSegments);
-        cmd.Parameters.AddWithValue("value", ToKeyText(value));
 
         var results = new List<DocumentResult<T>>();
         await using (var reader = await cmd.ExecuteReaderAsync(ct))

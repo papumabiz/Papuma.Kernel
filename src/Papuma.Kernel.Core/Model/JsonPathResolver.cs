@@ -20,9 +20,53 @@ internal static class JsonPathResolver
     public static string Resolve(LambdaExpression propertyExpression)
     {
         ArgumentNullException.ThrowIfNull(propertyExpression);
+        return ResolveChain(propertyExpression.Body, nameof(propertyExpression));
+    }
 
+    /// <summary>
+    /// Resolves a key declaration: a single property chain (<c>x => x.Email</c>) or an
+    /// anonymous type of property chains (<c>x => new { x.ProjectId, x.Number }</c>) for a
+    /// composite key (ADR-020). Returns the paths comma-separated in declaration order —
+    /// the form of <see cref="KeyMetadata.Path"/>.
+    /// </summary>
+    public static string ResolveKey(LambdaExpression keyExpression)
+    {
+        ArgumentNullException.ThrowIfNull(keyExpression);
+
+        if (Unwrap(keyExpression.Body) is not NewExpression composite)
+        {
+            return EnsureNoSeparator(ResolveChain(keyExpression.Body, nameof(keyExpression)));
+        }
+
+        if (composite.Arguments.Count == 0)
+        {
+            throw new ArgumentException("A composite key needs at least one property.", nameof(keyExpression));
+        }
+
+        var paths = composite.Arguments
+            .Select(a => EnsureNoSeparator(ResolveChain(a, nameof(keyExpression))))
+            .ToList();
+        var duplicate = paths.GroupBy(p => p, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1);
+        if (duplicate is not null)
+        {
+            throw new ArgumentException(
+                $"Composite key lists '{duplicate.Key}' more than once.", nameof(keyExpression));
+        }
+
+        return string.Join(KeyMetadata.ComponentSeparator, paths);
+    }
+
+    private static string EnsureNoSeparator(string path) =>
+        path.Contains(KeyMetadata.ComponentSeparator)
+            ? throw new ArgumentException(
+                $"Key path '{path}' contains '{KeyMetadata.ComponentSeparator}', which separates composite key components.",
+                "keyExpression")
+            : path;
+
+    private static string ResolveChain(Expression body, string parameterName)
+    {
         var segments = new Stack<string>();
-        var current = Unwrap(propertyExpression.Body);
+        var current = Unwrap(body);
 
         while (current is MemberExpression member)
         {
@@ -30,7 +74,7 @@ internal static class JsonPathResolver
             {
                 throw new ArgumentException(
                     $"Expression must be a property access chain; '{member.Member.Name}' is not a property.",
-                    nameof(propertyExpression));
+                    parameterName);
             }
 
             segments.Push(JsonNameOf(property));
@@ -41,7 +85,7 @@ internal static class JsonPathResolver
         {
             throw new ArgumentException(
                 "Expression must be a simple property access chain like x => x.Address.City.",
-                nameof(propertyExpression));
+                parameterName);
         }
 
         return string.Join('.', segments);

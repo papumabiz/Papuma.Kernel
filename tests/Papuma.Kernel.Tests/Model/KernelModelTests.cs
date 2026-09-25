@@ -73,6 +73,54 @@ public sealed class KernelModelTests
     }
 
     [Fact]
+    public void CompositeKey_KeepsComponentOrder_AndGetsItsOwnIndexName()
+    {
+        var model = new KernelModelBuilder()
+            .Document<AttributedDoc>(d => d
+                .UniqueKey(x => new { x.Name, x.Address!.City })
+                .LookupKey(x => new { x.Email }))   // one component is a plain single-field key
+            .Build();
+        var metadata = model.GetRequired<AttributedDoc>();
+
+        var composite = Assert.Single(metadata.Keys, k => k.IsComposite);
+        Assert.Equal("name,address.city", composite.Path);
+        Assert.Equal(["name", "address.city"], composite.Paths);
+        Assert.Equal([["name"], ["address", "city"]], composite.ComponentSegments);
+        Assert.Empty(composite.PathSegments);
+        Assert.Equal("ux_papuma_doc_attributeddoc_name__address_city", composite.IndexName);
+
+        var single = Assert.Single(metadata.Keys, k => k.Path == "email");
+        Assert.False(single.IsComposite);
+        Assert.Equal(["email"], single.PathSegments);
+    }
+
+    [Fact]
+    public void CompositeKey_RejectsRepeatedComponents_AndNonProperties()
+    {
+        Assert.Throws<ArgumentException>(() => new KernelModelBuilder()
+            .Document<AttributedDoc>(d => d.UniqueKey(x => new { x.Name, Again = x.Name })));
+        Assert.Throws<ArgumentException>(() => new KernelModelBuilder()
+            .Document<AttributedDoc>(d => d.UniqueKey(x => new { x.Name, Upper = x.Name.ToUpperInvariant() })));
+    }
+
+    [Fact]
+    public void CompositeKey_IndexDdl_HasOneExpressionPerComponent()
+    {
+        var model = new KernelModelBuilder()
+            .Document<AttributedDoc>(d => d.UniqueKey(x => new { x.Name, x.Address!.City }))
+            .Build();
+
+        var postgres = Papuma.Kernel.Store.SchemaManager.BuildKeyIndexDdl(model);
+
+        Assert.Contains(
+            "ON papuma.document (scope, tenant_id, (data #>> '{name}'), (data #>> '{address,city}'))",
+            postgres);
+        Assert.Contains( // the attribute-declared single-field key is unchanged
+            "ON papuma.document (scope, tenant_id, (data #>> '{customerNumber}'))",
+            postgres);
+    }
+
+    [Fact]
     public void ResolvePolicy_UsesNearestAncestorPath()
     {
         var model = new KernelModelBuilder()

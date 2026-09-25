@@ -57,10 +57,12 @@ The bootstrap registers `DocumentStore` + `KernelModel`, creates the schema
 idempotently at startup (tables, RLS, key indexes) and hosts the feed workers
 (NOTIFY-driven, polling as the truth) as well as the retention worker.
 
-Keys are **single-path** — always unique per tenant, but there is no composite
-key over several fields. For "number unique per project", store the combination
-in one field (`Key = $"{ProjectId}/{Number}"`) and declare that field as the
-`UniqueKey`, or make the combination the document id itself.
+Keys are always scoped to the tenant. For "unique within a parent" (number per
+project), declare a **composite key** — `.UniqueKey(x => new { x.ProjectId, x.Number })`
+— and look it up with one value per component:
+`LoadByKeyAsync<Ticket>(x => new { x.ProjectId, x.Number }, ["p1", 42])` (ADR-020).
+Like single-field keys, it is enforced only for documents that carry every
+component.
 
 ## 3. Writing — the session as unit of work
 

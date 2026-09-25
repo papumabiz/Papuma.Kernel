@@ -177,44 +177,91 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
     }
 
     /// <summary>
-    /// Loads a document by a declared key (ADR-006), or returns <c>null</c> when no
-    /// document matches. Throws when the key matches more than one document — declare
-    /// the key unique if single-match semantics are required.
+    /// Loads a document by a declared single-field key (ADR-006), or returns <c>null</c>
+    /// when no document matches. Throws when the key matches more than one document —
+    /// declare the key unique if single-match semantics are required.
     /// </summary>
     /// <typeparam name="T">The document CLR type.</typeparam>
     /// <param name="key">The key property (must be declared via attribute or fluent config).</param>
     /// <param name="value">The key value to match.</param>
     /// <param name="ct">A cancellation token.</param>
-    public async Task<DocumentResult<T>?> LoadByKeyAsync<T>(
+    public Task<DocumentResult<T>?> LoadByKeyAsync<T>(
         Expression<Func<T, object?>> key,
         object value,
         CancellationToken ct = default)
         where T : class
     {
         ArgumentNullException.ThrowIfNull(value);
+        return LoadByKeyCoreAsync<T>(ResolveDeclaredKey(key), [value], ct);
+    }
 
+    /// <summary>
+    /// Loads a document by a declared composite key (ADR-020), e.g.
+    /// <c>LoadByKeyAsync&lt;Ticket&gt;(x =&gt; new { x.ProjectId, x.Number }, ["p1", 42])</c>,
+    /// or returns <c>null</c> when no document matches. Throws when the key matches more
+    /// than one document.
+    /// </summary>
+    /// <typeparam name="T">The document CLR type.</typeparam>
+    /// <param name="key">The declared key, as declared: an anonymous type of its properties.</param>
+    /// <param name="values">One value per key component, in declaration order.</param>
+    /// <param name="ct">A cancellation token.</param>
+    public Task<DocumentResult<T>?> LoadByKeyAsync<T>(
+        Expression<Func<T, object?>> key,
+        IReadOnlyList<object> values,
+        CancellationToken ct = default)
+        where T : class
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        var keyMetadata = ResolveDeclaredKey(key, singleFieldOnly: false);
+        if (values.Count != keyMetadata.Paths.Count)
+        {
+            throw new ArgumentException(
+                $"Key {keyMetadata.Path} has {keyMetadata.Paths.Count} components; {values.Count} values were given.",
+                nameof(values));
+        }
+
+        for (var i = 0; i < values.Count; i++)
+        {
+            if (values[i] is null)
+            {
+                throw new ArgumentException($"Key component {keyMetadata.Paths[i]} has no value.", nameof(values));
+            }
+        }
+
+        return LoadByKeyCoreAsync<T>(keyMetadata, values, ct);
+    }
+
+    private async Task<DocumentResult<T>?> LoadByKeyCoreAsync<T>(
+        KeyMetadata keyMetadata,
+        IReadOnlyList<object> values,
+        CancellationToken ct)
+        where T : class
+    {
         var metadata = _model.GetRequired<T>();
-        var keyMetadata = ResolveDeclaredKey(key);
-
         var (conn, tx) = await EnsureTransactionAsync(ct);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        // The JSON path is interpolated as a literal (validated below), not bound as a
-        // parameter: SQLite's query planner only matches an expression index when the
+        // The JSON paths are interpolated as literals (validated), not bound as
+        // parameters: SQLite's query planner only matches an expression index when the
         // indexed expression is textually identical to the query's — a bound @path
         // parameter is a different expression node and silently defeats the declared-key
         // index (SqliteSpikeTests.JsonExtractIndex_NotUsed_WhenPathIsABoundParameter).
+        var predicates = new StringBuilder();
+        for (var i = 0; i < values.Count; i++)
+        {
+            predicates.Append($" AND json_extract(data, '{ValidatedKeyJsonPath(keyMetadata.ComponentSegments[i])}') = @value{i}");
+            cmd.Parameters.AddWithValue($"value{i}", ToKeyComparisonValue(values[i]));
+        }
+
         cmd.CommandText = $"""
             SELECT id, data, version, schema_version
             FROM document
             WHERE scope = @scope AND tenant_id = @tenantId
-              AND document_type = @type
-              AND json_extract(data, '{ValidatedKeyJsonPath(keyMetadata)}') = @value
+              AND document_type = @type{predicates}
             LIMIT 2
             """;
         AddScopeParameters(cmd, metadata.Name);
-        cmd.Parameters.AddWithValue("value", ToKeyComparisonValue(value));
 
         var results = new List<DocumentResult<T>>();
         await using (var reader = await cmd.ExecuteReaderAsync(ct))
@@ -1035,18 +1082,28 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
         cmd.Parameters.AddWithValue("type", documentType);
     }
 
-    private KeyMetadata ResolveDeclaredKey<T>(Expression<Func<T, object?>> key)
+    private KeyMetadata ResolveDeclaredKey<T>(Expression<Func<T, object?>> key, bool singleFieldOnly = true)
         where T : class
     {
         ArgumentNullException.ThrowIfNull(key);
         var metadata = _model.GetRequired<T>();
-        var path = JsonPathResolver.Resolve(key);
+        var path = JsonPathResolver.ResolveKey(key);
 
-        return metadata.Keys.FirstOrDefault(k => k.Path == path)
+        var declared = metadata.Keys.FirstOrDefault(k => k.Path == path)
             ?? throw new ArgumentException(
                 $"'{path}' is not a declared key on {metadata.Name}. " +
                 "Declare it via [UniqueKey]/[LookupKey] or UniqueKey()/LookupKey() (ADR-006).",
                 nameof(key));
+
+        if (singleFieldOnly && declared.IsComposite)
+        {
+            throw new ArgumentException(
+                $"'{path}' is a composite key on {metadata.Name}; this operation matches single-field " +
+                "keys only. Load by the composite key with one value per component (ADR-020).",
+                nameof(key));
+        }
+
+        return declared;
     }
 
     /// <summary>
@@ -1056,14 +1113,16 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
     /// developer-declared property names, not user input, but interpolation still demands
     /// the same identifier-pattern check before it happens).
     /// </summary>
-    private static string ValidatedKeyJsonPath(KeyMetadata key)
+    private static string ValidatedKeyJsonPath(KeyMetadata key) => ValidatedKeyJsonPath(key.PathSegments);
+
+    private static string ValidatedKeyJsonPath(string[] segments)
     {
-        foreach (var segment in key.PathSegments)
+        foreach (var segment in segments)
         {
             InputValidator.ValidateDocumentType(segment);
         }
 
-        return "$." + string.Join('.', key.PathSegments);
+        return "$." + string.Join('.', segments);
     }
 
     /// <summary>

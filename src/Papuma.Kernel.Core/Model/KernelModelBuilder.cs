@@ -266,22 +266,27 @@ public sealed class KernelModelBuilder
         }
 
         /// <summary>
-        /// Declares a unique key on a property (ADR-006).
+        /// Declares a unique key (ADR-006) on a property (<c>x => x.Email</c>) or, composite,
+        /// on several properties together (<c>x => new { x.ProjectId, x.Number }</c>, ADR-020).
+        /// A composite key is enforced only for documents that carry every component.
         /// </summary>
+        /// <param name="property">The key property, or an anonymous type of key properties.</param>
         public DocumentTypeBuilder<T> UniqueKey(Expression<Func<T, object?>> property)
         {
             ArgumentNullException.ThrowIfNull(property);
-            _keyOverrides[JsonPathResolver.Resolve(property)] = true;
+            _keyOverrides[JsonPathResolver.ResolveKey(property)] = true;
             return this;
         }
 
         /// <summary>
-        /// Declares a non-unique lookup key on a property (ADR-006).
+        /// Declares a non-unique lookup key (ADR-006) on a property or, composite, on
+        /// several properties together (<c>x => new { x.ProjectId, x.Status }</c>, ADR-020).
         /// </summary>
+        /// <param name="property">The key property, or an anonymous type of key properties.</param>
         public DocumentTypeBuilder<T> LookupKey(Expression<Func<T, object?>> property)
         {
             ArgumentNullException.ThrowIfNull(property);
-            _keyOverrides[JsonPathResolver.Resolve(property)] = false;
+            _keyOverrides[JsonPathResolver.ResolveKey(property)] = false;
             return this;
         }
 
@@ -537,7 +542,9 @@ public sealed class KernelModelBuilder
     internal static string BuildIndexName(string documentType, string path, bool unique)
     {
         var prefix = unique ? "ux" : "ix";
-        var raw = $"{prefix}_papuma_doc_{documentType}_{path.Replace('.', '_')}".ToLowerInvariant();
+        // Composite components are joined by "__" so (a, b) cannot collide with the path a.b.
+        var pathPart = path.Replace(KeyMetadata.ComponentSeparator.ToString(), "__", StringComparison.Ordinal).Replace('.', '_');
+        var raw = $"{prefix}_papuma_doc_{documentType}_{pathPart}".ToLowerInvariant();
         if (raw.Length <= 63)
         {
             return raw;
