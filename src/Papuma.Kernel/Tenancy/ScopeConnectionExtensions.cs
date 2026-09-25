@@ -40,10 +40,15 @@ public static class ScopeConnectionExtensions
     /// reuses the same pooled connection.
     /// </para>
     /// <para>
-    /// <b>Background workers with <c>ScopeFilter.All()</c>:</b> Workers that process
-    /// all scopes skip this call. Their database user must be configured with
-    /// <c>BYPASSRLS</c> so that RLS does not block cross-scope reads. In that case
-    /// Layer 1 (explicit WHERE predicates) is the sole isolation mechanism.
+    /// <b>Background workers that read across scopes</b> (<c>ScopeFilter.All()</c>) call
+    /// <see cref="SetAllScopesAsync"/> instead — the kernel's feed processors do. No
+    /// <c>BYPASSRLS</c> role is needed; the application role stays subject to RLS.
+    /// </para>
+    /// <para>
+    /// <b>Application tables:</b> the same call scopes RLS policies on your own tables
+    /// when they use <c>papuma.scope_visible</c> / <c>papuma.scope_writable</c>
+    /// (ADR-019). Those functions are the contract — do not reference the setting names
+    /// in your own policies.
     /// </para>
     /// </remarks>
     /// <param name="connection">The open PostgreSQL connection.</param>
@@ -84,10 +89,15 @@ public static class ScopeConnectionExtensions
     /// </summary>
     /// <remarks>
     /// <para>
-    /// This overload is used by background workers that process all scopes
-    /// (i.e. <see cref="ScopeFilter.IsAll"/> is <c>true</c>). Setting the scope to
-    /// <c>'All'</c> satisfies the RLS policy's third condition, which allows unrestricted
-    /// cross-scope reads without requiring a <c>BYPASSRLS</c> database role.
+    /// Used by background workers that process all scopes (i.e.
+    /// <see cref="ScopeFilter.IsAll"/> is <c>true</c>). The <c>'All'</c> scope satisfies
+    /// the RLS policies' read branch, which allows cross-scope reads without a
+    /// <c>BYPASSRLS</c> database role.
+    /// </para>
+    /// <para>
+    /// <b>Read-only by design:</b> the policies' <c>WITH CHECK</c> admits no write under
+    /// <c>'All'</c>. A worker that writes scoped rows sets the row's own scope with
+    /// <see cref="SetScopeAsync"/> for that write (ADR-019).
     /// </para>
     /// <para>
     /// <b>Invariant:</b> This method must always be called <em>after</em>
