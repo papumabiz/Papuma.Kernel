@@ -10,8 +10,11 @@ namespace Papuma.Kernel.Tenancy;
 /// </summary>
 public sealed record ScopeContext
 {
+    // A whitelist, not an SQL-safety requirement: tenant ids only ever reach SQL as
+    // parameters. It admits GUID strings ("D"/"N") and keeps ids free of whitespace
+    // and punctuation that would make them awkward in logs, URLs and connection strings.
     private static readonly Regex ValidTenantPattern = new(
-        "^[A-Za-z][A-Za-z0-9_]{1,100}$",
+        "^[A-Za-z0-9][A-Za-z0-9_-]{1,100}$",
         RegexOptions.Compiled,
         TimeSpan.FromMilliseconds(100));
 
@@ -40,22 +43,41 @@ public sealed record ScopeContext
     /// Creates a validated tenant scope.
     /// </summary>
     /// <param name="tenantId">
-    /// The tenant identifier: a leading letter followed by 1–100 letters, digits or
-    /// underscores (<c>^[A-Za-z][A-Za-z0-9_]{1,100}$</c>). A raw GUID string does not
-    /// match — derive a valid id consistently, e.g. <c>$"t{guid:N}"</c>.
+    /// The tenant identifier: a letter or digit followed by 1–100 letters, digits,
+    /// underscores or dashes (<c>^[A-Za-z0-9][A-Za-z0-9_-]{1,100}$</c>). GUID strings
+    /// match; ids are compared case-sensitively, so prefer <see cref="Tenant(Guid)"/>
+    /// for GUIDs to get one canonical form.
     /// </param>
     /// <exception cref="ArgumentException">
     /// Thrown when <paramref name="tenantId"/> does not match the pattern above.
     /// </exception>
     public static ScopeContext Tenant(string tenantId)
     {
+        ArgumentNullException.ThrowIfNull(tenantId);
+
         if (!ValidTenantPattern.IsMatch(tenantId))
         {
             throw new ArgumentException(
-                $"Invalid tenantId '{tenantId}'. Must match [A-Za-z][A-Za-z0-9_]{{1,100}}.",
+                $"Invalid tenantId '{tenantId}'. Must match [A-Za-z0-9][A-Za-z0-9_-]{{1,100}}.",
                 nameof(tenantId));
         }
 
         return new ScopeContext(ScopeType.Tenant, tenantId);
+    }
+
+    /// <summary>
+    /// Creates a tenant scope from a GUID in its canonical form: lowercase with dashes
+    /// (<c>Guid.ToString("D")</c>), so every caller derives the same tenant id.
+    /// </summary>
+    /// <param name="tenantId">The tenant identifier; must not be <see cref="Guid.Empty"/>.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="tenantId"/> is <see cref="Guid.Empty"/>.</exception>
+    public static ScopeContext Tenant(Guid tenantId)
+    {
+        if (tenantId == Guid.Empty)
+        {
+            throw new ArgumentException("The empty GUID is not a tenant id.", nameof(tenantId));
+        }
+
+        return Tenant(tenantId.ToString("D"));
     }
 }

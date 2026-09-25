@@ -46,6 +46,20 @@ public sealed class RlsIsolationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GuidTenantScope_IsolatesLikeAnyOtherTenant()
+    {
+        var tenantA = ScopeContext.Tenant(Guid.NewGuid());
+        var tenantB = ScopeContext.Tenant(Guid.NewGuid());
+        await InsertDocumentAsync(tenantA, "doc_guid_a");
+        await InsertDocumentAsync(tenantB, "doc_guid_b");
+
+        var visibleToA = await SelectAllIdsAsync(tenantA);
+
+        Assert.Contains("doc_guid_a", visibleToA);
+        Assert.DoesNotContain("doc_guid_b", visibleToA);
+    }
+
+    [Fact]
     public async Task PlatformScope_SeesOnlyPlatformRows()
     {
         await InsertDocumentAsync(ScopeContext.Tenant("rls_tenant_c"), "doc_c");

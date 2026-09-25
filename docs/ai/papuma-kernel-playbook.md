@@ -99,7 +99,7 @@ Typed errors you should handle (not swallow): `ConcurrencyException`,
 | …change a single field without loading | `PatchAsync` (field-level LWW is deliberate there) |
 | …bound a stock (never oversell) | `Increment(-1)` + `Validate` (concepts §17) |
 | …enforce uniqueness over two fields ("number per project") | no composite keys — one field holding the combination (`$"{ProjectId}/{Number}"`) declared as `UniqueKey`, or the combination as the document id |
-| …use a GUID as tenant id | tenant ids must match `^[A-Za-z][A-Za-z0-9_]{1,100}$` — derive once, e.g. `ScopeContext.Tenant($"t{guid:N}")` |
+| …use a GUID as tenant id | `ScopeContext.Tenant(guid)` — canonical lowercase dashed form; string ids match `^[A-Za-z0-9][A-Za-z0-9_-]{1,100}$` and compare case-sensitively |
 | …use the store in tests/tools without a host | `SchemaManager.EnsureSchemaAsync(dataSource, model)` + `new DocumentStore(dataSource, model)`; handlers via `ChangeFeedProcessor.ProcessOnceAsync()` ([getting-started §7](../getting-started.md#7-without-a-host-tests-tools-console-apps)) |
 | …react to "field X went Y→Z" | `change.IsFieldTransition(path, from, to)` in a handler (ADR-011) |
 | …add a human approval step | write a task document, handler returns; the decision = a normal write (concepts §18) |

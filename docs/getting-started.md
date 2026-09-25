@@ -91,10 +91,10 @@ await session.RollbackAsync<User>(user.Id, toVersion: 1, expectedVersion: 3);
 await session.CommitAsync();
 ```
 
-A tenant id must match `^[A-Za-z][A-Za-z0-9_]{1,100}$` — a leading letter,
-2–101 characters, no `-`. A raw GUID therefore fails; derive the id in one place,
-e.g. `ScopeContext.Tenant($"t{tenantGuid:N}")`, so every part of the application
-stores the same shape.
+A tenant id matches `^[A-Za-z0-9][A-Za-z0-9_-]{1,100}$` — 2–101 letters, digits,
+`_` or `-`, starting with a letter or digit; GUID strings fit. Ids compare
+case-sensitively, so for GUIDs use `ScopeContext.Tenant(Guid)`: it always yields
+the lowercase dashed form, and every part of the application stores the same shape.
 
 Conflicts are typed (`ConcurrencyException` with expected and actual version,
 `UniqueKeyViolationException` with the key path, …) and local thanks to
@@ -170,7 +170,7 @@ For integration tests, the kernel's own suite uses this shape
 
 - **One `postgres:18` container per test run** (Testcontainers), shared by all
   tests; `EnsureSchemaAsync` is idempotent, so every test class may call it.
-- **A fresh tenant per test** — `ScopeContext.Tenant($"t{Guid.NewGuid():N}")` —
+- **A fresh tenant per test** — `ScopeContext.Tenant(Guid.NewGuid())` —
   isolates tests without truncating tables.
 - **Connect as a non-superuser role** when a test asserts isolation: superusers
   bypass row-level security, so a superuser connection hides RLS bugs. Grant the

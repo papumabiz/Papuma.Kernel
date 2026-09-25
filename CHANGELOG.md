@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Tenant ids accept GUIDs.** `ScopeContext.Tenant` now accepts
+  `^[A-Za-z0-9][A-Za-z0-9_-]{1,100}$` (was `^[A-Za-z][A-Za-z0-9_]{1,100}$`): a leading
+  digit and `-` are allowed, so GUID strings work without a prefix. Every previously
+  valid id stays valid. The pattern was a whitelist, never an SQL-safety measure —
+  tenant ids only reach SQL as parameters. New overload `ScopeContext.Tenant(Guid)`
+  yields the canonical lowercase dashed form (ids compare case-sensitively) and rejects
+  `Guid.Empty`. A null id now throws `ArgumentNullException` naming `tenantId`.
 - **Packaging: one doc set in every package, with no dangling links.** All packages
   (`Papuma.Kernel`, `.Local`, `.FSharp`, `.AspNetCore`, `.Mcp`) now ship the same
   `docs/` set — guides, ADRs, recipes, the `ai/` set and `analyses/` — defined once in
