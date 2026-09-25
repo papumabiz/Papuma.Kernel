@@ -20,7 +20,7 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
     <!-- Microsoft.Data.Sqlite 10.0.10 transitively pulls SQLitePCLRaw 2.1.11, which has a
          known high-severity advisory (GHSA-2m69-gcr7-jv3q). Pin the bundle directly to a
          patched version — a direct reference wins over the transitive one. -->
