@@ -67,6 +67,10 @@ internal static class SqliteSchemaDdl
         CREATE UNIQUE INDEX IF NOT EXISTS ux_change_document_version
             ON change (scope, tenant_id, document_type, document_id, version);
 
+        -- A command's changes as one unit: GetChangesByCorrelationAsync.
+        CREATE INDEX IF NOT EXISTS ix_change_correlation
+            ON change (scope, tenant_id, json_extract(metadata, '$.correlationId'));
+
         -- ── Event log: append-only facts (ADR-013) ────────────────────────────────
         CREATE TABLE IF NOT EXISTS event
         (

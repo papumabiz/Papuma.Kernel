@@ -79,6 +79,10 @@ internal static class SchemaDdl
         CREATE UNIQUE INDEX IF NOT EXISTS ux_papuma_change_document_version
             ON papuma.change (scope, tenant_id, document_type, document_id, version);
 
+        -- A command's changes as one unit: GetChangesByCorrelationAsync.
+        CREATE INDEX IF NOT EXISTS ix_papuma_change_correlation
+            ON papuma.change (scope, tenant_id, (metadata ->> 'correlationId'));
+
         -- ── Event log: append-only facts (ADR-013), txid for gapless reads ────────
         CREATE TABLE IF NOT EXISTS papuma.event
         (
