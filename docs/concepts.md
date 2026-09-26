@@ -393,6 +393,58 @@ small, since every handler has its own connection/checkpoint), a SQL-side
 sharding by `document_id` hash (solves limit 2 while preserving the
 domain-relevant ordering *per document* across N parallel consumers).
 
+### The write path: what a save costs in storage
+
+The fair comparison for a save is not a plain CRUD update but CRUD **plus** an
+audit row **plus** an outbox row — an update and inserts per write either way;
+the kernel does it in one statement. What *is* specific to storing the document
+as one JSONB column, measured on 2026-09-26 (fresh PostgreSQL 18, 500 patches of
+50 documents, `pg_stat_user_tables`):
+
+| Model | HOT updates on `papuma.document` | WAL per save |
+|---|---:|---:|
+| no declared key anywhere | 52–66 % | ~1.05–1.2 KB |
+| one declared key, on a *different* document type | **0 %** | ~1.25–1.35 KB |
+
+A HOT update rewrites a row without touching its indexes — possible only when no
+indexed column changes. Declared keys are expression indexes over `data`, and
+`data` changes on every save; PostgreSQL decides HOT eligibility over the
+indexed columns of the whole table, so **one declared key anywhere switches HOT
+off for every document of every type** (the partial `WHERE document_type = …`
+does not help). Each update then adds a primary-key index entry (and key index
+entries where the partial predicate matches) and leaves more for vacuum; a
+`fillfactor` below 100 buys nothing while any key exists. In this probe the WAL
+cost rose by roughly 10–20 % — whether that dents throughput at realistic
+document sizes and concurrency is what the next benchmark has to show.
+
+**Document size is a modelling cost.** A relational row leaves an unchanged
+large column in TOAST; a JSONB document is rewritten — and re-compressed — as a
+whole on every change, so a save costs in proportion to the document's size, not
+the change's. The granularity rule of §17 applies here too: keep frequently
+patched state (counters, status) in small documents of its own rather than
+inside a large one. For larger documents, LZ4 compresses and decompresses much
+faster than the default `pglz`: `ALTER DATABASE app SET default_toast_compression
+= 'lz4'` applies to every value written afterwards, without touching the
+kernel's schema.
+
+**Deferred, with triggers** (jejak feedback F-14): moving declared keys into a
+side table (`papuma.document_key`, maintained in the same statement, written only
+when a key value changes) would restore HOT for ordinary saves — at the cost of
+reworking ADR-006's index model, lookups and violation mapping. Revisit when a
+benchmark with realistic shape (5–50 KB documents of incompressible content,
+several keys, 16–32 sessions) shows the lost HOT costing more than 20 % of
+saves/s. Partitioning `papuma.change` by time (BRIN on `seq`/`occurred_at`)
+bounds index size and vacuum for a table that is never deleted from; revisit when
+it passes ~100 million rows or its autovacuum runs become the bottleneck.
+
+**Beyond one primary.** Every key, predicate and policy already carries
+`tenant_id`, which makes tenant-based distribution (e.g. Citus with `tenant_id`
+as distribution column) the natural long-range route for documents and their
+histories. The part that would have to give is the single global `seq`: the feed
+would become ordered per shard — per tenant — which is the only order the domain
+relies on per document anyway. A redesign, not a setting; noted so nothing built
+now assumes a global order across tenants.
+
 ---
 
 ## 15. Observability without a vendor: why BCL primitives suffice — and the link trick

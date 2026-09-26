@@ -18,6 +18,13 @@
   format, the playbook, getting-started and both factsheets now separate the stable
   *format* from the *content* (your documents' field paths) and point other teams and
   systems to explicit integration events at the boundary. jejak feedback F-13.
+- **Docs: write-path storage costs** (concepts §14). Measured: one declared key anywhere
+  in the model makes HOT updates impossible for every document (0 % vs 52–66 % without
+  keys), because keys are expression indexes over the always-changing `data` column.
+  Document size is now documented as a modelling cost (whole-document rewrite per save;
+  `default_toast_compression = lz4` for large documents). A key side table and
+  partitioning of `papuma.change` are deferred with measurable triggers; tenant-based
+  distribution is noted as the long-range route. jejak feedback F-14.
 - **ADR-021 evidence log** records the first consumer data point for a testing-package
   xUnit adapter (jejak, F-10) and that the correlation read API it listed as a
   prerequisite now exists.

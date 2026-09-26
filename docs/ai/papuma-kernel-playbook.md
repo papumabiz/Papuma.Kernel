@@ -136,6 +136,9 @@ Typed errors you should handle (not swallow): `ConcurrencyException`,
 - **`ConcurrencyException` piles up on one document**: a hot document. Check
   whether `PatchAsync` (independent fields) or `Increment` (counters) can replace
   the load-modify-save (concepts §4/§17).
+- **Saves slow or WAL-heavy with large documents**: a save rewrites the whole
+  JSONB document. Split frequently patched state into small documents, consider
+  `default_toast_compression = lz4` (concepts §14, "The write path").
 - **RLS errors / empty reads in workers**: check the `'All'` scope mechanism
   (`SetAllScopesAsync` or `ScopeFilter.All()`); why a missing scope yields empty
   reads instead of an error: [concepts.md §23](../concepts.md#23-why-tenant-isolation-fails-closed-and-why-two-layers-not-one).
