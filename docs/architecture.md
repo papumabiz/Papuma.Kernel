@@ -90,7 +90,7 @@ Papuma.Kernel
 ├── Papuma.Kernel.Events       event log: append, EventFeedProcessor, retention (ADR-013)
 ├── Papuma.Kernel.Processing   change-handler engine: checkpoints, retry, rebuild
 ├── Papuma.Kernel.Model        metamodel: types, keys, policies, schema versions
-└── Papuma.Kernel.Hosting      AddPapumaKernel bootstrap, hosted feed workers
+└── Papuma.Kernel.Hosting      AddPapumaKernel bootstrap, schema contributors, hosted feed workers
 
 Papuma.Kernel.AspNetCore       tenant resolution, change-feed-lag health check
 Papuma.Kernel.Testing          test database with a non-superuser role, feed draining (ADR-021)

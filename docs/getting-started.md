@@ -55,7 +55,10 @@ builder.Services
 
 The bootstrap registers `DocumentStore` + `KernelModel`, creates the schema
 idempotently at startup (tables, RLS, key indexes) and hosts the feed workers
-(NOTIFY-driven, polling as the truth) as well as the retention worker.
+(NOTIFY-driven, polling as the truth) as well as the retention worker. Your own
+projection tables join that startup step through `.AddSchemaContributor<T>()` — run
+after the kernel schema, before the workers
+([recipe](recipes/projection-schema.md)).
 
 Keys are always scoped to the tenant. For "unique within a parent" (number per
 project), declare a **composite key** — `.UniqueKey(x => new { x.ProjectId, x.Number })`

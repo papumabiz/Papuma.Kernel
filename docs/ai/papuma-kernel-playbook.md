@@ -173,6 +173,9 @@ same hard rules above — with these engine-specific adjustments:
 - **One writer, one file, one process.** Don't open the same `.db` file from
   two processes — that's an OS file-lock violation, not a kernel concern to
   code around.
+- **No schema contributors (yet).** `AddSchemaContributor<T>()` exists for the
+  Postgres host only; with `AddPapumaKernelLocal`, create projection tables before
+  the host starts (e.g. right after building it, before `Run`).
 - **No embedded dashboard, no feed-lag health check, no MCP surface (yet).**
   Those live in `Papuma.Kernel.AspNetCore`/`Papuma.Kernel.Mcp`, which have no
   SQLite counterpart. `KernelDiagnostics` (`Meter`/`ActivitySource`) *is*
