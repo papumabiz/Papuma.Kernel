@@ -15,6 +15,9 @@ exactly like `papuma.document` — a missing scope yields empty reads.
 
 ## 1. The table and its policy
 
+Where this DDL runs at startup, and how the table evolves later: the
+[projection-schema recipe](projection-schema.md) (a schema contributor).
+
 ```sql
 CREATE TABLE app.ticket_list
 (

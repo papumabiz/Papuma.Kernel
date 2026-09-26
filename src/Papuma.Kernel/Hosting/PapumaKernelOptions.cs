@@ -27,7 +27,9 @@ public sealed class PapumaKernelOptions
     public NpgsqlDataSource? DataSource { get; set; }
 
     /// <summary>
-    /// Gets or sets whether <c>EnsureSchemaAsync</c> runs on startup (default: true).
+    /// Gets or sets whether <c>EnsureSchemaAsync</c> — and after it every registered
+    /// <see cref="ISchemaContributor"/> — runs on startup (default: true). Turn it off when
+    /// schema changes are applied by a separate deployment step.
     /// </summary>
     public bool EnsureSchema { get; set; } = true;
 
