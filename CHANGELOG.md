@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Write-path storage probe** (`dotnet run -c Release -- writepath` in
+  `benchmarks/Papuma.Kernel.Benchmarks`): saves/s, p50/p95, WAL per save, HOT ratio and
+  table/index growth for 5–50 KB incompressible documents, 0 vs 3 declared keys, 1/16/32
+  sessions, patch and full save, plus `fillfactor` 90 and `lz4` TOAST compression — a
+  fresh PostgreSQL 18 container per scenario, `--rounds`/`--filter` for repeat
+  measurements. Result in concepts §14: declared keys take HOT from 92–100 % to 0 %, but
+  at realistic shape that costs 0–9 % WAL and no measurable throughput — the trigger for
+  the deferred key side table did not fire. jejak feedback F-14.
 - **`GetChangesByCorrelationAsync(correlationId)`** on both kernels' sessions: every
   change a unit of work produced, across document types, in feed order, scope-bound —
   "what did this command do?" for audit timelines and for tests asserting a command's

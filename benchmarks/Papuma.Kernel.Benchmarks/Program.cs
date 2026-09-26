@@ -9,4 +9,10 @@ if (args is ["feed", ..])
     return;
 }
 
+if (args is ["writepath", .. var writePathArgs])
+{
+    await Papuma.Kernel.Benchmarks.WritePathProbe.RunAsync(writePathArgs);
+    return;
+}
+
 BenchmarkRunner.Run<Papuma.Kernel.Benchmarks.DiffEngineBenchmarks>(args: args);

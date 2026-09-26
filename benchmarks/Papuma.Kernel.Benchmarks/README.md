@@ -86,3 +86,59 @@ What the numbers mean for the three scaling triggers (concepts §14):
 Local-container numbers are optimistic on network latency (no real RTT to the
 database); on managed Postgres, expect the projection-handler rate to drop with
 the roundtrip time — measure in your environment, the probe is reusable.
+
+## Write-path storage probe (concepts §14, jejak F-14)
+
+```bash
+dotnet run --project benchmarks/Papuma.Kernel.Benchmarks -c Release -- writepath
+dotnet run --project benchmarks/Papuma.Kernel.Benchmarks -c Release -- writepath --rounds 3
+dotnet run --project benchmarks/Papuma.Kernel.Benchmarks -c Release -- writepath --rounds 5 --filter "Save 5 KB"
+```
+
+Decides the deferred *key side table*: does the loss of HOT updates that any
+declared key causes (keys are expression indexes over `data`) cost more than
+20 % of saves/s at realistic shape? Needs a container runtime (Docker, or Podman
+with a Docker-compatible socket); every scenario gets a fresh `postgres:18-alpine`
+through `PapumaTestDatabase` and writes as the non-superuser application role.
+
+The scenarios:
+
+- **Shape:** documents of ~5, ~20 and ~50 KB with a random base64 payload
+  (incompressible — repeated characters would compress away in TOAST and hide
+  the size cost); 0 declared keys vs 3 (unique, lookup, composite unique);
+  1, 16 and 32 concurrent sessions, 25 documents of their own each, one write per
+  commit; `PatchAsync` incrementing a counter (small change, large document) and
+  `SaveAsync` of the whole document.
+- **Storage knobs** at Patch 20 KB / 16 sessions, one at a time: `fillfactor = 90`
+  on `papuma.document` (`ALTER TABLE` + `VACUUM FULL`, an experiment only) and
+  `default_toast_compression = 'lz4'` (`ALTER DATABASE`, then reconnect).
+
+Per scenario: 1 s warmup, 4 s measured (first positional argument changes it).
+Reported: saves/s, p50/p95 latency per write, WAL bytes per save
+(`pg_current_wal_lsn` difference), HOT ratio (`n_tup_hot_upd / n_tup_upd` of
+`papuma.document` — the pools are cleared first, since backends flush their
+statistics on exit), and table/index growth; then a table of 3 keys against 0 per
+shape. Options:
+
+- `--rounds N` runs every scenario N times (fresh container each) and keeps the
+  median round by saves/s — use it; single rounds are noisy.
+- `--durable` keeps `synchronous_commit = on`. The default is `off`: the commit
+  fsync is a per-save constant that dilutes the storage cost under test, so the
+  default shows the upper bound of the relative key cost.
+- `--filter text` keeps the scenarios whose description contains the text (the
+  progress lines show the format, e.g. `Save 5 KB, 3 keys, 16 sessions`).
+
+The full matrix (40 scenarios) takes ~9 minutes per round locally.
+
+Result 2026-09-26 (i7-1260P, Podman 5.1 on WSL2, `--rounds 3` plus 5-round
+re-runs; full table and discussion in concepts §14):
+
+- **HOT:** 92–100 % without keys, 0 % with keys, at every size and concurrency.
+- **WAL per save ≈ document size** (6.6 / 23.5 / 56 KB): the TOASTed JSONB is
+  rewritten whole on every save. Keys add 0–9 % on top and ~30 bytes of index per
+  save; table growth is the same.
+- **Saves/s: no reproducible difference.** 200–550 saves/s at 16–32 sessions,
+  bound by roundtrips and TOAST I/O; the spread between runs of the same cell
+  (±25 %) is larger than any key effect, and the sign of Δ flips between runs.
+- **Trigger (> 20 % saves/s): not fired.** Local containers resolve ~25 %;
+  re-run on production-like hardware for finer resolution.

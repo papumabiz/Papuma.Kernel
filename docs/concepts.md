@@ -417,6 +417,53 @@ entries where the partial predicate matches) and leaves more for vacuum; a
 cost rose by roughly 10–20 % — whether that dents throughput at realistic
 document sizes and concurrency is what the next benchmark has to show.
 
+**Measured at realistic shape** (2026-09-26, the `writepath` probe in
+`benchmarks/`, i7-1260P, Podman 5.1 on WSL2, fresh `postgres:18-alpine` per
+scenario, `synchronous_commit = off` to take the commit fsync out of the
+comparison; random base64 payloads that TOAST cannot compress; each session
+writes 25 documents of its own, one write per commit; 3 declared keys = unique,
+lookup and a composite unique key on the written type). Medians of 3 rounds,
+Δ = 3 keys against none; the second Δ is a 5-round re-run of the cells that
+first crossed 20 %:
+
+| Write, size | Sessions | HOT, 0 → 3 keys | WAL per save | Δ WAL | Δ saves/s |
+|---|---:|---:|---:|---:|---:|
+| Patch 5 KB | 16 / 32 | 98–99 % → 0 % | 6.6 KB | +6–9 % | 0 % / +12 % |
+| Patch 20 KB | 16 / 32 | 99–100 % → 0 % | 23.5 KB | −1 % | +14 % (re-run −6 %) / +1 % |
+| Patch 50 KB | 16 / 32 | 95–96 % → 0 % | 56 KB | +1 % | +12 % / +24 % |
+| Save 5 KB | 16 / 32 | 98–100 % → 0 % | 6.6 KB | +6 % | −40 % (re-run −4 %) / +24 % (re-run −28 %) |
+| Save 20 KB | 16 / 32 | 92–98 % → 0 % | 23.3 KB | −1–+2 % | +6 % (re-run −7 %) / +4 % |
+| Save 50 KB | 16 / 32 | 95–97 % → 0 % | 56 KB | 0–2 % | +3 % / +13 % |
+
+What this shows:
+
+- **Once a document is TOASTed, its rewrite dominates.** From ~2 KB on, the
+  JSONB value lives out of line; every save writes the whole value again —
+  WAL per save ≈ document size — while the heap tuple stays small. Without
+  keys, HOT therefore reaches 92–100 % (not the 52–66 % of small documents), and
+  losing it adds one to three index entries: +0–9 % WAL, ~30 bytes of index
+  growth per save. Table growth is the same with and without keys.
+- **Throughput does not see it.** The loop is bound by roundtrips and TOAST
+  I/O (~7 ms per save for a single session, 200–550 saves/s at 16–32
+  sessions); run-to-run spread on this setup is ±25 %, and the Δ saves/s
+  column changes sign between runs of the same cell. No cell showed a
+  reproducible loss above 20 %; across the realistic cells the key variant
+  averages within a few percent of the keyless one.
+- **The storage knobs** (Patch 20 KB, 16 sessions, 5-round medians):
+  `fillfactor = 90` and `lz4` leave WAL per save unchanged for incompressible
+  content and move saves/s within the noise without keys (466 and 454 against
+  449). With keys both cells came out lower in both runs (−18/−27 % and
+  −30/−19 %), but their rounds overlap the keyless ones and neither setting
+  has a mechanism that would hurt only the key variant — a candidate for a
+  re-run on quieter hardware, not a finding. lz4's gain is for *compressible*
+  documents, which this probe excludes by design.
+
+**Verdict for the key side table: the trigger did not fire.** At realistic
+shape the lost HOT costs 0–9 % WAL and no measurable throughput. The limit of
+the evidence is its resolution: a local container on WSL2 cannot resolve
+differences below ~25 %, so this rules out a large cost, not a small one.
+Re-run the probe (`--rounds 5`) on production-like hardware before revisiting.
+
 **Document size is a modelling cost.** A relational row leaves an unchanged
 large column in TOAST; a JSONB document is rewritten — and re-compressed — as a
 whole on every change, so a save costs in proportion to the document's size, not
@@ -433,7 +480,7 @@ when a key value changes) would restore HOT for ordinary saves — at the cost o
 reworking ADR-006's index model, lookups and violation mapping. Revisit when a
 benchmark with realistic shape (5–50 KB documents of incompressible content,
 several keys, 16–32 sessions) shows the lost HOT costing more than 20 % of
-saves/s. Partitioning `papuma.change` by time (BRIN on `seq`/`occurred_at`)
+saves/s — measured 2026-09-26 above: not fired. Partitioning `papuma.change` by time (BRIN on `seq`/`occurred_at`)
 bounds index size and vacuum for a table that is never deleted from; revisit when
 it passes ~100 million rows or its autovacuum runs become the bottleneck.
 
