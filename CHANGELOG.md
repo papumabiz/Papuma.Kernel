@@ -15,6 +15,9 @@
   "what did this command do?" for audit timelines and for tests asserting a command's
   complete effect. Backed by a new index on the change table's `correlationId`
   (created idempotently by `EnsureSchemaAsync`). jejak feedback F-12.
+- **MCP: `get_changes_by_correlation`** — the correlation read as a read-only tool, so an
+  agent can answer "what did this command do?" from any change's `correlationId`
+  (policy-applied diffs, scope-bound, like `get_document_history`).
 - **`ISchemaContributor` / `AddSchemaContributor<T>()`**: application schema
   (projection tables, their RLS policies) applied at startup after the kernel schema
   and before the feed workers — so policies can use the ADR-019 functions and handlers

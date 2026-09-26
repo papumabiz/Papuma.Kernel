@@ -119,6 +119,38 @@ public sealed class McpToolsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ChangesByCorrelation_ReturnTheUnitOfWork_PolicyApplied_AndScopeBound()
+    {
+        var tenant = $"t{Guid.NewGuid():N}";
+        var first = NewId();
+        var second = NewId();
+        Guid correlationId;
+        await using (var session = _store.OpenSession(ScopeContext.Tenant(tenant)))
+        {
+            correlationId = session.CorrelationId;
+            await session.SaveAsync(new McpDoc(first, "Harry", Secret: "s3cret"), 0);
+            await session.SaveAsync(new McpDoc(second, "Sally"), 0);
+            await session.CommitAsync();
+        }
+
+        using var change = new ChangeFeedProcessor(_fixture.DataSource, [new NoopChangeHandler()]);
+        using var events = new EventFeedProcessor(_fixture.DataSource, [new NoopEventHandler()]);
+        var tools = CreateTools(change, events);
+
+        var changes = (JsonArray)JsonNode.Parse(
+            await tools.GetChangesByCorrelationAsync(correlationId.ToString(), tenant))!;
+        Assert.Equal([first, second], changes.Select(c => (string?)c!["documentId"]));
+        Assert.False(changes[0]!["diff"]!["secret"]!.AsObject().ContainsKey("new")); // policy applied
+
+        var foreign = (JsonArray)JsonNode.Parse(
+            await tools.GetChangesByCorrelationAsync(correlationId.ToString(), $"t{Guid.NewGuid():N}"))!;
+        Assert.Empty(foreign);
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => tools.GetChangesByCorrelationAsync("not-a-guid", tenant));
+    }
+
+    [Fact]
     public async Task FeedLagAndFailures_ReportBothFeeds()
     {
         using var change = new ChangeFeedProcessor(_fixture.DataSource, [new NoopChangeHandler()]);

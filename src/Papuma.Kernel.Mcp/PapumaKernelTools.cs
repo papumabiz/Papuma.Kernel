@@ -128,6 +128,45 @@ public sealed class PapumaKernelTools
         return json.ToJsonString();
     }
 
+    [McpServerTool(Name = "get_changes_by_correlation", ReadOnly = true)]
+    [Description("Returns every change one unit of work (one command, one session) produced — " +
+        "all records sharing the correlation id, across document types, in feed order: " +
+        "document type and id, version, operation, field diff, metadata, timestamp. Answers " +
+        "'what did this command do?'. The correlation id is in the metadata of any change or " +
+        "event. Diffs are policy-applied. Scope-bound: pass tenantId for tenant data.")]
+    public async Task<string> GetChangesByCorrelationAsync(
+        [Description("The correlation id (a GUID, e.g. metadata.correlationId of a change).")] string correlationId,
+        [Description("The tenant id; omit for platform-scoped documents.")] string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        if (!Guid.TryParse(correlationId, out var id))
+        {
+            throw new ArgumentException($"'{correlationId}' is not a GUID.", nameof(correlationId));
+        }
+
+        var scope = tenantId is null ? ScopeContext.Platform() : ScopeContext.Tenant(tenantId);
+        await using var session = _store.OpenSession(scope);
+        var changes = await session.GetChangesByCorrelationAsync(id, ct);
+
+        var json = new JsonArray();
+        foreach (var change in changes)
+        {
+            json.Add(new JsonObject
+            {
+                ["seq"] = change.Seq,
+                ["documentType"] = change.DocumentType,
+                ["documentId"] = change.DocumentId,
+                ["version"] = change.Version,
+                ["operation"] = change.Operation.ToString(),
+                ["diff"] = change.Diff.ToJson(),
+                ["metadata"] = change.Metadata.DeepClone(),
+                ["occurredAt"] = change.OccurredAt.ToString("O"),
+            });
+        }
+
+        return json.ToJsonString();
+    }
+
     [McpServerTool(Name = "get_document", ReadOnly = true)]
     [Description("Loads the current state of one document by id, with privacy policies " +
         "applied: sensitive fields are masked, hashed or omitted — never clear text " +
