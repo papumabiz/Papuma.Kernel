@@ -89,6 +89,9 @@ var loginCount = patched.GetDocument<User>().LoginCount;   // the stored state, 
 await session.PatchWhereAsync<User>(x => x.Status, "inactive",
     p => p.Set(x => x.Status, "archived"));
 
+// A unit of work read back as one: what did this command do?
+var effect = await session.GetChangesByCorrelationAsync(session.CorrelationId);
+
 // Rollback: append-only back to an earlier state (ADR-008)
 await session.RollbackAsync<User>(user.Id, toVersion: 1, expectedVersion: 3);
 await session.CommitAsync();
@@ -123,6 +126,11 @@ public sealed class UserProjection : IChangeHandler
     }
 }
 ```
+
+Handlers are for the application's own projections and reactions: a diff is keyed by
+your documents' field paths. When another team or system needs to react, publish an
+explicit integration event at the boundary instead of sharing the raw feed
+(concepts §21).
 
 The engine guarantees: strict `seq` ordering per handler, persisted checkpoints,
 retry with backoff, poison skip, at-least-once (handlers must be idempotent —

@@ -175,6 +175,7 @@ Pattern guides on kernel primitives ([docs/recipes](https://github.com/papumabiz
 [workflow-saga](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/recipes/workflow-saga.md) ·
 [realtime-ui-notifications](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/recipes/realtime-ui-notifications.md) ·
 [same-database-read-models](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/recipes/same-database-read-models.md) (RLS on your tables) ·
+[projection-schema](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/recipes/projection-schema.md) (create, evolve, rebuild) ·
 [external-read-models](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/recipes/external-read-models.md) (search/vector/cache) ·
 [nats-bridge](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/recipes/nats-bridge.md) ·
 [field-level-encryption](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/recipes/field-level-encryption.md) ·

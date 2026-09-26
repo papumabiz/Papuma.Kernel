@@ -11,7 +11,11 @@ language** (concepts §21). The feed is two ordinary PostgreSQL tables; this
 document is everything you need to write a correct consumer without the .NET
 library. Runnable references: [samples/polyglot-consumers](https://github.com/papumabiz/Papuma.Kernel/blob/master/samples/polyglot-consumers/README.md).
 
-The kernel guarantees this format is stable; treat it as the public API it is.
+The kernel guarantees this **format** is stable — tables, columns, diff encoding,
+the gapless read. The field paths *inside* a diff are the application's document
+model and change with it (concepts §21): read the raw feed from within the
+application that owns the model; across team or system boundaries, publish explicit
+integration events instead.
 
 ## 1. The change feed table: `papuma.change`
 

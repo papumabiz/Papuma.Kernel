@@ -103,7 +103,10 @@ detects them and the designed escape route for each
 ## Plays well with everything
 
 - **Any language can consume the feed** — it is two documented Postgres tables
-  with a stable JSONB wire format; a Python or Go consumer is ~50 lines.
+  with a stable JSONB wire format; a Python or Go consumer is ~50 lines. That is
+  for your own application's consumers; other teams and systems get explicit
+  integration events through a bridge, so your internal model never becomes their
+  contract.
 - **Event buses dock behind the feed** — the derived feed *is* a transactional
   outbox; the NATS/JetStream bridge (runnable in the sample) turns at-least-once
   into exactly-once with one line of dedup.

@@ -830,12 +830,25 @@ The benefit: ordering, checkpoints, retry and poison handling stay in one place
 (the engine), and the foreign application gets a contract in its own world
 instead of access to your database.
 
-**The decision rule:** same Postgres instance reachable + simple consumption
-(a projection, a sync, analytics) → path A is legitimate and even elegant — the
-feed *is* the API; that is precisely why the truth lives as JSONB in Postgres.
-You need decoupling, transformation, delivery guarantees across system
-boundaries, or the database must not be shared → path B. (And for plain *state
-reads* from other languages, the SQL views of §16 exist anyway.)
+**What is stable, and what is yours.** The wire format — columns, diff
+encoding, the gapless read — is a stable contract. The *content* is not: a diff
+is keyed by your documents' field paths, so every raw-feed consumer couples to
+your storage shape. Rename a field (with an upcaster, ADR-005) and every consumer
+that reads `diff -> 'email'` has to follow. Inside one application that is the
+point — the projections move with the model they project. Across a team or system
+boundary it turns your internal model into someone else's integration contract.
+
+**The decision rule:** the consumer belongs to the same application and team —
+its projections, a sync, analytics, possibly in another language — and the same
+Postgres instance is reachable → path A is legitimate and even elegant; that is
+precisely why the truth lives as JSONB in Postgres. Another team or system
+consumes it, you need decoupling, transformation or delivery guarantees across a
+boundary, or the database must not be shared → publish **explicit integration
+events** at the edge instead: facts in the event log (ADR-013) or a translation
+slice turning a field transition into a named event (ADR-011), carried by path B
+(e.g. the NATS bridge). Those are shaped for the consumer and versioned on purpose;
+the raw feed stays free to follow your model. (And for plain *state reads* from
+other languages, the SQL views of §16 exist anyway.)
 
 One boundary stays language-independent: foreign consumers are consumers.
 **Writing** goes through the kernel's session — only there do diff, policies,

@@ -51,6 +51,7 @@ services.AddPapumaKernel(o => { o.ConnectionString = …; o.Model(m => m
     .Document<User>(d => d.UniqueKey(x => x.Email).Validate(u => …))
     .Document<Ticket>(d => d.UniqueKey(x => new { x.ProjectId, x.Number }))   // composite (ADR-020)
     .Event<UserLoggedIn>(e => e.Retention(TimeSpan.FromDays(90)))); })
+  .AddSchemaContributor<ReadModelSchema>()   // projection tables: after kernel schema, before workers
   .AddChangeHandler<UserProjection>()
   .AddEventHandler<LoginAudit>();
 
@@ -71,6 +72,7 @@ var r = await s.LoadAsync<User>(id);                // r.Document, r.Version
 var byKey = await s.LoadByKeyAsync<User>(x => x.Email, "x@y.de");
 var ticket = await s.LoadByKeyAsync<Ticket>(x => new { x.ProjectId, x.Number }, ["p1", 42]);
 var history = await s.GetHistoryAsync<User>(id, fromVersion: 3);
+var commandEffect = await s.GetChangesByCorrelationAsync(correlationId);   // one unit of work, all types
 
 // Reacting
 public sealed class UserProjection : IChangeHandler
@@ -103,6 +105,8 @@ Typed errors you should handle (not swallow): `ConcurrencyException`,
 |---|---|
 | …read one current document (login, business logic) | `LoadAsync` / `LoadByKeyAsync` (immediately consistent) |
 | …**any derived read** — list, join, aggregation, search, external *(the default)* | an `IChangeHandler` projection (eventual, lag observable) |
+| …create or change a projection table | an `ISchemaContributor` with idempotent DDL (`AddSchemaContributor<T>()`); breaking changes = new table + new handler name (replay), not an in-place migration ([recipe](../recipes/projection-schema.md)) |
+| …show or test what one command did | `GetChangesByCorrelationAsync(session.CorrelationId)` — every change of that unit of work, all document types, feed order |
 | …keep tenant isolation on a projection table in the same database | RLS policy `USING (papuma.scope_visible(scope, tenant_id)) WITH CHECK (papuma.scope_writable(scope, tenant_id))`, handler sets `change.Scope` per change via `SetScopeAsync` — never copy the GUC names ([recipe](../recipes/same-database-read-models.md), ADR-019) |
 | …ad-hoc SQL/BI, all 4 conditions met *(the exception)* | view with `security_invoker = on` (concepts §16) |
 | …change a single field without loading | `PatchAsync` (field-level LWW is deliberate there) |
@@ -112,6 +116,7 @@ Typed errors you should handle (not swallow): `ConcurrencyException`,
 | …use a GUID as tenant id | `ScopeContext.Tenant(guid)` — canonical lowercase dashed form; string ids match `^[A-Za-z0-9][A-Za-z0-9_-]{1,100}$` and compare case-sensitively |
 | …use the store in tools without a host | `SchemaManager.EnsureSchemaAsync(dataSource, model)` + `new DocumentStore(dataSource, model)`; handlers via `ChangeFeedProcessor.ProcessOnceAsync()` ([getting-started §7](../getting-started.md#7-without-a-host-tests-tools-console-apps)) |
 | …write integration tests | `Papuma.Kernel.Testing`: `PapumaTestDatabase.StartAsync()`, `CreateStoreAsync(model)` (runs as a non-superuser role — RLS applies), `processor.DrainAsync()` (throws on handler failures); fresh tenant per test, unique handler and type names ([getting-started §7](../getting-started.md#integration-tests-papumakerneltesting), ADR-021) |
+| …let another team or system react to changes | explicit integration events at the edge — event log facts or a translation slice, carried by a bridge handler (NATS/webhook); the raw feed is for the owning application's own projections and reactions (concepts §21) |
 | …react to "field X went Y→Z" | `change.IsFieldTransition(path, from, to)` in a handler (ADR-011) |
 | …add a human approval step | write a task document, handler returns; the decision = a normal write (concepts §18) |
 | …build a workflow/saga | workflow document + feed handlers + `expectedVersion`; timers = a `dueAt` poller (concepts §18) |

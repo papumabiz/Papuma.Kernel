@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+- **`GetChangesByCorrelationAsync(correlationId)`** on both kernels' sessions: every
+  change a unit of work produced, across document types, in feed order, scope-bound —
+  "what did this command do?" for audit timelines and for tests asserting a command's
+  complete effect. Backed by a new index on the change table's `correlationId`
+  (created idempotently by `EnsureSchemaAsync`). jejak feedback F-12.
+- **`ISchemaContributor` / `AddSchemaContributor<T>()`**: application schema
+  (projection tables, their RLS policies) applied at startup after the kernel schema
+  and before the feed workers — so policies can use the ADR-019 functions and handlers
+  never run against a missing table. New recipe
+  [schema for projection tables](docs/recipes/projection-schema.md): idempotent DDL,
+  an advisory lock for concurrent starts, and breaking changes as a rebuild through a
+  new handler name. Verified by `ProjectionSchemaTests`. jejak feedback F-11.
+- **Docs: the raw feed is an in-application contract.** concepts §21, the feed wire
+  format, the playbook, getting-started and both factsheets now separate the stable
+  *format* from the *content* (your documents' field paths) and point other teams and
+  systems to explicit integration events at the boundary. jejak feedback F-13.
+- **ADR-021 evidence log** records the first consumer data point for a testing-package
+  xUnit adapter (jejak, F-10) and that the correlation read API it listed as a
+  prerequisite now exists.
+
 ## 1.3.0 (2026-09-26)
 
 Upgrade notes — what a consumer of 1.2.x can notice:

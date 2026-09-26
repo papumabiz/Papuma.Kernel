@@ -139,8 +139,11 @@ CREATE TABLE papuma.change
     txid            xid8        NOT NULL DEFAULT pg_current_xact_id()  -- gapless reads, ADR-010
 );
 
-CREATE UNIQUE INDEX ux_change_document_version
+CREATE UNIQUE INDEX ux_papuma_change_document_version
     ON papuma.change (scope, tenant_id, document_type, document_id, version);
+
+CREATE INDEX ix_papuma_change_correlation          -- GetChangesByCorrelationAsync
+    ON papuma.change (scope, tenant_id, (metadata ->> 'correlationId'));
 ```
 
 Both tables carry row-level-security policies (including the `'All'` scope for
@@ -468,6 +471,9 @@ Application patterns on top of the ADRs, as drafts for later tutorials:
 - [External read models](recipes/external-read-models.md)
   — the one projection pattern for search engines, vector stores and caches
   (Manticore, Qdrant, Redis), plus where DotNetCore.CAP does and does not fit.
+- [Schema for projection tables](recipes/projection-schema.md)
+  — idempotent DDL in an `ISchemaContributor` (after the kernel schema, before the
+  feed workers); breaking changes as rebuild via a new handler name.
 - [Read models in the same database](recipes/same-database-read-models.md)
   — projection tables under the kernel's row-level security via
   `papuma.scope_visible`/`scope_writable` (ADR-019).

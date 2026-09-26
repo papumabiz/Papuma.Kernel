@@ -50,6 +50,7 @@ are in the playbook.
 - [GDPR tooling](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/gdpr.md): data inventory, subject export, history redaction, per-tenant erasure-vs-restriction pattern
 - [Recipe: AI consumers](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/recipes/ai-consumers.md): pgvector embeddings projection, natural-language audit, anomaly detection
 - [Recipe: read models in the same database](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/recipes/same-database-read-models.md): projection tables under row-level security via papuma.scope_visible/scope_writable
+- [Recipe: schema for projection tables](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/recipes/projection-schema.md): ISchemaContributor with idempotent DDL at startup, breaking changes as rebuild via a new handler name
 - [Recipe: realtime UI notifications](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/docs/recipes/realtime-ui-notifications.md): NOTIFY-driven UI updates
 
 ## Decisions

@@ -97,7 +97,10 @@ the intended mitigation (`docs/concepts.md §14`) rather than left implicit.
 
 - **Cross-language consumers.** The feed is two documented Postgres tables with a
   stable JSONB wire format; a Python or Go consumer is roughly 50 lines. Runnable
-  examples ship in the samples.
+  examples ship in the samples. The diff content is keyed by the document's field
+  paths, so this is for consumers inside the owning application; across team or
+  system boundaries, publish explicit integration events (event log facts or
+  translation slices, carried by a bridge handler).
 - **Message buses.** The derived feed is a transactional outbox. A bridge handler
   publishes to NATS/JetStream, Kafka or webhooks; at-least-once delivery becomes
   effectively-once with a dedup key on the consumer.
