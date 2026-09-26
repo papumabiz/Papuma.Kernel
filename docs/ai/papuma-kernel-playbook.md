@@ -138,7 +138,9 @@ Typed errors you should handle (not swallow): `ConcurrencyException`,
   the load-modify-save (concepts §4/§17).
 - **Saves slow or WAL-heavy with large documents**: a save rewrites the whole
   JSONB document. Split frequently patched state into small documents, consider
-  `default_toast_compression = lz4` (concepts §14, "The write path").
+  `default_toast_compression = lz4` (concepts §14, "The write path"). Do not drop
+  declared keys to speed up saves: they switch off HOT updates, but at 5–50 KB
+  documents that measured as 0–9 % more WAL and no throughput difference.
 - **RLS errors / empty reads in workers**: check the `'All'` scope mechanism
   (`SetAllScopesAsync` or `ScopeFilter.All()`); why a missing scope yields empty
   reads instead of an error: [concepts.md §23](../concepts.md#23-why-tenant-isolation-fails-closed-and-why-two-layers-not-one).
