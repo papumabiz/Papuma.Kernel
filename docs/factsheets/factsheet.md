@@ -193,7 +193,7 @@ need the machinery that solves multi-writer problems:
 | Patch application | generated `jsonb_set`/`#-` SQL expressions | applied in-process against the loaded JSON, then written back |
 
 Every one of these is documented with the reasoning, not just the diff — see
-[docs/analyses/local-kernel-sqlite-sibling.md](analyses/local-kernel-sqlite-sibling.md).
+[docs/analyses/local-kernel-sqlite-sibling.md](../analyses/local-kernel-sqlite-sibling.md).
 
 **Maturity, stated with the same honesty as above:** newer than the Postgres
 kernel. Full API parity, **71 tests green against the real SQLite engine**

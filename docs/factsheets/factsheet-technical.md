@@ -226,7 +226,7 @@ parameter. Both are covered by regression tests
 (`SqliteSpikeTests`, `SqliteNumericKeyTests`).
 
 Every one of these is documented with its reasoning, not just the diff, in
-[docs/analyses/local-kernel-sqlite-sibling.md](analyses/local-kernel-sqlite-sibling.md).
+[docs/analyses/local-kernel-sqlite-sibling.md](../analyses/local-kernel-sqlite-sibling.md).
 
 ### 8.3 Minimal setup
 

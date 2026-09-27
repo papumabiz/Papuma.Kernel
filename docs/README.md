@@ -25,6 +25,6 @@ describe the PostgreSQL kernel unless they say otherwise; `Papuma.Kernel.Local`
 |---|---|
 | [ai/](ai/) | the coding-agent doc set, shipped inside the NuGet packages (see also [llms.txt](https://github.com/papumabiz/Papuma.Kernel/blob/master/llms.txt)) |
 | [analyses/](analyses/) | explorations that are not decisions — ideas, trade-offs, open questions |
-| [factsheet.md](factsheet.md) · [factsheet-technical.md](factsheet-technical.md) | one-pagers |
+| [factsheets/](https://github.com/papumabiz/Papuma.Kernel/tree/master/docs/factsheets) | one-pagers for evaluation (general and technical, with PDFs) — repository only, not shipped |
 | [legacy/](https://github.com/papumabiz/Papuma.Kernel/tree/master/docs/legacy) | frozen 0.x/v1 material, mostly German, unmaintained |
 | [feedback/](https://github.com/papumabiz/Papuma.Kernel/tree/master/docs/feedback) | feedback from applications built on the kernel (friction, gaps, what works) — repository only, not shipped |

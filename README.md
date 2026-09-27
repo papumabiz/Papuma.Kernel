@@ -37,7 +37,7 @@ is derived from it (never the other way around).
 
 > **The 1.0 reboot** — rebuilt from scratch on PostgreSQL ≥ 18; no migration path
 > from 0.x (see [CHANGELOG](https://github.com/papumabiz/Papuma.Kernel/blob/master/CHANGELOG.md)). The marketing one-pager with diagrams
-> and measured numbers lives in [docs/factsheet.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/factsheet.md).
+> and measured numbers lives in [docs/factsheet.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/factsheets/factsheet.md).
 
 ## Sixty seconds to running
 
@@ -185,7 +185,7 @@ Pattern guides on kernel primitives ([docs/recipes](https://github.com/papumabiz
 
 ## Documentation map
 
-- **Start:** [tutorial.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/tutorial.md) — build one app end to end (guided) · [getting-started.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/getting-started.md) — the five-minute API tour · marketing one-pager: [factsheet.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/factsheet.md)
+- **Start:** [tutorial.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/tutorial.md) — build one app end to end (guided) · [getting-started.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/getting-started.md) — the five-minute API tour · marketing one-pager: [factsheet.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/factsheets/factsheet.md)
 - **Architecture:** [architecture.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/architecture.md) · the *why* behind every decision: [concepts.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/concepts.md)
 - **Decisions:** [the ADRs](https://github.com/papumabiz/Papuma.Kernel/tree/master/docs/adr) — each a single, dated, reversible choice
 - **`Papuma.Kernel.Local` (SQLite):** [design rationale and what's different per engine](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/analyses/local-kernel-sqlite-sibling.md) — no dedicated getting-started yet; the write/read API mirrors `Papuma.Kernel`'s (`SaveAsync`/`LoadAsync`/`PatchAsync`/… on `SqliteDocumentSession`, `AddPapumaKernelLocal` for hosting)
