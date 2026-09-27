@@ -8,7 +8,7 @@ Two persistence kernels for .NET, sharing one document-sourced model:
 stored as JSON documents; the document is the source of truth. In the same
 transaction as each write, the kernel derives a reversible field-level change
 record and applies declared field policies to it. A processing engine delivers
-those records to application handlers in strict order, with persisted
+those records to application handlers in commit order, with persisted
 checkpoints. It is not event sourcing (state is stored, not folded from
 events), not an ORM, and provides no query DSL.
 
@@ -47,8 +47,9 @@ Three properties follow directly from this, rather than from added machinery:
 - **Optimistic concurrency is an invariant.** `SaveAsync` requires an
   `expectedVersion`; a mismatch raises a typed `ConcurrencyException`. Lost
   updates are not detected-and-recovered, they are structurally excluded.
-- **The feed is gapless and correctly ordered.** Ordering derives from the
-  document version and the feed sequence under MVCC, not from timestamps or
+- **The feed is gapless and correctly ordered.** Each handler's position is a
+  transaction snapshot, so no committed record can be skipped; delivery follows
+  commit order (per document by version) under MVCC, not timestamps or
   heuristics. There is no separate outbox to keep in sync and no dual-write.
 - **The change history is also the audit log.** Each record carries actor,
   timestamp, correlation and causation identifiers, and a reversible diff.
@@ -206,7 +207,7 @@ solve multi-writer problems:
 | Atomic old/new capture | one `RETURNING OLD/NEW` statement | `SELECT` + version-checked `UPDATE...RETURNING` — two statements; still atomic because the transaction is exclusive, nothing can interleave |
 | Feed wakeup | `LISTEN`/`NOTIFY`, network round trip | in-process `SqliteChangeNotifier` — one buffered subscription per processor, a commit wakes all; no network involved |
 | Handler execution | inside the processor's transaction, which row-locks the handler's checkpoint (`FOR UPDATE`) — other writers are unaffected | outside any transaction: read the batch, run handlers, then record the checkpoint (checked against a concurrent reset) — the file's single write lock stays free for the application and for projections writing to the same file |
-| Gapless-read handling | `txid`/snapshot filtering (ADR-010) — solves a multi-writer commit-order problem | not needed — one writer, no commit-order to reconcile |
+| Gapless-read handling | snapshot cursor (ADR-022) — solves a multi-writer commit-order problem | not needed — one writer, `seq` order is commit order |
 | Row isolation | explicit scope predicates **plus** PostgreSQL row-level security | explicit scope predicates only — no second process to defend against |
 | Leader coordination | `FOR UPDATE SKIP LOCKED` across concurrent processor instances | not needed — a single-writer store has exactly one instance |
 | Patch application | generated `jsonb_set`/`#-` SQL expressions | applied in-process against the loaded JSON (`JsonPatchApplier`), then written back |

@@ -312,7 +312,7 @@ curl -s localhost:5000/stats/open      # → one less — the feed updated the r
 You wrote a document; a handler you registered once reacted. That indirection is
 the whole point: the same handler shape drives a SQL projection, a search index,
 a SignalR push, or a message bus — see [external-read-models](recipes/external-read-models.md).
-The engine gives you strict ordering, persisted checkpoints, retry, and rebuild
+The engine gives you ordered delivery, persisted checkpoints, retry, and rebuild
 for free ([ADR-009](adr/adr-009-projections-as-dumb-handlers.md)); your handler
 must only be idempotent (here, trivially — see the note below).
 

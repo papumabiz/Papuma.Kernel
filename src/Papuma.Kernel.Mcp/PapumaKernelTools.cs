@@ -64,7 +64,7 @@ public sealed class PapumaKernelTools
         DataInventory.Build(_store.Model).ToJson().ToJsonString();
 
     [McpServerTool(Name = "get_feed_lag", ReadOnly = true)]
-    [Description("Returns the current lag (stable feed head minus checkpoint) per handler " +
+    [Description("Returns the current lag (committed records not yet delivered) per handler " +
         "for both the change feed and the event feed.")]
     public async Task<string> GetFeedLagAsync(CancellationToken ct = default)
     {

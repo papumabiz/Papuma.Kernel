@@ -20,8 +20,9 @@ This document is the entry map. The truth lives in the reference chain:
    holds via a different mechanism — see "Differences" below.
 2. **The session is a unit of work.** All writes of a session commit atomically
    (`CommitAsync`) or not at all (dispose without commit = rollback).
-3. **Reacting happens via feeds.** Change and event handlers consume strictly
-   ordered, checkpointed, at-least-once. The kernel generates no projections —
+3. **Reacting happens via feeds.** Change and event handlers consume in commit
+   order (per document by version), checkpointed, at-least-once. Never treat `seq`
+   as a watermark ("skip ≤ highest seen") — a lower `seq` can arrive later. The kernel generates no projections —
    handlers are "dumb" and write wherever they want.
 4. **Everything is scope-bound.** Every session belongs to a scope (`Platform` or
    `Tenant(id)`); isolation comes in two layers (explicit predicates + row level

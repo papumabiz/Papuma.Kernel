@@ -41,7 +41,8 @@ number formatting) cannot distort it.
 
 ## 2. The slow and the fast writer (the seq visibility gap)
 
-→ [ADR-010](adr/adr-010-feed-consumption.md)
+→ [ADR-022](adr/adr-022-snapshot-cursor.md) (supersedes point 2 of
+[ADR-010](adr/adr-010-feed-consumption.md))
 
 The most insidious problem of a polled feed: **sequence numbers are assigned at
 INSERT time, but rows become visible at COMMIT time — and those two orders can
@@ -53,33 +54,64 @@ Transaction B (the *fast writer*) starts later, draws `seq = 101` — and commit
 and advances its checkpoint to 101. When A commits later, its 100 lies *behind*
 the checkpoint — **it is never processed. Silently lost.**
 
-The solution: every ChangeRecord stores its transaction id (`txid xid8`), and the
-poller only reads changes whose transaction lies *before the horizon of all still
-running transactions*:
+**Why a number cannot be the cursor.** Up to 1.4 the kernel answered with a
+horizon: read only changes whose transaction id lies before the oldest still-open
+transaction (`txid < pg_snapshot_xmin(pg_current_snapshot())`). That catches the
+case above — and misses its everyday variant, found in production by jejak
+(F-15): a session that writes *several times*. A writes (`seq 96`), B writes
+(`seq 97`), A writes again (`seq 98`) and commits. B is now the oldest open
+transaction, A's id is older, so both of A's rows pass the horizon — the
+checkpoint moves to 98, and B's 97 is behind it when B commits. Any rule of the
+form "advance a `seq` checkpoint once it is safe" needs to know the sequence
+numbers of transactions that are still open. Those rows are invisible to the
+reader. The question has no answer in `seq` terms.
+
+**What is observable: who has committed.** That is exactly what a transaction
+snapshot (`pg_current_snapshot()`) records. So the cursor *is* a snapshot — the
+batching model of PgQ, Skype's queue on PostgreSQL. A handler stores the snapshot
+up to which it has delivered everything (`done_snapshot`). Each cycle takes the
+current snapshot and delivers every row whose transaction is visible now but was
+not then — a *slice*:
 
 ```sql
-WHERE seq > @checkpoint
-  AND txid < pg_snapshot_xmin(pg_current_snapshot())
+WHERE pg_visible_in_snapshot(txid, @slice)
+  AND NOT pg_visible_in_snapshot(txid, @done)
+  AND seq > @sliceSeq                       -- position inside a paginated slice
+ORDER BY seq
 ```
 
-`pg_snapshot_xmin` is the oldest still-open transaction. As long as the slow
-writer is open, the faster 101 also counts as "not yet stable" and is held back.
-Only when A commits (or aborts) does the horizon advance and both are delivered in
-seq order. No lag window, no heuristics — MVCC itself is the truth.
+A transaction's rows become deliverable together, the moment it commits; nothing
+that commits later can ever fall *behind* the cursor, because the cursor is not a
+line on the `seq` axis. When the slice is exhausted, it becomes the new
+`done_snapshot`. No lag window, no heuristics — MVCC itself is the truth.
 
-The price: a very long open *write* transaction stalls feed progress for *all*
-consumers. That is accepted and observable (lag metric) — and one more reason why
-sessions should be short transactions.
+**The order you get is commit order.** A's changes arrive before B's if A
+committed before B started; within one slice, by `seq`. **Per document strictly
+by version** — two transactions writing the same document serialize on its row
+lock, so the later one commits later. What you do *not* get is "globally by
+`seq`": a handler may receive 97 after 98. That promise was never actually kept
+(it was the bug), and commit order is the order the database itself defines — it
+is also the causal one. So `seq` identifies a change (idempotency key
+`handler + seq`, failure entries, history), but **it is not a watermark**: a
+handler that skips "everything ≤ the highest `seq` I have seen" drops late rows.
 
 **Who pays for what?** The writers pay **nothing** — the fast writer never waits
 for the slow one; both commit independently at full throughput; there is no queue
-and no lock between them. The cost is paid exclusively in *consumer latency*,
-bounded by the longest concurrently open **write** transaction. With many users
-running many short sessions, the horizon advances continuously (more volume tends
-to make it better, not worse); read-only sessions don't hold it back at all,
-because Postgres assigns transaction ids only on the first write. The one risk
-case remains the single long-open write session (e.g. spanning user think time) —
-which is exactly what the lag health check is for.
+and no lock between them. The feed pays one index on `txid` (the slice query is an
+index range between the two snapshots). And a long-open write transaction — the
+old weak spot, which stalled the whole feed under the horizon rule — now holds
+back **only its own rows**: everything committed around it flows. The lag metric
+counts committed, undelivered rows, so an open transaction is not lag at all until
+it commits.
+
+**Backups.** Transaction ids belong to a cluster. Physical backups, PITR and
+`pg_upgrade` keep them; a logical restore (`pg_dump` → another cluster) does not.
+`EnsureSchemaAsync` detects that state and repairs it (ADR-022 §7) — delivered
+rows may come again (at-least-once), none is lost.
+
+**Only PostgreSQL.** SQLite (`Papuma.Kernel.Local`) has a single writer: whole
+transactions are serialized, so there `seq` order already *is* commit order and a
+number suffices.
 
 ---
 
@@ -290,7 +322,8 @@ exactly one active processor per handler is needed — but no ZooKeeper, no leas
 protocol. The checkpoint *row* itself is the lock:
 
 ```sql
-SELECT last_seq FROM papuma.checkpoint
+SELECT done_snapshot, slice_snapshot, slice_seq   -- the cursor (§2)
+FROM papuma.checkpoint
 WHERE handler_name = @name
 FOR UPDATE SKIP LOCKED
 ```
@@ -346,13 +379,15 @@ same `txid` mechanics, the gap guarantee from section 2 holds in both feeds.
 
 ## 14. The scaling model of the feed engines — limits and escape routes
 
-→ [ADR-009](adr/adr-009-projections-as-dumb-handlers.md), [ADR-010](adr/adr-010-feed-consumption.md)
+→ [ADR-009](adr/adr-009-projections-as-dumb-handlers.md), [ADR-010](adr/adr-010-feed-consumption.md),
+[ADR-022](adr/adr-022-snapshot-cursor.md)
 
 Per process there is **one** `ChangeFeedProcessor` and **one** `EventFeedProcessor`;
 what gets registered are *handlers*, not processors. Parallelism arises across app
 instances — and there, `FOR UPDATE SKIP LOCKED` makes scale-out **failover, not
 throughput**. Per handler, exactly one instance consumes at any time, because
-strict seq ordering demands exactly one consumer (like Kafka with one partition).
+ordered delivery — commit order, per document by version (§2) — demands exactly
+one consumer (like Kafka with one partition).
 
 The three real limits, in the order you hit them:
 
@@ -365,8 +400,8 @@ The three real limits, in the order you hit them:
    to ~1,400 changes/s. If the application writes faster permanently, lag grows
    without bound; more instances do not help.
 3. **Read amplification**: every handler reads the full feed (no type filter in
-   SQL) — cheap thanks to a PK range scan from the checkpoint, but measurable at
-   volume × handler count.
+   SQL) — cheap thanks to an index range scan on `txid` between the cursor's two
+   snapshots, but measurable at volume × handler count.
 
 **Measured baseline (2026-06-12, local PG-18 container — details and the
 reusable probe in `benchmarks/`):** the engine itself delivers ~27,000
@@ -876,7 +911,7 @@ the core of every backup; the question dissolves.
 
 → [ADR-004](adr/adr-004-changerecord-diff-only.md) (wire format),
 [ADR-011](adr/adr-011-no-business-events-in-storage.md) (the translator edge),
-§2 (gapless reads), §16 (views)
+§2 (the snapshot cursor), §16 (views)
 
 Can an application written in another language react to changes and events from
 a Papuma-based system? Yes — and by design. The feed is deliberately *not* a
@@ -884,28 +919,23 @@ a Papuma-based system? Yes — and by design. The feed is deliberately *not* a
 stable wire format (the ADR-004 diffs are flat JSONB, queryable even from SQL:
 `diff ? 'email'`). The full contract is specified in
 [feed-wire-format.md](feed-wire-format.md). Everything the .NET processor does is plain SQL — read the
-checkpoint row, read gaplessly, advance the checkpoint, wait on NOTIFY. There
+checkpoint row, read the next slice, advance the cursor, wait on NOTIFY. There
 are two consumption paths, with a clear decision rule.
 
 **Path A: direct SQL from the foreign language.** A Python/Go/Node consumer
-replicates the poll loop in ~50 lines and may even keep its position in the
+replicates the poll loop in ~100 lines and may even keep its position in the
 same `papuma.checkpoint` table (`handler_name` is just text — pick a unique
 one). Runnable Python and Go clients live in
 [samples/polyglot-consumers](https://github.com/papumabiz/Papuma.Kernel/blob/master/samples/polyglot-consumers/README.md),
 verified against the real feed. Three things such a consumer must take
 seriously:
 
-1. **The gapless predicate is mandatory, not an optimization**:
-
-   ```sql
-   SELECT ... FROM papuma.change
-   WHERE seq > @checkpoint
-     AND txid < pg_snapshot_xmin(pg_current_snapshot())
-   ORDER BY seq
-   ```
-
-   A naive `seq > checkpoint` poll walks into the slow-writer trap (§2) and
-   silently loses changes.
+1. **The snapshot cursor is mandatory, not an optimization**: the position is
+   a transaction snapshot, each cycle reads the rows of the transactions
+   committed since (§2; the exact queries are in
+   [feed-wire-format.md](feed-wire-format.md)). A `seq > checkpoint` poll — with
+   or without the 1.0–1.4 `txid < xmin` horizon — walks into the slow-writer trap
+   and silently loses changes.
 2. **At-least-once discipline**: process, then advance the checkpoint — and be
    idempotent, exactly like a .NET handler (§19).
 3. **It sees the stored shape**: upcasting runs in the kernel, not in SQL — old
@@ -930,7 +960,7 @@ The benefit: ordering, checkpoints, retry and poison handling stay in one place
 instead of access to your database.
 
 **What is stable, and what is yours.** The wire format — columns, diff
-encoding, the gapless read — is a stable contract. The *content* is not: a diff
+encoding, the snapshot-cursor read — is a stable contract. The *content* is not: a diff
 is keyed by your documents' field paths, so every raw-feed consumer couples to
 your storage shape. Rename a field (with an upcaster, ADR-005) and every consumer
 that reads `diff -> 'email'` has to follow. Inside one application that is the
@@ -1194,9 +1224,9 @@ Why each "no" holds:
 
 - **Polyglot client libs (§21).** The database *is* the API. A per-language
   library would be a second API surface to maintain across Python, Go, Node —
-  for code that is ~50 lines of poll loop, gapless predicate and checkpoint.
+  for code that is ~80 lines of poll loop, slice query and snapshot cursor.
   There is almost nothing to encapsulate, and the small friction of "write the
-  fifty lines or use a bus" is what steers consumers to the right architecture
+  hundred lines or use a bus" is what steers consumers to the right architecture
   instead of turning the database into a shared integration database.
 - **A bus integration package (§22).** A bus bridge *is* an `IChangeHandler` —
   and handlers are application code by ADR-009, not a framework feature. Shipping

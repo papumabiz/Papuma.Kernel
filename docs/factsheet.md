@@ -188,7 +188,7 @@ need the machinery that solves multi-writer problems:
 |---|---|---|
 | Atomic old/new capture | one `RETURNING OLD/NEW` statement | `SELECT` + version-checked `UPDATE...RETURNING` — two statements, same atomicity (the transaction is exclusive; nothing can interleave) |
 | Feed wakeup | `LISTEN`/`NOTIFY`, network round trip | in-process `SqliteChangeNotifier`, no network involved |
-| Gapless-read handling | `txid`/snapshot filtering (ADR-010) — solves a multi-writer commit-order problem | not needed — one writer, no commit-order to reconcile |
+| Gapless-read handling | snapshot cursor (ADR-022) — solves a multi-writer commit-order problem | not needed — one writer, `seq` order is commit order |
 | Row isolation | explicit scope predicates **plus** Postgres row-level security | explicit scope predicates only — no second process to defend against |
 | Patch application | generated `jsonb_set`/`#-` SQL expressions | applied in-process against the loaded JSON, then written back |
 

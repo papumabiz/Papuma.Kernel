@@ -1,8 +1,8 @@
-"""A polyglot change-feed consumer in Python (concepts §21, ADR-010).
+"""A polyglot change-feed consumer in Python (concepts §21, ADR-022).
 
 The feed is two ordinary Postgres tables with a documented wire format — any
-language can consume it. This client is the whole pattern in ~70 lines: gapless
-reads, at-least-once with a persisted checkpoint, RLS scope.
+language can consume it. This client is the whole pattern in ~100 lines: the
+snapshot cursor, at-least-once with a persisted position, RLS scope.
 
     PAPUMA_CONN=postgresql://postgres:postgres@localhost:5432/papuma_sample \\
         python consumer.py
@@ -23,9 +23,30 @@ CONN = os.environ.get(
 
 _OPS = {1: "Insert", 2: "Update", 3: "Delete"}
 
+_COLUMNS = "seq, document_type, document_id, version, operation, diff"
 
-def drain(conn: psycopg.Connection) -> int:
-    """Process one batch in a single transaction and return how many were handled."""
+# The next rows of the slice (feed-wire-format.md §4): transactions visible in the
+# slice snapshot but not in the done one, in seq order. Before the first completed
+# slice, "done" is a seq floor instead.
+_FIRST_SLICE = f"""
+    SELECT {_COLUMNS} FROM papuma.change
+    WHERE seq > %(floor)s
+      AND pg_visible_in_snapshot(txid, %(slice)s::text::pg_snapshot)
+    ORDER BY seq LIMIT %(batch)s
+"""
+_NEXT_SLICE = f"""
+    SELECT {_COLUMNS} FROM papuma.change
+    WHERE txid >= pg_snapshot_xmin(%(done)s::text::pg_snapshot)
+      AND txid < pg_snapshot_xmax(%(slice)s::text::pg_snapshot)
+      AND pg_visible_in_snapshot(txid, %(slice)s::text::pg_snapshot)
+      AND NOT pg_visible_in_snapshot(txid, %(done)s::text::pg_snapshot)
+      AND seq > %(floor)s
+    ORDER BY seq LIMIT %(batch)s
+"""
+
+
+def drain(conn: psycopg.Connection) -> bool:
+    """Process one batch in a single transaction; True if another cycle may find more."""
     with conn.transaction():
         cur = conn.cursor()
 
@@ -33,31 +54,32 @@ def drain(conn: psycopg.Connection) -> int:
         # is transaction-local, so it must run inside this transaction.
         cur.execute("SELECT set_config('app.current_scope', 'All', true)")
 
-        # Read our checkpoint, creating it at 0 on the first run.
+        # Our cursor, locked: one consumer per handler name. A new row replays the
+        # whole feed (base_seq 0).
+        cur.execute(
+            "INSERT INTO papuma.checkpoint (handler_name) VALUES (%s) ON CONFLICT DO NOTHING",
+            (HANDLER,),
+        )
         cur.execute(
             """
-            INSERT INTO papuma.checkpoint (handler_name, last_seq) VALUES (%s, 0)
-            ON CONFLICT (handler_name) DO UPDATE SET handler_name = papuma.checkpoint.handler_name
-            RETURNING last_seq
+            SELECT base_seq, done_snapshot::text, slice_snapshot::text, slice_seq
+            FROM papuma.checkpoint WHERE handler_name = %s FOR UPDATE
             """,
             (HANDLER,),
         )
-        checkpoint = cur.fetchone()[0]
+        base_seq, done, slice_, slice_seq = cur.fetchone()
+        resumed = slice_ is not None
 
-        # The gapless predicate (§2): only changes whose transaction is visible to
-        # everyone. Without it a slow writer's lower seq could land behind the
-        # checkpoint and be lost silently.
-        cur.execute(
-            """
-            SELECT seq, document_type, document_id, version, operation, diff
-            FROM papuma.change
-            WHERE seq > %s AND txid < pg_snapshot_xmin(pg_current_snapshot())
-            ORDER BY seq
-            LIMIT %s
-            """,
-            (checkpoint, BATCH),
-        )
-        rows = cur.fetchall()
+        # No slice in progress: the transactions committed by now form the next one.
+        # A seq checkpoint cannot work here — it would need the seqs of transactions
+        # that are still open (concepts §2).
+        if slice_ is None:
+            slice_ = cur.execute("SELECT pg_current_snapshot()::text").fetchone()[0]
+            slice_seq = 0
+
+        params = {"done": done, "slice": slice_, "batch": BATCH,
+                  "floor": max(base_seq, slice_seq) if done is None else slice_seq}
+        rows = cur.execute(_FIRST_SLICE if done is None else _NEXT_SLICE, params).fetchall()
 
         for seq, doc_type, doc_id, version, operation, diff in rows:
             # Process the change. Handlers MUST be idempotent (at-least-once): a crash
@@ -68,14 +90,24 @@ def drain(conn: psycopg.Connection) -> int:
             print(f"seq={seq:<4} {_OPS.get(operation, '?'):<6} "
                   f"{doc_type}/{doc_id} v{version} changed={changed}")
 
-        if rows:
+        # A short batch completes the slice; a full one moves the position inside it.
+        if len(rows) < BATCH:
+            done, slice_, slice_seq = slice_, None, 0
+        else:
+            slice_seq = rows[-1][0]
+
+        if rows or resumed:  # an empty fresh slice changes nothing — no write
             cur.execute(
-                "UPDATE papuma.checkpoint SET last_seq = %s, updated_at = now() "
-                "WHERE handler_name = %s",
-                (rows[-1][0], HANDLER),
+                """
+                UPDATE papuma.checkpoint
+                SET done_snapshot = %s::text::pg_snapshot, slice_snapshot = %s::text::pg_snapshot,
+                    slice_seq = %s, last_seq = greatest(last_seq, %s), updated_at = now()
+                WHERE handler_name = %s
+                """,
+                (done, slice_, slice_seq, max((r[0] for r in rows), default=0), HANDLER),
             )
 
-        return len(rows)
+        return bool(rows) or resumed
 
 
 def main() -> None:
@@ -84,7 +116,7 @@ def main() -> None:
         conn.execute("LISTEN papuma_changes")
         print(f'consuming the change feed as "{HANDLER}" — Ctrl+C to stop')
         while True:
-            if drain(conn) == 0:
+            if not drain(conn):
                 # Wait for a NOTIFY wakeup or a 5s timeout, then drain again.
                 select.select([conn.fileno()], [], [], 5.0)
 

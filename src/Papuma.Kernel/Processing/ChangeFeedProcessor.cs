@@ -226,7 +226,7 @@ public sealed class ChangeFeedProcessor : IDisposable
     }
 
     /// <summary>
-    /// Returns a lag snapshot per handler (feed head vs. checkpoint).
+    /// Returns a lag snapshot per handler: committed changes not yet delivered (ADR-022).
     /// </summary>
     /// <param name="ct">A cancellation token.</param>
     public async Task<IReadOnlyList<ChangeFeedLagSnapshot>> GetLagAsync(CancellationToken ct = default)

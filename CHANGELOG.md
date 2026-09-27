@@ -1,5 +1,59 @@
 # Changelog
 
+## Unreleased
+
+Upgrade notes — what a consumer of 1.4.x can notice:
+
+- **Rebuild your projections after upgrading.** Up to 1.4 the PostgreSQL feeds could
+  skip changes and events for good (see *Fixed* below). Upgrading stops new losses; it
+  cannot deliver what was skipped before. Reset every handler whose output must be
+  complete (`ResetCheckpointAsync`) and let it replay. Effect handlers (mails, webhooks)
+  may have missed work — the records themselves are intact in `papuma.change` /
+  `papuma.event`, so a one-off query can find what was never acted on.
+- **Delivery order is commit order, not global `seq` order.** A handler receives a
+  transaction's records after those of every transaction that committed before it
+  started; within a transaction by `seq`; per document strictly by version. A lower
+  `seq` can now arrive after a higher one. Handlers that use `seq` as a watermark
+  ("skip everything ≤ the highest seen") drop records — use the documented idempotency
+  (handler + `seq`, or the document version) instead.
+- **New `txid` indexes** on `papuma.change` and `papuma.event` (`ix_papuma_change_txid`,
+  `ix_papuma_event_txid`) and four columns on `papuma.checkpoint` are created at the
+  first startup by `EnsureSchemaAsync`; existing checkpoints are carried over. On large
+  tables create the indexes beforehand without blocking writes:
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_papuma_change_txid ON papuma.change (txid);`
+  (and the same for `papuma.event`).
+- **Direct-SQL feed consumers must switch queries.** The read prescribed by
+  `feed-wire-format.md` up to 1.4 (`seq > checkpoint AND txid < xmin`) has the same
+  defect. Section 4 now specifies the snapshot cursor; the Python and Go samples use it.
+- **`ChangeFeedLagSnapshot.Lag` is a count** of committed, undelivered records;
+  `Checkpoint` is the highest delivered `seq`. Open transactions are no longer lag.
+- **After a logical restore** (`pg_dump`/`pg_restore` into another cluster)
+  `EnsureSchemaAsync` repairs the feed state (transaction ids are per cluster); records
+  delivered shortly before the dump may be delivered again (at-least-once).
+  `Papuma.Kernel.Local` is unaffected by all of the above.
+
+Changes:
+
+- **Fixed (PostgreSQL): the change and event feeds could skip records of interleaved
+  transactions.** The read predicate `seq > checkpoint AND txid < pg_snapshot_xmin(…)`
+  assumed that an older transaction also draws its sequence numbers earlier. A session
+  writing several times breaks that: A writes (seq 96), B writes (97), A writes again
+  (98) and commits — the checkpoint moved to 98 while B was open, and B's 97 was never
+  delivered, by any handler, without a failure entry (jejak feedback F-15). No predicate
+  over a sequence checkpoint can fix this; a handler's position is now a transaction
+  snapshot (ADR-022, the PgQ model): each cycle delivers the transactions committed
+  since, as a slice in `seq` order. Proven by a concurrency stress test (interleaved
+  multi-write sessions, random commit and rollback, two competing processors) that
+  fails on the old engine on every run.
+- **A long-open write transaction no longer stalls the feed.** Under the old horizon
+  any open transaction held back every later commit; now it holds back only its own
+  records.
+- **New: `SchemaManager.RepairFeedAfterLogicalRestoreAsync`** — the restore repair that
+  `EnsureSchemaAsync` runs, callable directly when the schema is managed elsewhere.
+- **Docs:** ADR-022 (snapshot cursor; supersedes point 2 of ADR-010, amends ADR-009's
+  ordering), concepts §2 rewritten, feed-wire-format §4 rewritten; ADR-023 (why there is
+  no event-sourcing mode) with the stream-shaped aggregates recipe.
+
 ## 1.4.0 (2026-09-27)
 
 Upgrade notes — what a consumer of 1.3.x can notice:

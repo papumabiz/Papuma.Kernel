@@ -136,7 +136,7 @@ CREATE TABLE papuma.change
     actor_id        text        NOT NULL DEFAULT '',  -- who caused this change (ADR-017)
     metadata        jsonb       NOT NULL,   -- isRollback, restoredVersion, correlationId, ...
     occurred_at     timestamptz NOT NULL DEFAULT now(),
-    txid            xid8        NOT NULL DEFAULT pg_current_xact_id()  -- gapless reads, ADR-010
+    txid            xid8        NOT NULL DEFAULT pg_current_xact_id()  -- snapshot cursor, ADR-022
 );
 
 CREATE UNIQUE INDEX ux_papuma_change_document_version
@@ -144,6 +144,8 @@ CREATE UNIQUE INDEX ux_papuma_change_document_version
 
 CREATE INDEX ix_papuma_change_correlation          -- GetChangesByCorrelationAsync
     ON papuma.change (scope, tenant_id, (metadata ->> 'correlationId'));
+
+CREATE INDEX ix_papuma_change_txid ON papuma.change (txid);  -- slice reads, ADR-022
 ```
 
 Both tables carry row-level-security policies (including the `'All'` scope for
@@ -332,19 +334,25 @@ no read models ([ADR-009](adr/adr-009-projections-as-dumb-handlers.md)).
 
 The engine provides the infrastructure:
 
-- **Ordering**: per handler strictly by `seq`; per document therefore
-  automatically by `version`.
-- **Checkpoints**: one persisted position per handler (`papuma.checkpoint`).
+- **Ordering**: per handler in commit order — within a transaction by `seq`, per
+  document strictly by `version`. `seq` identifies a change; it is not a watermark.
+- **Checkpoints**: one persisted cursor per handler (`papuma.checkpoint`).
 - **Retry** with backoff and poison handling.
-- **Rebuild**: checkpoint to 0, feed replay (upcasters optionally in between).
+- **Rebuild**: reset the cursor, feed replay (upcasters optionally in between).
 
-### Gapless reading
+### Reading by snapshot cursor
 
 A naive `WHERE seq > @lastSeq` loses changes whose transaction commits later than
-one with a higher `seq`. The engine therefore reads snapshot-based: only changes
-whose `txid` lies before `pg_snapshot_xmin(pg_current_snapshot())` count as
-visibly stable. LISTEN/NOTIFY serves only as the wakeup; polling remains the
-truth ([ADR-010](adr/adr-010-feed-consumption.md), building on
+one with a higher `seq` — and no rule over a `seq` checkpoint is safe, because it
+would need the sequence numbers of still-open transactions. A handler's position is
+therefore a transaction snapshot (PgQ model): each cycle delivers, as a *slice*, the
+rows of every transaction visible in the current snapshot but not in the last
+completed one, in `seq` order; an exhausted slice becomes the new position. Nothing
+can commit behind the cursor, and an open transaction holds back only its own rows
+([ADR-022](adr/adr-022-snapshot-cursor.md), superseding the `txid < xmin` horizon
+of ADR-010). Lag is the count of committed, undelivered rows. LISTEN/NOTIFY serves
+only as the wakeup; polling remains the truth
+([ADR-010](adr/adr-010-feed-consumption.md), building on
 [polling-vs-listen-analysis.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/legacy/polling-vs-listen-analysis.md)).
 
 ### Convenience on top, not underneath

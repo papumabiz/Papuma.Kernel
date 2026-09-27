@@ -1,6 +1,7 @@
 # Papuma Kernel — Feed Wire Format
 
-Status: verified against `SchemaDdl.cs` and the diff engine (2026-06-13)
+Status: verified against `SchemaDdl.cs` and the diff engine (2026-09-27; consumption
+rule 1 changed after 1.4 — ADR-022)
 
 > **PostgreSQL kernel only.** `Papuma.Kernel.Local` stores its feed in an embedded
 > SQLite file that no second process reads; this contract does not apply to it —
@@ -12,7 +13,7 @@ document is everything you need to write a correct consumer without the .NET
 library. Runnable references: [samples/polyglot-consumers](https://github.com/papumabiz/Papuma.Kernel/blob/master/samples/polyglot-consumers/README.md).
 
 The kernel guarantees this **format** is stable — tables, columns, diff encoding,
-the gapless read. The field paths *inside* a diff are the application's document
+the snapshot-cursor read. The field paths *inside* a diff are the application's document
 model and change with it (concepts §21): read the raw feed from within the
 application that owns the model; across team or system boundaries, publish explicit
 integration events instead.
@@ -21,7 +22,7 @@ integration events instead.
 
 | Column | Type | Meaning |
 |---|---|---|
-| `seq` | `bigint` (identity, PK) | Global feed order. Your cursor. |
+| `seq` | `bigint` (identity, PK) | Identity of the change; order within a slice. **Not** a cursor (section 4). |
 | `scope` | `text` | `'Platform'` or `'Tenant'`. |
 | `tenant_id` | `text` | Tenant id; empty string for platform scope. |
 | `document_type` | `text` | Logical aggregate name (the CLR type name). |
@@ -32,13 +33,13 @@ integration events instead.
 | `diff` | `jsonb` | The reversible field diff (section 3). |
 | `metadata` | `jsonb` | `correlationId`, optional `actorId`/`causationId`/`traceparent`, rollback markers. |
 | `occurred_at` | `timestamptz` | When the change was recorded. |
-| `txid` | `xid8` | Writer's transaction id — used for gapless reads (section 4). |
+| `txid` | `xid8` | Writer's transaction id — what the snapshot cursor reads by (section 4). |
 
 ## 2. The event log table: `papuma.event`
 
 | Column | Type | Meaning |
 |---|---|---|
-| `seq` | `bigint` (identity, PK) | Global event order (separate from the change feed). |
+| `seq` | `bigint` (identity, PK) | Identity of the event (separate from the change feed); order within a slice. |
 | `scope`, `tenant_id` | `text` | As above. |
 | `event_type` | `text` | Logical event name. |
 | `payload` | `jsonb` | The policy-applied fact (no `operation`/`diff`; ADR-013). |
@@ -79,21 +80,74 @@ time, so a foreign-language consumer cannot reach them.
 
 ## 4. Consuming correctly — the three mandatory rules
 
-1. **Gapless read.** Sequence numbers are assigned at INSERT but become visible
-   at COMMIT, so commit order can cross seq order. Read only rows whose
-   transaction is visible to everyone:
+1. **Snapshot cursor (ADR-022).** Sequence numbers are assigned at INSERT but
+   become visible at COMMIT, so commit order crosses `seq` order — and no rule
+   over a `seq` checkpoint can be safe, because it would need the sequence
+   numbers of transactions that are still open. **Up to 1.4 this document
+   prescribed `seq > :checkpoint AND txid < pg_snapshot_xmin(pg_current_snapshot())`;
+   that predicate loses rows of interleaved multi-write transactions. Switch.**
+
+   The position is a transaction snapshot. Keep it in `papuma.checkpoint` (pick a
+   unique `handler_name`; the kernel's own handlers use the same columns):
+
+   | Column | Meaning |
+   |---|---|
+   | `done_snapshot pg_snapshot` | every transaction visible in it is delivered; `NULL` = see `base_seq` |
+   | `base_seq bigint` | while `done_snapshot` is `NULL`: rows with `seq <= base_seq` are delivered (`0` = from the start) |
+   | `slice_snapshot pg_snapshot` | the slice in progress; `NULL` = none |
+   | `slice_seq bigint` | inside the slice: rows with `seq <= slice_seq` are delivered |
+   | `last_seq bigint` | highest `seq` delivered — informational |
+
+   One cycle, in **one transaction** (READ COMMITTED, the default):
 
    ```sql
+   -- a. Lock your row (one consumer per handler_name). New consumer: insert it
+   --    first — base_seq 0 replays everything; done_snapshot = pg_current_snapshot()
+   --    starts at the head.
+   INSERT INTO papuma.checkpoint (handler_name) VALUES (:name) ON CONFLICT DO NOTHING;
+   SELECT base_seq, done_snapshot::text, slice_snapshot::text, slice_seq
+   FROM papuma.checkpoint WHERE handler_name = :name FOR UPDATE;
+
+   -- b. No slice in progress: take one. Never build a snapshot client-side.
+   SELECT pg_current_snapshot()::text;                -- :slice, and :slice_seq = 0
+
+   -- c. The next batch of the slice. While done_snapshot is NULL:
    SELECT seq, document_type, document_id, version, operation, diff, metadata
    FROM papuma.change
-   WHERE seq > :checkpoint
-     AND txid < pg_snapshot_xmin(pg_current_snapshot())
+   WHERE seq > greatest(:base_seq, :slice_seq)
+     AND pg_visible_in_snapshot(txid, :slice::pg_snapshot)
    ORDER BY seq
    LIMIT :batch;
+
+   --    Otherwise (the txid bounds make it an index range scan):
+   SELECT seq, document_type, document_id, version, operation, diff, metadata
+   FROM papuma.change
+   WHERE txid >= pg_snapshot_xmin(:done::pg_snapshot)
+     AND txid <  pg_snapshot_xmax(:slice::pg_snapshot)
+     AND pg_visible_in_snapshot(txid, :slice::pg_snapshot)
+     AND NOT pg_visible_in_snapshot(txid, :done::pg_snapshot)
+     AND seq > :slice_seq
+   ORDER BY seq
+   LIMIT :batch;
+
+   -- d. Process the rows in order, then persist and commit. A batch shorter than
+   --    :batch completes the slice:
+   UPDATE papuma.checkpoint
+   SET done_snapshot = :slice::pg_snapshot, slice_snapshot = NULL, slice_seq = 0,
+       last_seq = greatest(last_seq, :highest), updated_at = now()
+   WHERE handler_name = :name;
+   --    a full batch only moves the position inside it:
+   UPDATE papuma.checkpoint
+   SET slice_snapshot = :slice::pg_snapshot, slice_seq = :last_processed_seq,
+       last_seq = greatest(last_seq, :highest), updated_at = now()
+   WHERE handler_name = :name;
    ```
 
-   A naive `seq > checkpoint` loses a slow writer's lower seq permanently. This
-   predicate is **mandatory**.
+   The set of rows in a slice is fixed when it is taken (all its transactions have
+   committed), so paginating it by `seq` neither skips nor repeats. **Ordering you
+   get:** commit order across transactions, `seq` order within a slice, strictly
+   by `version` per document. A lower `seq` can arrive after a higher one — never
+   use `seq` as a "skip everything below" watermark.
 
 2. **Scope (RLS).** All feed tables enforce row-level security. Inside the read
    transaction, set the scope GUC, or you get **empty reads** (fail-closed):
@@ -108,9 +162,8 @@ time, so a foreign-language consumer cannot reach them.
    `set_config(..., true)` is transaction-local — it must run in the same
    transaction as the read.
 
-3. **Checkpoint + idempotency.** Keep your position in `papuma.checkpoint`
-   (`handler_name text PK, last_seq bigint`) — pick a unique `handler_name`.
-   Advance it *after* processing, in the same transaction. Delivery is
+3. **Idempotency.** Advance the cursor *after* processing, in the same
+   transaction (step d). Delivery is
    **at-least-once**: a crash before commit re-delivers the batch, so processing
    must be idempotent.
 

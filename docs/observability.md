@@ -31,7 +31,7 @@ all metrics live.
 
 | Instrument | Type | Tags | Meaning |
 |---|---|---|---|
-| `papuma.feed.lag` | ObservableGauge | `papuma.feed`, `papuma.handler` | **The most important number**: stable-visible feed head minus checkpoint, per handler. Freshness ≈ poll interval (cache, refreshed by `GetLagAsync` and the run loop's idle moments). |
+| `papuma.feed.lag` | ObservableGauge | `papuma.feed`, `papuma.handler` | **The most important number**: committed records not yet delivered, per handler (counted, ADR-022 — an open transaction is not lag until it commits). Freshness ≈ poll interval (cache, refreshed by `GetLagAsync` and the run loop's idle moments). |
 | `papuma.feed.processed` | Counter | `papuma.feed`, `papuma.handler` | Delivered records |
 | `papuma.feed.failures` | Counter | `papuma.feed`, `papuma.handler` | Handler failures (every attempt counts) |
 | `papuma.feed.poisoned` | Counter | `papuma.feed`, `papuma.handler` | Records skipped as poison — **alert candidate** |

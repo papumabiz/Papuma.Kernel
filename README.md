@@ -17,7 +17,7 @@ Papuma Kernel is a small application kernel for .NET 10, built as **two
 independent products sharing one model**. You store plain C# objects as JSON
 documents; the kernel derives a **reversible change feed in the same atomic
 transaction**, applies your **privacy policies before anything is recorded**,
-and delivers every change to your handlers strictly in order. You get what
+and delivers every change to your handlers in commit order. You get what
 event sourcing promises — a complete, auditable history and reactive
 projections — without the replay obligation, the mandatory event modeling, or
 the GDPR headache.
@@ -102,7 +102,8 @@ implementations pretending to agree):
   project onto masked reads ([ADR-016](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/adr/adr-016-policy-projected-reads.md)).
 - **GDPR tooling** — Art.-30 data inventory from the metamodel, Art.-15/20 subject
   export, history redaction with a mandatory audit trail ([gdpr.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/gdpr.md)).
-- **Processing engine** — strict per-handler ordering, persisted checkpoints,
+- **Processing engine** — per-handler delivery in commit order (per document by
+  version), nothing skipped (snapshot cursor), persisted checkpoints,
   retry/backoff, poison handling, one-call rebuild.
 - **Event log** — first-class facts (`UserLoggedIn`) beside state changes, same
   transaction, same policies, per-type retention.
@@ -138,7 +139,7 @@ SQLite-only (`Papuma.Kernel.Local`):
   shared factory — a background feed processor writing doesn't block the UI
   reading, verified empirically, not assumed.
 - Genuinely simpler where the single-writer topology allows it: no RLS
-  machinery, no gapless-read snapshot logic — see the
+  machinery, no snapshot cursor — see the
   [design rationale](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/analyses/local-kernel-sqlite-sibling.md) for exactly
   what's dropped and why that's safe, not a shortcut.
 

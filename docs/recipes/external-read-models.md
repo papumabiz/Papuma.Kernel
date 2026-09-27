@@ -31,7 +31,7 @@ public sealed class SearchIndexProjection(DocumentStore store, ISearchClient sea
         await using var session = store.OpenSession(change.Scope);
         var product = await session.LoadAsync<Product>(change.DocumentId, ct);
         if (product is null || product.Version > change.Version) return; // gone, or a newer
-            // change is already committed — its delivery comes next (strict order) and projects it
+            // change is already committed — its delivery comes next (per-document order) and projects it
 
         await search.UpsertAsync(DocKey(change), Map(product.Document), product.Version, ct);
     }
