@@ -108,6 +108,35 @@ in the write path, where the database serializes them: a bounded counter (§17),
 unique key, `expectedVersion`. A handler never could make them reliably; the old
 `seq` order only looked like it could.
 
+**What `seq` still is.** It lost exactly one job — being the cursor ("how far have
+I read?"), which it could never do safely, because it is drawn at write time, not
+at commit. Everything else stays:
+
+- **Identity.** The primary key of every change and event: failure entries
+  (`handler + seq`), `RetryFailureAsync`, the dashboard and MCP tools, the
+  documented idempotency key.
+- **Write order — a causally valid total order.** If A committed before B began,
+  every `seq` of B is larger than every `seq` of A; within a transaction `seq`
+  follows the write order; per document it follows the version (the row lock).
+  So sorting by `seq` never contradicts causality. It is the order in which things
+  were *written*, not the order in which they became *visible* — and both are
+  legitimate linearizations of the same history.
+- **Order inside a slice.** A slice can hold several transactions, including two on
+  the same document; sorting by `seq` is what delivers version 1 before version 2.
+  Sorting by `txid` would not: a transaction can take its id early and write the
+  document late.
+- **Replay order.** Because `seq` order is causally valid, a rebuild after a reset
+  simply reads by `seq` — a cheap primary-key scan — and is as correct as live
+  delivery, just possibly ordered differently for concurrent transactions (hence
+  the rule above).
+- **Paging key.** Batches page a slice along the primary key, so every row is read
+  once however large the slice.
+- **The cursor, still, in `Papuma.Kernel.Local`** — one writer, so there write
+  order *is* commit order.
+
+In one sentence: `seq` says in which order things were written; it no longer says
+how far a handler has read.
+
 **Who pays for what?** The writers pay **nothing** — the fast writer never waits
 for the slow one; both commit independently at full throughput; there is no queue
 and no lock between them. The feed pays one index on `txid`: each new slice finds
