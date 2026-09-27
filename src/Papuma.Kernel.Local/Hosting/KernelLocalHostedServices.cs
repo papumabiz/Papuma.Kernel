@@ -14,21 +14,30 @@ using Papuma.Kernel.Store;
 namespace Papuma.Kernel.Hosting;
 
 /// <summary>
-/// Applies the SQLite kernel schema (including declared key indexes) on startup when
-/// <see cref="PapumaKernelLocalOptions.EnsureSchema"/> is enabled — counterpart of
+/// Applies the SQLite kernel schema (including declared key indexes), then the
+/// application's <see cref="ISqliteSchemaContributor"/>s, on startup when
+/// <see cref="PapumaKernelLocalOptions.EnsureSchema"/> is enabled — before the feed
+/// workers, which are registered after this service. Counterpart of
 /// <c>KernelSchemaInitializer</c>.
 /// </summary>
 internal sealed class SqliteKernelSchemaInitializer(
     PapumaKernelLocalOptions options,
-    KernelModel model) : IHostedService
+    KernelModel model,
+    IEnumerable<ISqliteSchemaContributor> contributors) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        if (options.EnsureSchema)
+        if (!options.EnsureSchema)
         {
-            await using var connection = await SqliteConnectionFactory.OpenAsync(
-                options.ResolveConnectionString(), cancellationToken);
-            await SqliteSchemaManager.EnsureSchemaAsync(connection, model, cancellationToken);
+            return;
+        }
+
+        await using var connection = await SqliteConnectionFactory.OpenAsync(
+            options.ResolveConnectionString(), cancellationToken);
+        await SqliteSchemaManager.EnsureSchemaAsync(connection, model, cancellationToken);
+        foreach (var contributor in contributors)
+        {
+            await contributor.EnsureSchemaAsync(connection, cancellationToken);
         }
     }
 

@@ -27,7 +27,8 @@ public sealed class PapumaKernelLocalOptions
     public string? ConnectionString { get; set; }
 
     /// <summary>
-    /// Gets or sets whether the schema is applied on startup (default: true).
+    /// Gets or sets whether the kernel schema — and after it every registered
+    /// <see cref="ISqliteSchemaContributor"/> — is applied on startup (default: true).
     /// </summary>
     public bool EnsureSchema { get; set; } = true;
 

@@ -167,15 +167,21 @@ same hard rules above — with these engine-specific adjustments:
 - **No `FOR UPDATE SKIP LOCKED` leader election.** A single-writer store never
   runs concurrent processor instances, so there's nothing to elect a leader
   for.
-- **Feed wakeup is in-process** (`SqliteChangeNotifier`, a bounded channel),
-  not `LISTEN`/`NOTIFY` — the realtime-UI-notifications recipe's *pattern*
-  still applies, its Postgres-specific wiring doesn't.
+- **Feed wakeup is in-process** (`SqliteChangeNotifier`: every processor holds
+  its own subscription, a commit wakes all of them), not `LISTEN`/`NOTIFY` — the
+  realtime-UI-notifications recipe's *pattern* still applies, its
+  Postgres-specific wiring doesn't.
+- **Handlers run outside any feed transaction.** The processor reads a batch,
+  releases the database, runs the handlers, then records the checkpoint. A local
+  projection writes to the same `.db` file through its own connection; a slow
+  handler does not block the application's writes.
 - **One writer, one file, one process.** Don't open the same `.db` file from
   two processes — that's an OS file-lock violation, not a kernel concern to
   code around.
-- **No schema contributors (yet).** `AddSchemaContributor<T>()` exists for the
-  Postgres host only; with `AddPapumaKernelLocal`, create projection tables before
-  the host starts (e.g. right after building it, before `Run`).
+- **Schema contributors take a `SqliteConnection`.** `AddSchemaContributor<T>()`
+  with an `ISqliteSchemaContributor` runs after the kernel schema, before the feed
+  workers — same place as on Postgres, no advisory lock needed (one process owns
+  the file). SQLite has no `ADD COLUMN IF NOT EXISTS`: check `pragma_table_info`.
 - **No embedded dashboard, no feed-lag health check, no MCP surface (yet).**
   Those live in `Papuma.Kernel.AspNetCore`/`Papuma.Kernel.Mcp`, which have no
   SQLite counterpart. `KernelDiagnostics` (`Meter`/`ActivitySource`) *is*

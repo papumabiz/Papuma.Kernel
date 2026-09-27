@@ -43,4 +43,17 @@ public sealed class PapumaKernelLocalBuilder
         Services.AddSingleton<IEventHandler, THandler>();
         return this;
     }
+
+    /// <summary>
+    /// Registers application schema (projection tables) to be applied at startup after
+    /// the kernel schema and before the feed workers start. Contributors run in
+    /// registration order.
+    /// </summary>
+    /// <typeparam name="TContributor">The contributor type.</typeparam>
+    public PapumaKernelLocalBuilder AddSchemaContributor<TContributor>()
+        where TContributor : class, ISqliteSchemaContributor
+    {
+        Services.AddSingleton<ISqliteSchemaContributor, TContributor>();
+        return this;
+    }
 }

@@ -2,7 +2,8 @@
 
 Status: pattern recipe (2026-09-26), verified against PostgreSQL 18 by
 `ProjectionSchemaTests` in the kernel's test suite (the contributor below is the one
-the test runs). PostgreSQL kernel only.
+the test runs). `Papuma.Kernel.Local` has the same hook — see the SQLite section at
+the end.
 Background: [read models in the same database](same-database-read-models.md) (the
 table and its RLS policy), [concepts §19](../concepts.md#19-checkpoints-backup-and-rebuild-what-is-truth-what-is-derivable)
 (projections are derivable), [ADR-009](../adr/adr-009-projections-as-dumb-handlers.md).
@@ -113,6 +114,42 @@ await database.GrantAppRoleAsync("app");                           // the app ro
 
 Or host the kernel in the test with `AddSchemaContributor<TicketBoardSchema>()` on the
 test database's owner data source; the contributor then runs exactly as in production.
+
+## SQLite (`Papuma.Kernel.Local`)
+
+The same hook, with the kernel's open connection instead of a data source:
+
+```csharp
+builder.Services
+    .AddPapumaKernelLocal(o => { o.DbPath = dbPath; o.Model(/* ... */); })
+    .AddSchemaContributor<TicketBoardSchema>()     // an ISqliteSchemaContributor
+    .AddChangeHandler<TicketBoardProjection>();
+
+public sealed class TicketBoardSchema : ISqliteSchemaContributor
+{
+    public async Task EnsureSchemaAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS ticket_board
+            (
+                scope TEXT NOT NULL, tenant_id TEXT NOT NULL, id TEXT NOT NULL,
+                title TEXT NOT NULL, version INTEGER NOT NULL,
+                PRIMARY KEY (scope, tenant_id, id)
+            );
+            CREATE INDEX IF NOT EXISTS ix_ticket_board_title ON ticket_board (scope, tenant_id, title);
+            """;
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+}
+```
+
+Differences: no advisory lock (one process owns the file), no RLS (isolation is the
+explicit `scope`/`tenant_id` predicate), and no `ADD COLUMN IF NOT EXISTS` — read
+`pragma_table_info('ticket_board')` and add the column only when it is missing. The
+projection handler writes through its own connection to the same file; the feed
+processor holds no transaction while handlers run. Verified by
+`SqliteProjectionSchemaTests`.
 
 ## When to reach for a migration tool
 

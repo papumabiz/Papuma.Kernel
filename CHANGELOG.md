@@ -15,6 +15,28 @@
   "what did this command do?" for audit timelines and for tests asserting a command's
   complete effect. Backed by a new index on the change table's `correlationId`
   (created idempotently by `EnsureSchemaAsync`). jejak feedback F-12.
+- **`Papuma.Kernel.Local`: schema contributors** — `AddSchemaContributor<T>()` with an
+  `ISqliteSchemaContributor` (the kernel's open `SqliteConnection`), run after the
+  kernel schema and before the feed workers, like the Postgres hook.
+- **Fixed (`Papuma.Kernel.Local`): handlers could not write to the database file.** The
+  feed processors held a `BEGIN IMMEDIATE` transaction — the file's single write lock —
+  while handlers ran, so a local projection writing through its own connection got
+  `database is locked` (then retry, then poison), and any slow handler (mail, HTTP)
+  blocked every application write for its duration. Both processors now read a batch
+  in a short transaction, run the handlers with no transaction open, and record the
+  outcome in a second short one — only if the checkpoint was not moved meanwhile (a
+  reset for a rebuild wins; the stale outcome is dropped and re-read). At-least-once,
+  ordering and stop-the-line are unchanged.
+- **Fixed (`Papuma.Kernel.Local`): the event feed missed wakeups.** Change and event
+  processor shared one single-slot signal; whichever read it first took it, the other
+  slept until the poll interval (default 5 s). `SqliteChangeNotifier.Subscribe()` gives
+  every waiter its own buffered signal and a commit reaches all of them;
+  `SqliteChangeNotifier.WaitAsync` is obsolete for that reason.
+- **Fixed (PostgreSQL): retry backoff mixed two clocks.** `next_retry_at` was set with
+  the database clock and compared with the application host's clock, shifting every
+  retry by the clock skew between the two (a few ms in a container were enough to make
+  zero-delay retries wait). The due check now runs in the database
+  (`next_retry_at > now()`), for the change and the event feed.
 - **MCP: `get_changes_by_correlation`** — the correlation read as a read-only tool, so an
   agent can answer "what did this command do?" from any change's `correlationId`
   (policy-applied diffs, scope-bound, like `get_document_history`).
