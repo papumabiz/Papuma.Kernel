@@ -68,8 +68,10 @@ public sealed class ChangeFeedProcessorTests : IAsyncLifetime
         }
     }
 
+    // A fresh handler starts behind every other test's changes in the shared database;
+    // the default batch size makes "one cycle delivers my change" depend on test order.
     private ChangeFeedProcessor CreateProcessor(IChangeHandler handler, ChangeFeedProcessorOptions? options = null) =>
-        new(_fixture.DataSource, [handler], options);
+        new(_fixture.DataSource, [handler], options ?? new ChangeFeedProcessorOptions { BatchSize = 100_000 });
 
     [Fact]
     public async Task DeliversCommittedChanges_InSeqOrder_WithFullRecord()

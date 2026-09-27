@@ -89,25 +89,18 @@ public sealed class FeedCursorTests : IAsyncLifetime
         const int TransactionsPerWriter = 25;
         const int HotDocuments = 3;
 
+        // A database of its own: hundreds of rows would put every fresh handler of the
+        // other tests behind a longer shared backlog.
+        await using var db = await ScratchDatabase.CreateAsync(_fixture.Database);
+        await SchemaManager.EnsureSchemaAsync(db.DataSource, _model);
+        var store = new DocumentStore(db.DataSource, _model);
         var changes = new ChangeRecorder();
         var events = new EventRecorder();
-
-        // Start both handlers at the head of the shared database in one large batch; the
-        // concurrent phase then runs with tiny batches, so slices are paginated.
-        using (var catchUp = new ChangeFeedProcessor(_fixture.Database.AppDataSource, [changes], new() { BatchSize = 100_000 }))
-        using (var catchUpEvents = new EventFeedProcessor(_fixture.Database.AppDataSource, [events], new() { BatchSize = 100_000 }))
-        {
-            await catchUp.DrainAsync();
-            await catchUpEvents.DrainAsync();
-        }
-
-        changes.Received.Clear();
-        events.Received.Clear();
 
         var tenant = ScopeContext.Tenant(Guid.NewGuid());
         var committedChanges = new ConcurrentDictionary<long, bool>();
         var hotIds = Enumerable.Range(0, HotDocuments).Select(_ => NewId()).ToArray();
-        await using (var setup = _store.OpenSession(tenant))
+        await using (var setup = store.OpenSession(tenant))
         {
             foreach (var id in hotIds)
             {
@@ -129,8 +122,8 @@ public sealed class FeedCursorTests : IAsyncLifetime
         var processors = new List<IDisposable>();
         for (var i = 0; i < 2; i++) // two instances contending for the same handlers
         {
-            var changeProcessor = new ChangeFeedProcessor(_fixture.Database.AppDataSource, [changes], small);
-            var eventProcessor = new EventFeedProcessor(_fixture.Database.AppDataSource, [events], small);
+            var changeProcessor = new ChangeFeedProcessor(db.DataSource, [changes], small);
+            var eventProcessor = new EventFeedProcessor(db.DataSource, [events], small);
             processors.Add(changeProcessor);
             processors.Add(eventProcessor);
             feedLoops.Add(Loop(changeProcessor.ProcessOnceAsync, cts.Token));
@@ -145,7 +138,7 @@ public sealed class FeedCursorTests : IAsyncLifetime
 
             for (var t = 0; t < TransactionsPerWriter; t++)
             {
-                var session = _store.OpenSession(tenant);
+                var session = store.OpenSession(tenant);
                 var versions = (long[])ownVersions.Clone();
                 var eventSeqs = new List<long>();
                 try
@@ -201,8 +194,8 @@ public sealed class FeedCursorTests : IAsyncLifetime
         processors.ForEach(p => p.Dispose());
 
         // Everything still pending after the writers finished.
-        using (var final = new ChangeFeedProcessor(_fixture.Database.AppDataSource, [changes], small))
-        using (var finalEvents = new EventFeedProcessor(_fixture.Database.AppDataSource, [events], small))
+        using (var final = new ChangeFeedProcessor(db.DataSource, [changes], small))
+        using (var finalEvents = new EventFeedProcessor(db.DataSource, [events], small))
         {
             await final.DrainAsync(maxCycles: 10_000);
             await finalEvents.DrainAsync(maxCycles: 10_000);
@@ -392,7 +385,8 @@ public sealed class FeedCursorTests : IAsyncLifetime
 
     /// <summary>
     /// A database of its own in the shared container, for tests that rewrite feed state
-    /// globally (schema downgrades, transaction ids) and must not touch other tests' rows.
+    /// globally (schema downgrades, transaction ids) or write in bulk, and must not touch
+    /// other tests' rows.
     /// </summary>
     private sealed class ScratchDatabase : IAsyncDisposable
     {
