@@ -39,7 +39,19 @@ namespace Papuma.Kernel.Processing;
 /// coordinate.
 /// </para>
 /// <para>
-/// <b>No LISTEN/NOTIFY:</b> replaced by an optional in-process <see cref="SqliteChangeNotifier"/>.
+/// <b>No LISTEN/NOTIFY:</b> replaced by an optional in-process <see cref="SqliteChangeNotifier"/>;
+/// the processor waits on its own subscription.
+/// </para>
+/// <para>
+/// <b>Handlers run with no transaction open.</b> A cycle reads checkpoint and batch in a
+/// short transaction, runs the handlers, then records the outcome in a short write
+/// transaction — only if the checkpoint is still the one read (a concurrent
+/// <see cref="ResetCheckpointAsync"/> wins; the stale outcome is dropped). The database
+/// file's single write lock is therefore free while handlers run: a projection writes to
+/// the same file through its own connection, and a slow handler does not block the
+/// application. Run one processor per database file (the hosted service does): nothing
+/// serializes two instances any more, and a second one would deliver the same batch
+/// twice — still at-least-once, but pointless work.
 /// </para>
 /// </remarks>
 public sealed class SqliteChangeFeedProcessor : IDisposable

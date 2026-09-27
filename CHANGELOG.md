@@ -26,7 +26,8 @@
   in a short transaction, run the handlers with no transaction open, and record the
   outcome in a second short one — only if the checkpoint was not moved meanwhile (a
   reset for a rebuild wins; the stale outcome is dropped and re-read). At-least-once,
-  ordering and stop-the-line are unchanged.
+  ordering and stop-the-line are unchanged. The old lock also serialized a second
+  processor instance on the same file; run one per file (the hosted service does).
 - **Fixed (`Papuma.Kernel.Local`): the event feed missed wakeups.** Change and event
   processor shared one single-slot signal; whichever read it first took it, the other
   slept until the poll interval (default 5 s). `SqliteChangeNotifier.Subscribe()` gives

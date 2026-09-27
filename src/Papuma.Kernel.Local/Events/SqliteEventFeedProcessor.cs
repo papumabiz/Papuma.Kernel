@@ -21,7 +21,8 @@ namespace Papuma.Kernel.Events;
 /// The event log engine for a single-writer embedded store — SQLite counterpart of the
 /// Postgres kernel's <c>EventFeedProcessor</c>, with the same simplifications as
 /// <see cref="SqliteChangeFeedProcessor"/> (no gapless-read handling, no leader
-/// coordination, in-process wakeup instead of LISTEN/NOTIFY — see that type's remarks).
+/// coordination, in-process wakeup instead of LISTEN/NOTIFY, handlers run with no
+/// transaction open, one processor per database file — see that type's remarks).
 /// </summary>
 /// <remarks>
 /// Change feed and event log are separate feeds with separate checkpoint spaces

@@ -204,7 +204,8 @@ solve multi-writer problems:
 | | Postgres kernel | SQLite kernel |
 |---|---|---|
 | Atomic old/new capture | one `RETURNING OLD/NEW` statement | `SELECT` + version-checked `UPDATE...RETURNING` — two statements; still atomic because the transaction is exclusive, nothing can interleave |
-| Feed wakeup | `LISTEN`/`NOTIFY`, network round trip | in-process `SqliteChangeNotifier` (bounded channel), no network involved |
+| Feed wakeup | `LISTEN`/`NOTIFY`, network round trip | in-process `SqliteChangeNotifier` — one buffered subscription per processor, a commit wakes all; no network involved |
+| Handler execution | inside the processor's transaction, which row-locks the handler's checkpoint (`FOR UPDATE`) — other writers are unaffected | outside any transaction: read the batch, run handlers, then record the checkpoint (checked against a concurrent reset) — the file's single write lock stays free for the application and for projections writing to the same file |
 | Gapless-read handling | `txid`/snapshot filtering (ADR-010) — solves a multi-writer commit-order problem | not needed — one writer, no commit-order to reconcile |
 | Row isolation | explicit scope predicates **plus** PostgreSQL row-level security | explicit scope predicates only — no second process to defend against |
 | Leader coordination | `FOR UPDATE SKIP LOCKED` across concurrent processor instances | not needed — a single-writer store has exactly one instance |
