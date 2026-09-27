@@ -110,8 +110,9 @@ unique key, `expectedVersion`. A handler never could make them reliably; the old
 
 **Who pays for what?** The writers pay **nothing** — the fast writer never waits
 for the slow one; both commit independently at full throughput; there is no queue
-and no lock between them. The feed pays one index on `txid` (the slice query is an
-index range between the two snapshots). And a long-open write transaction — the
+and no lock between them. The feed pays one index on `txid`: each new slice finds
+its lowest `seq` there once, then pages forward along the primary key, reading each
+row once. And a long-open write transaction — the
 old weak spot, which stalled the whole feed under the horizon rule — now holds
 back **only its own rows**: everything committed around it flows. The lag metric
 counts committed, undelivered rows, so an open transaction is not lag at all until
@@ -414,8 +415,8 @@ The three real limits, in the order you hit them:
    to ~1,400 changes/s. If the application writes faster permanently, lag grows
    without bound; more instances do not help.
 3. **Read amplification**: every handler reads the full feed (no type filter in
-   SQL) — cheap thanks to an index range scan on `txid` between the cursor's two
-   snapshots, but measurable at volume × handler count.
+   SQL) — cheap thanks to a forward PK range scan per slice (its start found once
+   through the `txid` index), but measurable at volume × handler count.
 
 **Measured baseline (2026-06-12, local PG-18 container — details and the
 reusable probe in `benchmarks/`):** the engine itself delivers ~27,000

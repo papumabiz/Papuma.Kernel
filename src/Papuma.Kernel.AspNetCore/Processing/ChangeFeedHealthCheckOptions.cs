@@ -9,8 +9,8 @@ namespace Papuma.Kernel.AspNetCore.Processing;
 public sealed class ChangeFeedHealthCheckOptions
 {
     /// <summary>
-    /// Gets or sets the maximum tolerated lag (in feed sequence numbers) before the
-    /// health check reports unhealthy.
+    /// Gets or sets the maximum tolerated lag — committed changes a handler has not
+    /// received yet (ADR-022) — before the health check reports unhealthy.
     /// </summary>
     public long MaxAllowedLag { get; set; } = 1000;
 }

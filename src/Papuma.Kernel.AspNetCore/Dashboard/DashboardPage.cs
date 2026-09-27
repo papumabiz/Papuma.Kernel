@@ -50,11 +50,11 @@ internal static class DashboardPage
 <div class="cards" id="cards"></div>
 
 <h2>Change feed — lag per handler</h2>
-<table><thead><tr><th>Handler</th><th>Checkpoint</th><th>Head</th><th style="width:45%">Lag</th></tr></thead>
+<table><thead><tr><th>Handler</th><th title="Highest seq delivered to the handler">Delivered up to</th><th title="Highest seq in the feed">Head</th><th style="width:45%">Lag</th></tr></thead>
 <tbody id="changeLag"></tbody></table>
 
 <h2>Event feed — lag per handler</h2>
-<table><thead><tr><th>Handler</th><th>Checkpoint</th><th>Head</th><th style="width:45%">Lag</th></tr></thead>
+<table><thead><tr><th>Handler</th><th title="Highest seq delivered to the handler">Delivered up to</th><th title="Highest seq in the feed">Head</th><th style="width:45%">Lag</th></tr></thead>
 <tbody id="eventLag"></tbody></table>
 
 <h2>Failures (retry pending / poison)</h2>

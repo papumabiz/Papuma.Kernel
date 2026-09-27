@@ -10,7 +10,7 @@ namespace Papuma.Kernel.AspNetCore.Processing;
 
 /// <summary>
 /// Reports unhealthy status when one or more change handlers exceed the configured
-/// lag threshold (architecture §8 / ADR-010 "feed lag" metric).
+/// lag threshold (architecture §8; lag = committed, undelivered changes, ADR-022).
 /// </summary>
 public sealed class ChangeFeedLagHealthCheck : IHealthCheck
 {

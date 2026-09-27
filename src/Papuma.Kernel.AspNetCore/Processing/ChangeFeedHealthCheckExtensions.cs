@@ -15,7 +15,7 @@ public static class ChangeFeedHealthCheckExtensions
     /// lag threshold. Requires <c>AddPapumaKernel(...)</c>.
     /// </summary>
     /// <param name="builder">The health checks builder.</param>
-    /// <param name="maxAllowedLag">The maximum tolerated lag in feed sequence numbers.</param>
+    /// <param name="maxAllowedLag">The maximum tolerated lag: committed changes a handler has not received yet.</param>
     /// <param name="name">The health check name.</param>
     public static IHealthChecksBuilder AddPapumaChangeFeedLag(
         this IHealthChecksBuilder builder,
