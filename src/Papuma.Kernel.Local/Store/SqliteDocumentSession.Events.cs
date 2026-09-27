@@ -59,7 +59,7 @@ public sealed partial class SqliteDocumentSession
                 cmd.Parameters.AddWithValue("occurredAt", DateTimeOffset.UtcNow.ToString("O"));
 
                 var seq = (long)(await cmd.ExecuteScalarAsync(ct))!;
-                _hasWrites = true;
+                _pendingWrites.Add(metadata.Name);
 
                 KernelDiagnostics.EventsAppended.Add(1,
                     new KeyValuePair<string, object?>("papuma.event_type", metadata.Name));

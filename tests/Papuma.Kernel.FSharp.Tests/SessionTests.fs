@@ -112,3 +112,36 @@ let ``trySaveAsync reports UniqueKeyViolation`` () : Task =
                         Assert.Equal("owner", keyPath)
                     | other -> Assert.Fail($"expected a UniqueKeyViolation, got: %A{other}")
                 }))
+
+[<Fact>]
+let ``runSessionCommitted commits on Ok and discards on Error`` () : Task =
+    withStore<Account> (fun store ->
+        task {
+            let tenant = newTenant ()
+            let kept = newId ()
+            let dropped = newId ()
+
+            let! ok =
+                runSessionCommitted (store.OpenSession(tenant)) (fun session ->
+                    trySaveAsync session ({ Id = kept; Owner = "Harry"; Balance = 100 }: Account) 0L)
+
+            Assert.True(Result.isOk ok)
+
+            let! error =
+                runSessionCommitted (store.OpenSession(tenant)) (fun session ->
+                    task {
+                        let! _ = trySaveAsync session ({ Id = dropped; Owner = "Sally"; Balance = 1 }: Account) 0L
+                        return Error "rejected by the command"
+                    })
+
+            Assert.Equal(Error "rejected by the command", error)
+
+            do!
+                runSession (store.OpenSession(tenant)) (fun session ->
+                    task {
+                        let! committed = session.LoadAsync<Account>(kept)
+                        let! discarded = session.LoadAsync<Account>(dropped)
+                        Assert.NotNull(committed)
+                        Assert.Null(discarded)
+                    })
+        })

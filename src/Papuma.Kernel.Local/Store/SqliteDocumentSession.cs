@@ -9,6 +9,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
 
 using Papuma.Kernel.Changes;
 using Papuma.Kernel.Diagnostics;
@@ -61,11 +62,12 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
     private readonly KernelModel _model;
     private readonly SessionOptions _options;
     private readonly Action? _notifyWaiters;
+    private readonly ILogger? _logger;
+    private readonly PendingWrites _pendingWrites = new();
 
     private SqliteConnection? _connection;
     private SqliteTransaction? _transaction;
     private bool _disposed;
-    private bool _hasWrites;
 
     /// <summary>Gets the scope this session is bound to.</summary>
     public ScopeContext Scope { get; }
@@ -77,8 +79,10 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
     internal string ActorId { get; }
 
     internal SqliteDocumentSession(
-        string connectionString, KernelModel model, ScopeContext scope, SessionOptions? options, Action? notifyWaiters)
+        string connectionString, KernelModel model, ScopeContext scope, SessionOptions? options, Action? notifyWaiters,
+        ILogger? logger)
     {
+        _logger = logger;
         _connectionString = connectionString;
         _model = model;
         Scope = scope;
@@ -108,7 +112,7 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
         await _transaction.DisposeAsync();
         _transaction = null;
 
-        if (_hasWrites)
+        if (_pendingWrites.Count > 0)
         {
             // In-process wakeup for feed processors — the LISTEN/NOTIFY replacement for a
             // single-writer embedded store. Fired after commit (not "atomically with" it,
@@ -117,14 +121,53 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
             _notifyWaiters?.Invoke();
         }
 
-        _hasWrites = false;
+        _pendingWrites.Clear();
 
         KernelDiagnostics.SessionCommits.Add(1);
         KernelDiagnostics.CommitDuration.Record(stopwatch.Elapsed.TotalMilliseconds);
     }
 
     /// <summary>
-    /// Disposes the session. Uncommitted writes are rolled back.
+    /// Rolls back all writes performed since the session was opened (or since the last
+    /// commit), deliberately — unlike a dispose with pending writes, which logs a warning.
+    /// The session stays usable; the next operation starts a fresh transaction.
+    /// </summary>
+    /// <param name="ct">A cancellation token.</param>
+    public async Task DiscardAsync(CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (_transaction is null)
+        {
+            return; // nothing pending
+        }
+
+        await _transaction.RollbackAsync(ct);
+        await _transaction.DisposeAsync();
+        _transaction = null;
+        _pendingWrites.Clear();
+    }
+
+    private void ReportUncommittedDisposal()
+    {
+        if (_pendingWrites.Count == 0)
+        {
+            return;
+        }
+
+        KernelDiagnostics.UncommittedDisposals.Add(1);
+        _logger?.LogWarning(
+            new EventId(PendingWrites.UncommittedDisposalEventId, PendingWrites.UncommittedDisposalEventName),
+            PendingWrites.UncommittedDisposalMessage,
+            CorrelationId, _pendingWrites.Count, _pendingWrites.First);
+        _pendingWrites.Clear();
+    }
+
+    /// <summary>
+    /// Disposes the session. Uncommitted writes are rolled back; when there were any, a
+    /// warning is logged (event id 1001) and <c>papuma.session.uncommitted_disposals</c> is
+    /// counted — a forgotten <see cref="CommitAsync"/> must not vanish silently. Call
+    /// <see cref="DiscardAsync"/> first to roll back on purpose.
     /// </summary>
     public async ValueTask DisposeAsync()
     {
@@ -139,6 +182,7 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
         {
             await _transaction.DisposeAsync(); // implicit rollback
             _transaction = null;
+            ReportUncommittedDisposal();
         }
 
         if (_connection is not null)
@@ -660,7 +704,7 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
         cmd.Parameters.AddWithValue("occurredAt", DateTimeOffset.UtcNow.ToString("O"));
 
         await cmd.ExecuteNonQueryAsync(ct);
-        _hasWrites = true;
+        _pendingWrites.Add($"{metadata.Name}/{id}");
 
         KernelDiagnostics.Writes.Add(1,
             new KeyValuePair<string, object?>("papuma.operation", operation.ToString()),
@@ -733,7 +777,7 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
             await cmd.ExecuteNonQueryAsync(ct);
         }
 
-        _hasWrites = true;
+        _pendingWrites.Add($"{metadata.Name} (bulk)", records.Count);
 
         KernelDiagnostics.Writes.Add(records.Count,
             new KeyValuePair<string, object?>("papuma.operation", operation.ToString()),

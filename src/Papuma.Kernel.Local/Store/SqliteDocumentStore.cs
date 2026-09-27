@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
+using Microsoft.Extensions.Logging;
+
 using Papuma.Kernel.Model;
 using Papuma.Kernel.Tenancy;
 
@@ -14,6 +16,7 @@ namespace Papuma.Kernel.Store;
 public sealed class SqliteDocumentStore
 {
     private readonly Action? _notifyWaiters;
+    private readonly ILogger? _logger;
 
     /// <summary>Gets the SQLite connection string sessions open against.</summary>
     internal string ConnectionString { get; }
@@ -35,6 +38,20 @@ public sealed class SqliteDocumentStore
     /// store used without a feed processor (e.g. tests, or a document-only consumer).
     /// </param>
     public SqliteDocumentStore(string connectionString, KernelModel model, Action? notifyWaiters = null)
+        : this(connectionString, model, notifyWaiters, logger: null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SqliteDocumentStore"/> class with a
+    /// logger — sessions report a dispose with uncommitted writes through it.
+    /// </summary>
+    /// <param name="connectionString">The SQLite connection string (e.g. <c>Data Source=app.db</c>).</param>
+    /// <param name="model">The startup-built kernel model.</param>
+    /// <param name="notifyWaiters">Optional in-process wakeup hook (see the other constructor).</param>
+    /// <param name="logger">The logger sessions report through; <c>null</c> disables logging.</param>
+    public SqliteDocumentStore(
+        string connectionString, KernelModel model, Action? notifyWaiters, ILogger<SqliteDocumentStore>? logger)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentNullException.ThrowIfNull(model);
@@ -42,17 +59,18 @@ public sealed class SqliteDocumentStore
         ConnectionString = connectionString;
         Model = model;
         _notifyWaiters = notifyWaiters;
+        _logger = logger;
     }
 
     /// <summary>
-    /// Opens a unit-of-work session bound to the given scope. Dispose the session;
-    /// uncommitted writes roll back.
+    /// Opens a unit-of-work session bound to the given scope. Commit it, or dispose it to
+    /// roll back — a dispose with uncommitted writes is logged.
     /// </summary>
     /// <param name="scope">The scope context all session operations run under.</param>
     /// <param name="options">Optional session metadata (correlation/causation/actor).</param>
     public SqliteDocumentSession OpenSession(ScopeContext scope, SessionOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(scope);
-        return new SqliteDocumentSession(ConnectionString, Model, scope, options, _notifyWaiters);
+        return new SqliteDocumentSession(ConnectionString, Model, scope, options, _notifyWaiters, _logger);
     }
 }

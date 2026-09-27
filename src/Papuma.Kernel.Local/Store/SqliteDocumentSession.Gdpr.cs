@@ -92,7 +92,7 @@ public sealed partial class SqliteDocumentSession
                     await update.ExecuteNonQueryAsync(ct);
                 }
 
-                _hasWrites |= dirty.Count > 0;
+                _pendingWrites.Add("change history redaction", dirty.Count);
                 return dirty.Count;
             }, ct);
         }
@@ -186,7 +186,7 @@ public sealed partial class SqliteDocumentSession
                     await update.ExecuteNonQueryAsync(ct);
                 }
 
-                _hasWrites |= dirty.Count > 0;
+                _pendingWrites.Add("event history redaction", dirty.Count);
                 return dirty.Count;
             }, ct);
         }

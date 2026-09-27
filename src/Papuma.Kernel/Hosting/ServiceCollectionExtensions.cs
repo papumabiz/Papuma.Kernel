@@ -59,7 +59,8 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton(sp => new DocumentStore(
             sp.GetRequiredService<NpgsqlDataSource>(),
-            sp.GetRequiredService<KernelModel>()));
+            sp.GetRequiredService<KernelModel>(),
+            sp.GetService<ILogger<DocumentStore>>()));
 
         services.AddSingleton(sp => new ChangeFeedProcessor(
             sp.GetRequiredService<NpgsqlDataSource>(),

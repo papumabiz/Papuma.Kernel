@@ -45,6 +45,10 @@ internal static class KernelDiagnostics
         "papuma.session.conflicts", unit: "{conflict}",
         description: "Optimistic concurrency conflicts and unique key violations, tagged by kind.");
 
+    public static readonly Counter<long> UncommittedDisposals = Meter.CreateCounter<long>(
+        "papuma.session.uncommitted_disposals", unit: "{session}",
+        description: "Sessions disposed with uncommitted writes, which were rolled back (neither committed nor discarded).");
+
     // ── Feed engines ───────────────────────────────────────────────────────────
 
     public static readonly Counter<long> FeedProcessed = Meter.CreateCounter<long>(

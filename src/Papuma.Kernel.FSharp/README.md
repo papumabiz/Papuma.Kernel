@@ -107,16 +107,21 @@ rather than a shared interface.
 
 F#'s `use` binds `IDisposable`, not `IAsyncDisposable` — sessions implement the latter.
 `runSession` runs a function against an open session and disposes it afterwards,
-including on failure, without a hand-written `try`/`finally`:
+including on failure, without a hand-written `try`/`finally`.
+
+A session's writes are rolled back on dispose unless `CommitAsync` was called — and an
+`Ok` from `trySaveAsync` reads like "done" although nothing is committed yet. For a body
+that returns a `Result`, use **`runSessionCommitted`**: it commits on `Ok`, discards the
+writes on `Error` (`DiscardAsync`), and disposes either way:
 
 ```fsharp
 let! result =
-    runSession (store.OpenSession(scope)) (fun session ->
-        task {
-            let! outcome = trySaveAsync session order 0L
-            return outcome
-        })
+    runSessionCommitted (store.OpenSession(scope)) (fun session ->
+        trySaveAsync session order 0L)
 ```
+
+Plain `runSession` leaves committing to you; a dispose with uncommitted writes rolls
+back and logs a warning (event id 1001).
 
 ## What this package deliberately does not do
 

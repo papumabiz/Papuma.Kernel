@@ -40,6 +40,31 @@ module Session =
                 session.DisposeAsync().AsTask().GetAwaiter().GetResult()
         }
 
+    /// <summary>
+    /// Like <see cref="runSession"/>, for a body that returns a <c>Result</c>: commits the
+    /// session when it returns <c>Ok</c>, discards its writes when it returns <c>Error</c>,
+    /// and disposes it either way. <c>Ok</c> then really means "done" — the forgotten
+    /// <c>CommitAsync</c> after a successful <c>trySaveAsync</c> (feedback F-18) cannot
+    /// happen. An exception still disposes without commit, which rolls back and logs.
+    /// </summary>
+    let inline runSessionCommitted< ^Session, 'a, 'e
+        when ^Session :> IAsyncDisposable
+        and ^Session: (member CommitAsync: CancellationToken -> Task)
+        and ^Session: (member DiscardAsync: CancellationToken -> Task)>
+        (session: ^Session)
+        (f: ^Session -> Task<Result<'a, 'e>>)
+        : Task<Result<'a, 'e>> =
+        let commit () = (^Session: (member CommitAsync: CancellationToken -> Task) (session, CancellationToken.None))
+        let discard () = (^Session: (member DiscardAsync: CancellationToken -> Task) (session, CancellationToken.None))
+        runSession session (fun s ->
+            task {
+                let! result = f s
+                match result with
+                | Ok _ -> do! commit ()
+                | Error _ -> do! discard ()
+                return result
+            })
+
     /// <see cref="KernelError"/>-returning counterpart of <c>SaveAsync</c>.
     let inline trySaveAsync< ^Session, 'T
         when ^Session: (member SaveAsync: 'T * int64 * CancellationToken -> Task<SaveResult>)>

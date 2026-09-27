@@ -19,7 +19,8 @@ This document is the entry map. The truth lives in the reference chain:
    `RETURNING OLD/NEW`). On `Papuma.Kernel.Local` (SQLite) the same guarantee
    holds via a different mechanism — see "Differences" below.
 2. **The session is a unit of work.** All writes of a session commit atomically
-   (`CommitAsync`) or not at all (dispose without commit = rollback).
+   (`CommitAsync`) or not at all (dispose without commit = rollback, logged as a
+   warning; `DiscardAsync` = deliberate rollback, silent).
 3. **Reacting happens via feeds.** Change and event handlers consume in causal
    order (per document strictly by version; concurrent transactions unordered),
    checkpointed, at-least-once. Never treat `seq` as a watermark ("skip ≤ highest
@@ -229,7 +230,9 @@ its fields). For `LoadByKeyAsync` with a composite key, annotate the values as
   back on dispose, until `CommitAsync` is called. Easy to miss for what
   "looks" like a single, already-done write — see the comment in
   `samples/fsharp-local-todo/Program.fs`, where this was the one real bug
-  the sample shipped with before it was caught by actually running it.
+  the sample shipped with before it was caught by actually running it. Use
+  **`runSessionCommitted`** for a body that returns a `Result`: it commits on
+  `Ok` and discards on `Error`, so `Ok` really means done.
 - **Hard rule, no exception: no discriminated-union or `option` fields on
   document types.** The kernel's JSON serializer config is fixed on purpose
   (one deterministic wire format for every language/process reading the

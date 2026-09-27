@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+Upgrade notes — what a consumer of 2.0.x can notice:
+
+- **A session disposed with uncommitted writes now logs a warning** (event id 1001,
+  `UncommittedSessionDisposed`) and counts `papuma.session.uncommitted_disposals`. The
+  rollback itself is unchanged. Where a rollback is intended, call `DiscardAsync()` first;
+  a dispose on an exception path still logs — next to the exception.
+
+Changes:
+
+- **New: a forgotten `CommitAsync` is no longer silent** (feedback F-18). Both kernels'
+  sessions log and count a dispose with uncommitted writes, naming the correlation id,
+  the number of writes and the first of them. `DocumentSession.DiscardAsync()` /
+  `SqliteDocumentSession.DiscardAsync()` roll back on purpose and keep the session
+  usable. The stores take an optional `ILogger` (new constructor overloads;
+  `AddPapumaKernel` / `AddPapumaKernelLocal` pass it from DI). F#: `runSessionCommitted`
+  commits when the body returns `Ok` and discards on `Error`. A throwing strict mode was
+  left out on purpose: a dispose on an exception path would replace the original
+  exception.
+
 ## 2.0.0 (2026-09-27)
 
 A major version for one reason: the feed's ordering contract changes (causal order

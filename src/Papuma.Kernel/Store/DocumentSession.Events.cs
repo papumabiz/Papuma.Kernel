@@ -56,7 +56,7 @@ public sealed partial class DocumentSession
             AddJsonbParameter(cmd, "metadata", BuildChangeMetadata(null));
 
             var seq = (long)(await cmd.ExecuteScalarAsync(ct))!;
-            _hasWrites = true;
+            _pendingWrites.Add(metadata.Name);
 
             Diagnostics.KernelDiagnostics.EventsAppended.Add(1,
                 new KeyValuePair<string, object?>("papuma.event_type", metadata.Name));

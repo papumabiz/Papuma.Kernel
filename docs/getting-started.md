@@ -76,7 +76,7 @@ await using var session = store.OpenSession(ScopeContext.Tenant("acme"),
 // Registration: document + fact, one atomic commit, shared correlationId
 await session.SaveAsync(user, expectedVersion: 0);          // 0 = insert expected
 await session.AppendAsync(new UserLoggedIn(user.Id, "web"));
-await session.CommitAsync();                                 // without commit: rollback
+await session.CommitAsync();                                 // without commit: rollback, logged
 
 // Optimistic concurrency is mandatory on save (ADR-003):
 var loaded = await session.LoadAsync<User>(user.Id);

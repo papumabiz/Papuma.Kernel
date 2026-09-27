@@ -22,7 +22,9 @@ derived automatically. NOT event sourcing, NOT an ORM, NO query DSL.
 ### Rules (binding, from the package's ADRs)
 
 1. Write only through `DocumentSession` (unit of work): `store.OpenSession(scope)`
-   → writes → `CommitAsync()`. Without commit, everything is discarded.
+   → writes → `CommitAsync()`. Without commit, everything is rolled back on dispose
+   (logged as a warning, event 1001); roll back on purpose with `DiscardAsync()`.
+   F#: `runSessionCommitted` commits on `Ok`.
 2. `SaveAsync` ALWAYS with `expectedVersion` (`0` = insert). Handle
    `ConcurrencyException`: reload, re-decide — no blind retries.
 3. Single fields: `PatchAsync` (no load needed). Bounded counters:
@@ -88,7 +90,8 @@ derived automatically. NOT event sourcing, NOT an ORM, NO query DSL.
 
 1. Write only through `SqliteDocumentSession` (unit of work):
    `store.OpenSession(scope)` → writes → `CommitAsync()`. Without commit,
-   everything is discarded.
+   everything is rolled back on dispose (logged as a warning, event 1001); roll
+   back on purpose with `DiscardAsync()`. F#: `runSessionCommitted` commits on `Ok`.
 2. `SaveAsync` ALWAYS with `expectedVersion` (`0` = insert). Handle
    `ConcurrencyException`: reload, re-decide — no blind retries.
 3. Single fields: `PatchAsync` (no load needed). Bounded counters:

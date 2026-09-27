@@ -7,6 +7,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
+using Microsoft.Extensions.Logging;
+
 using Npgsql;
 using NpgsqlTypes;
 
@@ -31,7 +33,8 @@ namespace Papuma.Kernel.Store;
 /// <para>
 /// <b>Session = Unit of Work:</b> all operations share one transaction, opened lazily on
 /// first use. Nothing is visible to other sessions until <see cref="CommitAsync"/>;
-/// disposing without commit rolls everything back. Each write runs under a savepoint, so
+/// disposing without commit rolls everything back — with a logged warning when writes
+/// were pending; <see cref="DiscardAsync"/> drops them deliberately. Each write runs under a savepoint, so
 /// a failed write (concurrency conflict, unique violation, rejected validator) leaves
 /// the session usable and earlier writes intact. All change records of a session share
 /// the <see cref="CorrelationId"/>.
@@ -44,11 +47,12 @@ public sealed partial class DocumentSession : IAsyncDisposable
     private readonly NpgsqlDataSource _dataSource;
     private readonly KernelModel _model;
     private readonly SessionOptions _options;
+    private readonly ILogger? _logger;
+    private readonly PendingWrites _pendingWrites = new();
 
     private NpgsqlConnection? _connection;
     private NpgsqlTransaction? _transaction;
     private bool _disposed;
-    private bool _hasWrites;
 
     /// <summary>Gets the scope this session is bound to.</summary>
     public ScopeContext Scope { get; }
@@ -59,9 +63,11 @@ public sealed partial class DocumentSession : IAsyncDisposable
     /// <summary>Gets the actor id written to change/event records and the document (ADR-017).</summary>
     internal string ActorId { get; }
 
-    internal DocumentSession(NpgsqlDataSource dataSource, KernelModel model, ScopeContext scope, SessionOptions? options)
+    internal DocumentSession(
+        NpgsqlDataSource dataSource, KernelModel model, ScopeContext scope, SessionOptions? options, ILogger? logger)
     {
         _dataSource = dataSource;
+        _logger = logger;
         _model = model;
         Scope = scope;
         _options = options ?? new SessionOptions();
@@ -85,7 +91,7 @@ public sealed partial class DocumentSession : IAsyncDisposable
 
         var stopwatch = Stopwatch.StartNew();
 
-        if (_hasWrites)
+        if (_pendingWrites.Count > 0)
         {
             // Wakeup for feed processors; delivered atomically with the commit (ADR-010).
             await using var notifyCmd = _connection!.CreateCommand();
@@ -97,14 +103,38 @@ public sealed partial class DocumentSession : IAsyncDisposable
         await _transaction.CommitAsync(ct);
         await _transaction.DisposeAsync();
         _transaction = null;
-        _hasWrites = false;
+        _pendingWrites.Clear();
 
         KernelDiagnostics.SessionCommits.Add(1);
         KernelDiagnostics.CommitDuration.Record(stopwatch.Elapsed.TotalMilliseconds);
     }
 
     /// <summary>
-    /// Disposes the session. Uncommitted writes are rolled back.
+    /// Rolls back all writes performed since the session was opened (or since the last
+    /// commit), deliberately — unlike a dispose with pending writes, which logs a warning.
+    /// The session stays usable; the next operation starts a fresh transaction.
+    /// </summary>
+    /// <param name="ct">A cancellation token.</param>
+    public async Task DiscardAsync(CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (_transaction is null)
+        {
+            return; // nothing pending
+        }
+
+        await _transaction.RollbackAsync(ct);
+        await _transaction.DisposeAsync();
+        _transaction = null;
+        _pendingWrites.Clear();
+    }
+
+    /// <summary>
+    /// Disposes the session. Uncommitted writes are rolled back; when there were any, a
+    /// warning is logged (event id 1001) and <c>papuma.session.uncommitted_disposals</c> is
+    /// counted — a forgotten <see cref="CommitAsync"/> must not vanish silently. Call
+    /// <see cref="DiscardAsync"/> first to roll back on purpose.
     /// </summary>
     public async ValueTask DisposeAsync()
     {
@@ -119,6 +149,7 @@ public sealed partial class DocumentSession : IAsyncDisposable
         {
             await _transaction.DisposeAsync(); // implicit rollback
             _transaction = null;
+            ReportUncommittedDisposal();
         }
 
         if (_connection is not null)
@@ -126,6 +157,21 @@ public sealed partial class DocumentSession : IAsyncDisposable
             await _connection.DisposeAsync();
             _connection = null;
         }
+    }
+
+    private void ReportUncommittedDisposal()
+    {
+        if (_pendingWrites.Count == 0)
+        {
+            return;
+        }
+
+        KernelDiagnostics.UncommittedDisposals.Add(1);
+        _logger?.LogWarning(
+            new EventId(PendingWrites.UncommittedDisposalEventId, PendingWrites.UncommittedDisposalEventName),
+            PendingWrites.UncommittedDisposalMessage,
+            CorrelationId, _pendingWrites.Count, _pendingWrites.First);
+        _pendingWrites.Clear();
     }
 
     /// <summary>
@@ -605,7 +651,7 @@ public sealed partial class DocumentSession : IAsyncDisposable
         AddJsonbParameter(cmd, "metadata", BuildChangeMetadata(extraMetadata));
 
         await cmd.ExecuteNonQueryAsync(ct);
-        _hasWrites = true;
+        _pendingWrites.Add($"{metadata.Name}/{id}");
 
         KernelDiagnostics.Writes.Add(1,
             new KeyValuePair<string, object?>("papuma.operation", operation.ToString()),
@@ -666,7 +712,7 @@ public sealed partial class DocumentSession : IAsyncDisposable
         });
 
         await cmd.ExecuteNonQueryAsync(ct);
-        _hasWrites = true;
+        _pendingWrites.Add($"{metadata.Name}/{records[0].Id}", records.Count);
 
         KernelDiagnostics.Writes.Add(records.Count,
             new KeyValuePair<string, object?>("papuma.operation", operation.ToString()),

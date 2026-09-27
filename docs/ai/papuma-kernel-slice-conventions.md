@@ -246,13 +246,13 @@ module PlaceOrderDecider =
           CustomerEmail = cmd.CustomerEmail }
 
 // PlaceOrderHandler — INVARIANT: load → decide → write, one session, one
-// commit (don't skip CommitAsync — nothing a session writes is visible
-// anywhere else until it's called; see samples/fsharp-local-todo's README).
+// commit. runSessionCommitted commits when the body returns Ok and discards
+// the writes on Error — the forgotten CommitAsync cannot happen.
 // Patch takes F# lambdas (`box` where the parameter is obj), and trySaveAsync/
 // tryPatchAsync return Result instead of throwing — DocumentNotFoundException
 // becomes a match arm, not a try/catch.
 let handle (store: SqliteDocumentStore) (scope: ScopeContext) (cmd: PlaceOrder) : Task<Result<Order, KernelError>> =
-    runSession (store.OpenSession(scope)) (fun session ->
+    runSessionCommitted (store.OpenSession(scope)) (fun session ->
         task {
             let! product = session.LoadAsync<Product>(cmd.ProductId)
             let! stock = session.LoadAsync<Inventory>(cmd.ProductId)
@@ -273,16 +273,11 @@ let handle (store: SqliteDocumentStore) (scope: ScopeContext) (cmd: PlaceOrder) 
                 | Ok _ ->
                     let order = PlaceOrderDecider.decide product.Document stock.Document cmd
                     let! saveOutcome = trySaveAsync session order 0L
-
-                    match saveOutcome with
-                    | Ok _ -> do! session.CommitAsync()
-                    | Error _ -> ()
-
                     return saveOutcome |> Result.map (fun _ -> order)
         })
 ```
 
-`trySaveAsync`/`tryPatchAsync`/`runSession` are written against statically
+`trySaveAsync`/`tryPatchAsync`/`runSession`/`runSessionCommitted` are written against statically
 resolved type parameters (SRTP), so the same handler code compiles unchanged
 against `Papuma.Kernel`'s `DocumentStore`/`DocumentSession` (Postgres) — swap
 the type annotation, nothing else.

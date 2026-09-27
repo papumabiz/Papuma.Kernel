@@ -42,6 +42,7 @@ all metrics live.
 | `papuma.session.writes` | Counter | `papuma.operation`, `papuma.document_type` | Written ChangeRecords |
 | `papuma.session.events` | Counter | `papuma.event_type` | Appended events |
 | `papuma.session.conflicts` | Counter | `papuma.kind` (`concurrency` \| `unique_key`), `papuma.document_type` | Conflicts — high rates indicate hot documents (concepts §4) |
+| `papuma.session.uncommitted_disposals` | Counter | — | Sessions disposed with uncommitted writes, rolled back — usually a forgotten `CommitAsync`. Each one also logs a warning (event id 1001, `UncommittedSessionDisposed`, with correlation id and the first write) through the store's `ILogger`; `DiscardAsync` rolls back without either |
 
 **Dashboard recommendation**: lag per handler (gauge, alert on sustained growth),
 poison counter (alert at > 0), conflict rate per document type, p95 of handler
