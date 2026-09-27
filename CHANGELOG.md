@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 2.0.0 (2026-09-27)
+
+A major version for one reason: the feed's ordering contract changes (causal order
+instead of global `seq` order) and direct-SQL consumers must switch queries. The API
+is source-compatible; the schema migrates itself at startup. **Every PostgreSQL user
+of 1.x should upgrade** — the 1.x feeds can skip records.
 
 Upgrade notes — what a consumer of 1.4.x can notice:
 

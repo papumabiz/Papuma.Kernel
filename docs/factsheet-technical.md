@@ -1,6 +1,6 @@
 # Papuma Kernel — Technical Factsheet
 
-Version `1.4.0` · Target framework .NET 10 · MIT licensed
+Version `2.0.0` · Target framework .NET 10 · MIT licensed
 
 Two persistence kernels for .NET, sharing one document-sourced model:
 `Papuma.Kernel` (requires PostgreSQL ≥ 18, for servers) and
@@ -87,7 +87,7 @@ Commodity hardware (i7, local PostgreSQL 18 container). The probes are in
 | Feed delivery overhead per change | ~37 µs |
 | Projection handler, 1 SQL upsert per change | ~1,400 changes/s |
 | Diff of a 1,000-field document | ~0.3 ms |
-| Test suite against real PostgreSQL 18 (per CI build) | 213, passing |
+| Test suite against real PostgreSQL 18 (per CI build) | 224, passing |
 
 Known scaling limits are documented alongside the metric that detects each and
 the intended mitigation (`docs/concepts.md §14`) rather than left implicit.
@@ -133,7 +133,7 @@ the intended mitigation (`docs/concepts.md §14`) rather than left implicit.
 
 ## 6. Maturity (`Papuma.Kernel`)
 
-The design is complete: 13 implementation phases, 21 ADRs, each identified risk
+The design is complete: 13 implementation phases, 23 ADRs, each identified risk
 closed with a test or a measurement; the full suite runs against real
 PostgreSQL 18 on every CI build. It has **not yet run production traffic**.
 Suitable today for internal line-of-business systems and new products by teams

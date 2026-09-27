@@ -4,8 +4,8 @@
 
 | Version | Supported |
 |---|---|
-| 1.4.x | ✅ |
-| < 1.4 | ❌ — upgrade to the latest 1.4.x |
+| 2.0.x | ✅ |
+| < 2.0 | ❌ — upgrade to the latest 2.0.x (1.x feeds can skip records, see the 2.0.0 changelog) |
 
 Papuma Kernel has not yet carried production traffic (see
 [Maturity](README.md#maturity-stated-plainly)). Fixes land on the current minor
