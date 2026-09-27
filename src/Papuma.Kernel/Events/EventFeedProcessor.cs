@@ -322,7 +322,7 @@ public sealed class EventFeedProcessor : IDisposable
                 continue;
             }
 
-            if (item.NextRetryAt is { } retryAt && retryAt > DateTimeOffset.UtcNow)
+            if (item.RetryPending)
             {
                 break; // stop-the-line (ADR-009)
             }
@@ -386,7 +386,9 @@ public sealed class EventFeedProcessor : IDisposable
         return processed;
     }
 
-    private sealed record BatchItem(EventRecord Record, int Attempts, DateTimeOffset? NextRetryAt);
+    // RetryPending is decided by the database clock that also set next_retry_at — comparing it
+    // with the application's clock would shift every retry by the clock skew between hosts.
+    private sealed record BatchItem(EventRecord Record, int Attempts, bool RetryPending);
 
     private async Task<IReadOnlyList<BatchItem>> LoadBatchAsync(
         NpgsqlConnection conn, NpgsqlTransaction tx, string checkpointKey, long checkpoint, CancellationToken ct)
@@ -395,7 +397,8 @@ public sealed class EventFeedProcessor : IDisposable
         cmd.Transaction = tx;
         cmd.CommandText = """
             SELECT e.seq, e.scope, e.tenant_id, e.event_type, e.payload::text, e.actor_id,
-                   e.metadata::text, e.occurred_at, COALESCE(f.attempts, 0), f.next_retry_at
+                   e.metadata::text, e.occurred_at, COALESCE(f.attempts, 0),
+                   COALESCE(f.next_retry_at > now(), false) AS retry_pending
             FROM papuma.event e
             LEFT JOIN papuma.failure f
                    ON f.handler_name = @name AND f.seq = e.seq
@@ -429,7 +432,7 @@ public sealed class EventFeedProcessor : IDisposable
             batch.Add(new BatchItem(
                 record,
                 reader.GetInt32(8),
-                reader.IsDBNull(9) ? null : reader.GetFieldValue<DateTimeOffset>(9)));
+                reader.GetBoolean(9)));
         }
 
         return batch;

@@ -340,7 +340,7 @@ public sealed class ChangeFeedProcessor : IDisposable
                 continue;
             }
 
-            if (item.NextRetryAt is { } retryAt && retryAt > DateTimeOffset.UtcNow)
+            if (item.RetryPending)
             {
                 break; // stop-the-line: strict ordering, retry after backoff (ADR-009)
             }
@@ -395,7 +395,9 @@ public sealed class ChangeFeedProcessor : IDisposable
         return processed;
     }
 
-    private sealed record BatchItem(ChangeRecord Record, int Attempts, DateTimeOffset? NextRetryAt);
+    // RetryPending is decided by the database clock that also set next_retry_at — comparing it
+    // with the application's clock would shift every retry by the clock skew between hosts.
+    private sealed record BatchItem(ChangeRecord Record, int Attempts, bool RetryPending);
 
     private async Task<IReadOnlyList<BatchItem>> LoadBatchAsync(
         NpgsqlConnection conn, NpgsqlTransaction tx, string handlerName, long checkpoint, CancellationToken ct)
@@ -407,7 +409,8 @@ public sealed class ChangeFeedProcessor : IDisposable
         cmd.CommandText = """
             SELECT c.seq, c.scope, c.tenant_id, c.document_type, c.document_id, c.version,
                    c.schema_version, c.operation, c.diff::text, c.actor_id, c.metadata::text,
-                   c.occurred_at, COALESCE(f.attempts, 0), f.next_retry_at
+                   c.occurred_at, COALESCE(f.attempts, 0),
+                   COALESCE(f.next_retry_at > now(), false) AS retry_pending
             FROM papuma.change c
             LEFT JOIN papuma.failure f
                    ON f.handler_name = @name AND f.seq = c.seq
@@ -445,7 +448,7 @@ public sealed class ChangeFeedProcessor : IDisposable
             batch.Add(new BatchItem(
                 record,
                 reader.GetInt32(12),
-                reader.IsDBNull(13) ? null : reader.GetFieldValue<DateTimeOffset>(13)));
+                reader.GetBoolean(13)));
         }
 
         return batch;

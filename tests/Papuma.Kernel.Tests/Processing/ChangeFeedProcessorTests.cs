@@ -213,6 +213,9 @@ public sealed class ChangeFeedProcessorTests : IAsyncLifetime
         var processor = CreateProcessor(handler, new ChangeFeedProcessorOptions
         {
             MaxAttempts = 2,
+            // The whole shared-database backlog in one cycle, so each cycle is exactly one
+            // attempt — a fresh handler starts at seq 0 behind every other test's changes.
+            BatchSize = 100_000,
             BaseRetryDelay = TimeSpan.Zero, // immediate retries for the test
         });
 
