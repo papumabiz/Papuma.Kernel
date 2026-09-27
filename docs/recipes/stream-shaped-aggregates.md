@@ -145,7 +145,9 @@ The event log has no stream-id column. For an account statement, project the
 facts into an application table with an `IEventHandler` — see
 [read models in the same database](same-database-read-models.md) — keyed and
 indexed the way the UI queries it. Ad-hoc audits can filter
-`payload ->> 'accountId'` directly.
+`payload ->> 'accountId'` directly. A kernel-supported stream-id column is
+deferred with an explicit trigger (ADR-023, alternatives) — if your projection
+exists only to look facts up by aggregate id, that is worth a feedback entry.
 
 ## When this is not enough
 

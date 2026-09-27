@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted (2026-09-27) — confirms ADR-002 and the red line of ADR-013; the
-command-capture kernel feature is deferred against the trigger below
+Accepted (2026-09-27) — confirms ADR-002 and the red line of ADR-013; a
+kernel-level command log and a stream-id column on the event log are deferred
+against the triggers below
 
 ## Context
 
@@ -70,7 +71,7 @@ state."* An opt-in mode would cross it inside the same package.
 - No retroactive state: if `evolve` was wrong, correcting past states means a
   data migration on documents, not a replay. That is the ES capability given up.
 - The event log has no stream-id column; reading one aggregate's stream means a
-  payload predicate or an application projection.
+  payload predicate or an application projection (deferred, see below).
 
 ## Alternatives considered
 
@@ -88,6 +89,18 @@ state."* An opt-in mode would cross it inside the same package.
   **Trigger:** two consumer applications carrying the same hand-written
   command-log event type, or a feedback entry that shows the code it would
   replace.
+- **An optional stream-id column on `papuma.event`** (`AppendAsync(event,
+  streamId)`, indexed per scope/tenant/stream) — deferred, not rejected. It would
+  make "all facts of aggregate X" a kernel-supported, indexed read without a
+  projection. Against it for now: it is a schema change on a kernel table, it
+  touches the wire format (feed-wire-format.md) and `Papuma.Kernel.Local`, and
+  it invites treating the event log as a per-aggregate stream store — one step
+  from replay. The statement projection covers the need today and is usually the
+  shape the UI wants anyway.
+  **Trigger:** two consumer applications that build an event projection whose
+  only purpose is lookup by aggregate id (no reshaping, no aggregation), or a
+  measured payload-predicate query on `papuma.event` that exceeds its latency
+  budget and cannot be moved to a projection.
 
 ## Related
 
