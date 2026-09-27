@@ -69,6 +69,133 @@ public sealed class SqliteChangeFeedProcessorTests : IAsyncLifetime
     private SqliteChangeFeedProcessor CreateProcessor(IChangeHandler handler, ChangeFeedProcessorOptions? options = null) =>
         new(_fixture.ConnectionString, [handler], notifier: null, options);
 
+    /// <summary>Blocks inside HandleAsync until released — to act while a batch is in flight.</summary>
+    private sealed class GateHandler(string name) : IChangeHandler
+    {
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool Armed { get; set; } = true;
+
+        public string Name => name;
+
+        public async Task HandleAsync(ChangeRecord change, CancellationToken ct)
+        {
+            if (!Armed)
+            {
+                return;
+            }
+
+            Entered.TrySetResult();
+            await Release.Task.WaitAsync(ct);
+        }
+    }
+
+    [Fact]
+    public async Task HandlerCanWriteToTheSameDatabaseFile_ThroughItsOwnConnection()
+    {
+        await using (var session = _store.OpenSession(NewTenant()))
+        {
+            await session.SaveAsync(new FeedDoc(NewId(), "projected"), 0);
+            await session.CommitAsync();
+        }
+
+        var table = $"proj_{Guid.NewGuid():N}";
+        await using (var setup = new Microsoft.Data.Sqlite.SqliteConnection(_fixture.ConnectionString))
+        {
+            await setup.OpenAsync();
+            await using var ddl = setup.CreateCommand();
+            ddl.CommandText = $"CREATE TABLE {table} (seq INTEGER PRIMARY KEY)";
+            await ddl.ExecuteNonQueryAsync();
+        }
+
+        var handler = new ProjectingHandler(NewHandlerName(), _fixture.ConnectionString, table);
+        var processor = CreateProcessor(handler, new ChangeFeedProcessorOptions { MaxAttempts = 1 });
+
+        var delivered = await processor.ProcessOnceAsync();
+
+        Assert.True(delivered > 0);
+        Assert.Empty(await processor.GetFailuresAsync());
+    }
+
+    private sealed class ProjectingHandler(string name, string connectionString, string table) : IChangeHandler
+    {
+        public string Name => name;
+
+        public async Task HandleAsync(ChangeRecord change, CancellationToken ct)
+        {
+            await using var conn = new Microsoft.Data.Sqlite.SqliteConnection(connectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"INSERT OR IGNORE INTO {table} (seq) VALUES (@seq)";
+            cmd.Parameters.AddWithValue("seq", change.Seq);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+    }
+
+    [Fact]
+    public async Task SlowHandler_DoesNotBlockApplicationWrites()
+    {
+        await using (var session = _store.OpenSession(NewTenant()))
+        {
+            await session.SaveAsync(new FeedDoc(NewId(), "first"), 0);
+            await session.CommitAsync();
+        }
+
+        var handler = new GateHandler(NewHandlerName());
+        var processor = CreateProcessor(handler);
+        var cycle = processor.ProcessOnceAsync();
+        await handler.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // The handler is mid-batch. A write must not wait for it (busy timeout is 5 s).
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        await using (var session = _store.OpenSession(NewTenant()))
+        {
+            await session.SaveAsync(new FeedDoc(NewId(), "while handling"), 0);
+            await session.CommitAsync();
+        }
+
+        stopwatch.Stop();
+        handler.Release.SetResult();
+        await cycle;
+
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(2), $"Write took {stopwatch.Elapsed}.");
+    }
+
+    [Fact]
+    public async Task CheckpointResetDuringABatch_IsNotOverwritten()
+    {
+        var handler = new GateHandler(NewHandlerName()) { Armed = false };
+        var processor = CreateProcessor(handler, new ChangeFeedProcessorOptions { BatchSize = 10_000 });
+        await using (var session = _store.OpenSession(NewTenant()))
+        {
+            await session.SaveAsync(new FeedDoc(NewId(), "already seen"), 0);
+            await session.CommitAsync();
+        }
+
+        await processor.ProcessOnceAsync(); // checkpoint moves past everything so far
+        Assert.True(Assert.Single(await processor.GetLagAsync()).Checkpoint > 0);
+
+        await using (var session = _store.OpenSession(NewTenant()))
+        {
+            await session.SaveAsync(new FeedDoc(NewId(), "in flight"), 0);
+            await session.CommitAsync();
+        }
+
+        handler.Armed = true;
+        var cycle = processor.ProcessOnceAsync();
+        await handler.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        await processor.ResetCheckpointAsync(handler.Name); // an operator rebuild, mid-batch
+        handler.Release.SetResult();
+        var delivered = await cycle;
+
+        Assert.Equal(0, delivered); // outcome of the stale position dropped
+        var lag = Assert.Single(await processor.GetLagAsync());
+        Assert.Equal(0, lag.Checkpoint); // the reset stands; the next cycle replays
+    }
+
     [Fact]
     public async Task DeliversCommittedChanges_InSeqOrder()
     {

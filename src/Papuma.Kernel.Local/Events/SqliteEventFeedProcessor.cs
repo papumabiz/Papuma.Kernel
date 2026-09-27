@@ -103,6 +103,10 @@ public sealed class SqliteEventFeedProcessor : IDisposable
 
         _logger.LogInformation("Event feed processor started ({HandlerCount} handlers).", _handlers.Count);
 
+        // Own signal buffer, taken before the first cycle: a commit during any cycle wakes
+        // this processor right after it — the other feed processor gets its own signal.
+        using var subscription = _notifier?.Subscribe();
+
         while (!ct.IsCancellationRequested)
         {
             int processed;
@@ -125,9 +129,9 @@ public sealed class SqliteEventFeedProcessor : IDisposable
                 try
                 {
                     await GetLagAsync(ct);
-                    if (_notifier is not null)
+                    if (subscription is not null)
                     {
-                        await _notifier.WaitAsync(_options.PollInterval, ct);
+                        await subscription.WaitAsync(_options.PollInterval, ct);
                     }
                     else
                     {
@@ -292,33 +296,41 @@ public sealed class SqliteEventFeedProcessor : IDisposable
     {
         var key = CheckpointPrefix + handler.Name;
 
-        await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
-        await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
+        // Three short phases instead of one transaction around the handlers: a handler
+        // may write to the same database file through its own connection (a local
+        // projection), and a slow handler (mail, HTTP) must not hold the file's single
+        // write lock against the application. Guarantees are unchanged — at-least-once,
+        // strict order, stop-the-line — because the checkpoint still only moves after
+        // the handler returned.
 
+        // 1. Read: one consistent snapshot of checkpoint and batch.
         long checkpoint;
-        await using (var checkpointCmd = conn.CreateCommand())
+        IReadOnlyList<BatchItem> batch;
+        await using (var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct))
+        await using (var tx = conn.BeginTransaction(deferred: true))
         {
-            checkpointCmd.Transaction = tx;
-            checkpointCmd.CommandText = "SELECT last_seq FROM checkpoint WHERE handler_name = @name";
-            checkpointCmd.Parameters.AddWithValue("name", key);
-            checkpoint = await checkpointCmd.ExecuteScalarAsync(ct) is long seq ? seq : 0L;
+            checkpoint = await ReadCheckpointAsync(conn, tx, key, ct);
+            batch = await LoadBatchAsync(conn, tx, key, checkpoint, ct);
+            await tx.CommitAsync(ct);
         }
 
-        var batch = await LoadBatchAsync(conn, tx, key, checkpoint, ct);
         if (batch.Count == 0)
         {
-            await tx.CommitAsync(ct);
             return 0;
         }
 
+        // 2. Handle: no transaction is open.
         var processed = 0;
         var newCheckpoint = checkpoint;
+        var recovered = new List<long>();
+        (long Seq, Exception Error)? failed = null;
         foreach (var item in batch)
         {
             ct.ThrowIfCancellationRequested();
 
             if (item.Attempts >= _options.MaxAttempts)
             {
+                // Poison: skip, keep the failure entry as the permanent record.
                 _logger.LogError(
                     "Event handler {Handler} skips poison event seq {Seq} after {Attempts} attempts.",
                     handler.Name, item.Record.Seq, item.Attempts);
@@ -331,7 +343,7 @@ public sealed class SqliteEventFeedProcessor : IDisposable
 
             if (item.NextRetryAt is { } retryAt && retryAt > DateTimeOffset.UtcNow)
             {
-                break;
+                break; // stop-the-line: strict ordering, retry after backoff
             }
 
             using var activity = FeedDiagnostics.StartHandlerActivity(
@@ -351,11 +363,8 @@ public sealed class SqliteEventFeedProcessor : IDisposable
                 KernelDiagnostics.FeedFailures.Add(1,
                     new KeyValuePair<string, object?>("papuma.feed", FeedTag),
                     new KeyValuePair<string, object?>("papuma.handler", handler.Name));
-                var attempts = await RegisterFailureAsync(conn, tx, key, item.Record.Seq, ex, ct);
-                _logger.LogWarning(ex,
-                    "Event handler {Handler} failed on event seq {Seq} (attempt {Attempts}/{MaxAttempts}).",
-                    handler.Name, item.Record.Seq, attempts, _options.MaxAttempts);
-                break;
+                failed = (item.Record.Seq, ex);
+                break; // stop-the-line; checkpoint stays before the failed seq
             }
 
             KernelDiagnostics.HandlerDuration.Record(stopwatch.Elapsed.TotalMilliseconds,
@@ -367,26 +376,72 @@ public sealed class SqliteEventFeedProcessor : IDisposable
 
             if (item.Attempts > 0)
             {
-                await ClearFailureAsync(conn, tx, key, item.Record.Seq, ct);
+                recovered.Add(item.Record.Seq);
             }
 
             newCheckpoint = item.Record.Seq;
             processed++;
         }
 
-        if (newCheckpoint != checkpoint)
+        // 3. Record the outcome — only against the checkpoint it was computed from. If it
+        // moved meanwhile (a reset for a rebuild), the outcome belongs to a stale position:
+        // drop it, the next cycle reads from the new one.
+        await using (var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct))
+        await using (var tx = conn.BeginTransaction(deferred: false))
         {
-            await using var cmd = conn.CreateCommand();
-            cmd.Transaction = tx;
-            cmd.CommandText = "UPDATE checkpoint SET last_seq = @seq, updated_at = @now WHERE handler_name = @name";
-            cmd.Parameters.AddWithValue("name", key);
-            cmd.Parameters.AddWithValue("seq", newCheckpoint);
-            cmd.Parameters.AddWithValue("now", DateTimeOffset.UtcNow.ToString("O"));
-            await cmd.ExecuteNonQueryAsync(ct);
+            if (await ReadCheckpointAsync(conn, tx, key, ct) != checkpoint)
+            {
+                await tx.RollbackAsync(ct);
+                _logger.LogInformation(
+                    "Checkpoint of {Handler} moved while its batch was handled; outcome dropped, next cycle re-reads.",
+                    handler.Name);
+                return 0;
+            }
+
+            foreach (var seq in recovered)
+            {
+                await ClearFailureAsync(conn, tx, key, seq, ct);
+            }
+
+            if (failed is { } failure)
+            {
+                var attempts = await RegisterFailureAsync(conn, tx, key, failure.Seq, failure.Error, ct);
+                _logger.LogWarning(failure.Error,
+                    "Event handler {Handler} failed on event seq {Seq} (attempt {Attempts}/{MaxAttempts}).",
+                    handler.Name, failure.Seq, attempts, _options.MaxAttempts);
+            }
+
+            if (newCheckpoint != checkpoint)
+            {
+                await SaveCheckpointAsync(conn, tx, key, newCheckpoint, ct);
+            }
+
+            await tx.CommitAsync(ct);
         }
 
-        await tx.CommitAsync(ct);
         return processed;
+    }
+
+    private static async Task<long> ReadCheckpointAsync(
+        SqliteConnection conn, SqliteTransaction tx, string key, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SELECT last_seq FROM checkpoint WHERE handler_name = @name";
+        cmd.Parameters.AddWithValue("name", key);
+        return await cmd.ExecuteScalarAsync(ct) is long seq ? seq : 0L;
+    }
+
+    private static async Task SaveCheckpointAsync(
+        SqliteConnection conn, SqliteTransaction tx, string handlerName, long seq, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "UPDATE checkpoint SET last_seq = @seq, updated_at = @now WHERE handler_name = @name";
+        cmd.Parameters.AddWithValue("name", handlerName);
+        cmd.Parameters.AddWithValue("seq", seq);
+        cmd.Parameters.AddWithValue("now", DateTimeOffset.UtcNow.ToString("O"));
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     private sealed record BatchItem(EventRecord Record, int Attempts, DateTimeOffset? NextRetryAt);
