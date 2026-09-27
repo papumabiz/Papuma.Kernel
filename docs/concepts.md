@@ -923,7 +923,7 @@ checkpoint row, read the next slice, advance the cursor, wait on NOTIFY. There
 are two consumption paths, with a clear decision rule.
 
 **Path A: direct SQL from the foreign language.** A Python/Go/Node consumer
-replicates the poll loop in ~100 lines and may even keep its position in the
+replicates the poll loop in ~150 lines and may even keep its position in the
 same `papuma.checkpoint` table (`handler_name` is just text — pick a unique
 one). Runnable Python and Go clients live in
 [samples/polyglot-consumers](https://github.com/papumabiz/Papuma.Kernel/blob/master/samples/polyglot-consumers/README.md),
@@ -1224,9 +1224,9 @@ Why each "no" holds:
 
 - **Polyglot client libs (§21).** The database *is* the API. A per-language
   library would be a second API surface to maintain across Python, Go, Node —
-  for code that is ~80 lines of poll loop, slice query and snapshot cursor.
+  for code that is ~150 lines of poll loop, slice queries and snapshot cursor.
   There is almost nothing to encapsulate, and the small friction of "write the
-  hundred lines or use a bus" is what steers consumers to the right architecture
+  ~150 lines or use a bus" is what steers consumers to the right architecture
   instead of turning the database into a shared integration database.
 - **A bus integration package (§22).** A bus bridge *is* an `IChangeHandler` —
   and handlers are application code by ADR-009, not a framework feature. Shipping

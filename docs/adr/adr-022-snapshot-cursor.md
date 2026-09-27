@@ -67,21 +67,27 @@ migration are the same state with a different `base_seq` — no special cases.
 Inside the processor's transaction, after the leader lock
 (`FOR UPDATE SKIP LOCKED` on the checkpoint row, unchanged from ADR-010):
 
-1. If `slice_snapshot` is `NULL`, take `pg_current_snapshot()` as the new slice and set
-   `slice_seq = 0`. (READ COMMITTED: every later statement sees at least what this
-   snapshot shows as committed.)
-2. Read the next batch of the slice:
+1. If `slice_snapshot` is `NULL`, take `pg_current_snapshot()` as the new slice.
+   (READ COMMITTED: every later statement sees at least what this snapshot shows as
+   committed.) With a `done_snapshot`, find the slice's lowest `seq` once through the
+   `txid` index and set `slice_seq` just below it; no row means nothing has committed
+   since — the cycle ends without taking the slice.
+2. Read the next batch of the slice — a forward PK range scan:
 
    ```sql
    SELECT … FROM papuma.change
-   WHERE pg_visible_in_snapshot(txid, @slice)
-     AND NOT <delivered by done_snapshot / base_seq>
-     AND seq > @slice_seq
-     -- index range: txid >= pg_snapshot_xmin(@done) (or seq > @base_seq while done is NULL)
-     --              and txid <  pg_snapshot_xmax(@slice)
+   WHERE seq > @slice_seq                      -- (greatest(@base_seq, @slice_seq) while done is NULL)
+     AND pg_visible_in_snapshot(txid, @slice)
+     AND NOT pg_visible_in_snapshot(txid, @done)  -- (omitted while done is NULL)
    ORDER BY seq
    LIMIT @batchSize;
    ```
+
+   Reading batches through the `txid` index instead would re-read and re-sort the
+   whole slice for every batch — quadratic in the slice size, which after an outage or
+   a large import is unbounded. Paging the PK reads each row once; the one-off cost is
+   a slice that contains an old transaction: its first batches walk forward over the
+   rows committed since that transaction's first write, once.
 
 3. Deliver in `seq` order with the existing retry, backoff, poison and stop-the-line
    rules; `slice_seq` follows the last processed row.
@@ -109,8 +115,15 @@ order the database itself defines, and unlike `seq` order it respects causality.
 ### 5. Lag is counted, not subtracted
 
 `head − checkpoint` has no meaning any more. Lag becomes the number of **committed,
-undelivered** rows (same predicate, counted), served from the same index. It is exact,
-and it is what the health check's threshold always meant.
+undelivered** rows, counted. It is exact, and it is what the health check's threshold
+always meant.
+
+"Not visible in `done`" is evaluated as two disjoint `txid` index conditions — `txid >=
+pg_snapshot_xmax(done)` plus `txid = ANY(pg_snapshot_xip(done))` — both for the lag and
+for the slice's lowest `seq`. The equivalent `txid >= pg_snapshot_xmin(done) AND NOT
+visible` would scan every row since the oldest transaction open when `done` was taken;
+an idle-in-transaction session would turn each health check into a table scan. Checked
+with `EXPLAIN ANALYZE` on 2 million rows, custom and generic plans alike.
 
 ### 6. Indexes
 

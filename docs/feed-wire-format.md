@@ -109,9 +109,23 @@ time, so a foreign-language consumer cannot reach them.
    FROM papuma.checkpoint WHERE handler_name = :name FOR UPDATE;
 
    -- b. No slice in progress: take one. Never build a snapshot client-side.
+   --    While done_snapshot is NULL:
    SELECT pg_current_snapshot()::text;                -- :slice, and :slice_seq = 0
+   --    Otherwise also find the slice's lowest seq, once, through the txid index
+   --    (MATERIALIZED keeps min() from becoming a PK scan over the whole table):
+   WITH s AS MATERIALIZED (SELECT pg_current_snapshot() AS slice),
+        r AS MATERIALIZED (
+            SELECT c.seq FROM papuma.change c, s
+            WHERE c.txid >= pg_snapshot_xmax(:done::pg_snapshot)
+              AND pg_visible_in_snapshot(c.txid, s.slice)
+            UNION ALL
+            SELECT c.seq FROM papuma.change c, s
+            WHERE c.txid = ANY (ARRAY(SELECT pg_snapshot_xip(:done::pg_snapshot)))
+              AND pg_visible_in_snapshot(c.txid, s.slice))
+   SELECT (SELECT slice::text FROM s), (SELECT min(seq) FROM r);
+   --    -> :slice, and :slice_seq = min - 1. min NULL = nothing new: end the cycle.
 
-   -- c. The next batch of the slice. While done_snapshot is NULL:
+   -- c. The next batch of the slice — a forward PK range scan. While done_snapshot is NULL:
    SELECT seq, document_type, document_id, version, operation, diff, metadata
    FROM papuma.change
    WHERE seq > greatest(:base_seq, :slice_seq)
@@ -119,14 +133,12 @@ time, so a foreign-language consumer cannot reach them.
    ORDER BY seq
    LIMIT :batch;
 
-   --    Otherwise (the txid bounds make it an index range scan):
+   --    Otherwise:
    SELECT seq, document_type, document_id, version, operation, diff, metadata
    FROM papuma.change
-   WHERE txid >= pg_snapshot_xmin(:done::pg_snapshot)
-     AND txid <  pg_snapshot_xmax(:slice::pg_snapshot)
+   WHERE seq > :slice_seq
      AND pg_visible_in_snapshot(txid, :slice::pg_snapshot)
      AND NOT pg_visible_in_snapshot(txid, :done::pg_snapshot)
-     AND seq > :slice_seq
    ORDER BY seq
    LIMIT :batch;
 
@@ -144,7 +156,9 @@ time, so a foreign-language consumer cannot reach them.
    ```
 
    The set of rows in a slice is fixed when it is taken (all its transactions have
-   committed), so paginating it by `seq` neither skips nor repeats. **Ordering you
+   committed), so paginating it by `seq` neither skips nor repeats. Do not add `txid`
+   bounds to the batch query: the planner would read the batch through the `txid`
+   index, which re-reads and re-sorts the whole slice for every batch. **Ordering you
    get:** commit order across transactions, `seq` order within a slice, strictly
    by `version` per document. A lower `seq` can arrive after a higher one — never
    use `seq` as a "skip everything below" watermark.

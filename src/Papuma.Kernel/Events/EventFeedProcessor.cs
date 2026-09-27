@@ -252,11 +252,7 @@ public sealed class EventFeedProcessor : IDisposable
         foreach (var handler in _handlers)
         {
             var cursor = await SnapshotCursor.ReadOrInitialAsync(conn, tx, CheckpointPrefix + handler.Name, ct);
-            await using var lagCmd = conn.CreateCommand();
-            lagCmd.Transaction = tx;
-            var undelivered = cursor.UndeliveredPredicate(lagCmd, "e");
-            lagCmd.CommandText = $"SELECT count(*) FROM papuma.event e WHERE {undelivered}";
-            var lag = (long)(await lagCmd.ExecuteScalarAsync(ct))!;
+            var lag = await cursor.CountUndeliveredAsync(conn, tx, "papuma.event", ct);
 
             snapshots.Add(new ChangeFeedLagSnapshot(handler.Name, cursor.LastSeq, latestSeq, lag));
             _lagByHandler[handler.Name] = lag; // feeds the observable gauge
@@ -280,15 +276,15 @@ public sealed class EventFeedProcessor : IDisposable
             return 0; // locked by another instance (or not yet registered)
         }
 
-        var cursor = await locked.WithSliceAsync(conn, tx, ct);
-        var batch = await LoadBatchAsync(conn, tx, key, cursor, ct);
+        var cursor = await locked.WithSliceAsync(conn, tx, "papuma.event", ct);
+        var batch = cursor.SliceSnapshot is null ? [] : await LoadBatchAsync(conn, tx, key, cursor, ct);
         if (batch.Count == 0 && locked.SliceSnapshot is not null)
         {
             // The slice in progress has run dry, so it is complete — go straight on with a
             // fresh one: a drained slice must not make the cycle look idle while newer
             // commits wait.
-            cursor = await cursor.After(cursor.SliceSeq, 0, sliceCompleted: true).WithSliceAsync(conn, tx, ct);
-            batch = await LoadBatchAsync(conn, tx, key, cursor, ct);
+            cursor = await cursor.After(cursor.SliceSeq, 0, sliceCompleted: true).WithSliceAsync(conn, tx, "papuma.event", ct);
+            batch = cursor.SliceSnapshot is null ? [] : await LoadBatchAsync(conn, tx, key, cursor, ct);
         }
 
         if (batch.Count == 0)

@@ -1,7 +1,7 @@
 """A polyglot change-feed consumer in Python (concepts §21, ADR-022).
 
 The feed is two ordinary Postgres tables with a documented wire format — any
-language can consume it. This client is the whole pattern in ~100 lines: the
+language can consume it. This client is the whole pattern in ~140 lines: the
 snapshot cursor, at-least-once with a persisted position, RLS scope.
 
     PAPUMA_CONN=postgresql://postgres:postgres@localhost:5432/papuma_sample \\
@@ -25,9 +25,24 @@ _OPS = {1: "Insert", 2: "Update", 3: "Delete"}
 
 _COLUMNS = "seq, document_type, document_id, version, operation, diff"
 
-# The next rows of the slice (feed-wire-format.md §4): transactions visible in the
-# slice snapshot but not in the done one, in seq order. Before the first completed
-# slice, "done" is a seq floor instead.
+# A new slice and its lowest seq, found once through the txid index (feed-wire-format.md
+# §4): "not visible in done" = at or beyond its xmax, or in progress when it was taken.
+_NEW_SLICE = """
+    WITH s AS MATERIALIZED (SELECT pg_current_snapshot() AS slice),
+         r AS MATERIALIZED (
+             SELECT c.seq FROM papuma.change c, s
+             WHERE c.txid >= pg_snapshot_xmax(%(done)s::text::pg_snapshot)
+               AND pg_visible_in_snapshot(c.txid, s.slice)
+             UNION ALL
+             SELECT c.seq FROM papuma.change c, s
+             WHERE c.txid = ANY (ARRAY(SELECT pg_snapshot_xip(%(done)s::text::pg_snapshot)))
+               AND pg_visible_in_snapshot(c.txid, s.slice))
+    SELECT (SELECT slice::text FROM s), (SELECT min(seq) FROM r)
+"""
+
+# The next rows of the slice: transactions visible in the slice snapshot but not in the
+# done one, in seq order — a forward PK range scan. Before the first completed slice,
+# "done" is a seq floor instead.
 _FIRST_SLICE = f"""
     SELECT {_COLUMNS} FROM papuma.change
     WHERE seq > %(floor)s
@@ -36,11 +51,9 @@ _FIRST_SLICE = f"""
 """
 _NEXT_SLICE = f"""
     SELECT {_COLUMNS} FROM papuma.change
-    WHERE txid >= pg_snapshot_xmin(%(done)s::text::pg_snapshot)
-      AND txid < pg_snapshot_xmax(%(slice)s::text::pg_snapshot)
+    WHERE seq > %(floor)s
       AND pg_visible_in_snapshot(txid, %(slice)s::text::pg_snapshot)
       AND NOT pg_visible_in_snapshot(txid, %(done)s::text::pg_snapshot)
-      AND seq > %(floor)s
     ORDER BY seq LIMIT %(batch)s
 """
 
@@ -73,9 +86,14 @@ def drain(conn: psycopg.Connection) -> bool:
         # No slice in progress: the transactions committed by now form the next one.
         # A seq checkpoint cannot work here — it would need the seqs of transactions
         # that are still open (concepts §2).
-        if slice_ is None:
+        if slice_ is None and done is None:
             slice_ = cur.execute("SELECT pg_current_snapshot()::text").fetchone()[0]
             slice_seq = 0
+        elif slice_ is None:
+            slice_, lowest = cur.execute(_NEW_SLICE, {"done": done}).fetchone()
+            if lowest is None:
+                return False  # nothing committed since the done snapshot
+            slice_seq = lowest - 1
 
         params = {"done": done, "slice": slice_, "batch": BATCH,
                   "floor": max(base_seq, slice_seq) if done is None else slice_seq}

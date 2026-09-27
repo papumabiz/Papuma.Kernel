@@ -1,7 +1,7 @@
 // A polyglot change-feed consumer in Go (concepts §21, ADR-022).
 //
 // The feed is two ordinary Postgres tables with a documented wire format — any
-// language can consume it. This client is the whole pattern in ~120 lines: the
+// language can consume it. This client is the whole pattern in ~200 lines: the
 // snapshot cursor, at-least-once with a persisted position, RLS scope.
 //
 //	PAPUMA_CONN=postgres://postgres:postgres@localhost:5432/papuma_sample go run .
@@ -25,20 +25,32 @@ const (
 
 const columns = "seq, document_type, document_id, version, operation, diff"
 
-// The next rows of the slice (feed-wire-format.md §4): transactions visible in the
-// slice snapshot but not in the done one, in seq order. Before the first completed
-// slice, "done" is a seq floor instead.
+// A new slice and its lowest seq, found once through the txid index (feed-wire-format.md
+// §4): "not visible in done" = at or beyond its xmax, or in progress when it was taken.
+const newSlice = `
+	WITH s AS MATERIALIZED (SELECT pg_current_snapshot() AS slice),
+	     r AS MATERIALIZED (
+	         SELECT c.seq FROM papuma.change c, s
+	         WHERE c.txid >= pg_snapshot_xmax($1::text::pg_snapshot)
+	           AND pg_visible_in_snapshot(c.txid, s.slice)
+	         UNION ALL
+	         SELECT c.seq FROM papuma.change c, s
+	         WHERE c.txid = ANY (ARRAY(SELECT pg_snapshot_xip($1::text::pg_snapshot)))
+	           AND pg_visible_in_snapshot(c.txid, s.slice))
+	SELECT (SELECT slice::text FROM s), (SELECT min(seq) FROM r)`
+
+// The next rows of the slice: transactions visible in the slice snapshot but not in the
+// done one, in seq order — a forward PK range scan. Before the first completed slice,
+// "done" is a seq floor instead.
 const (
 	firstSlice = `SELECT ` + columns + ` FROM papuma.change
 		WHERE seq > $1
 		  AND pg_visible_in_snapshot(txid, $2::text::pg_snapshot)
 		ORDER BY seq LIMIT $3`
 	nextSlice = `SELECT ` + columns + ` FROM papuma.change
-		WHERE txid >= pg_snapshot_xmin($4::text::pg_snapshot)
-		  AND txid < pg_snapshot_xmax($2::text::pg_snapshot)
+		WHERE seq > $1
 		  AND pg_visible_in_snapshot(txid, $2::text::pg_snapshot)
 		  AND NOT pg_visible_in_snapshot(txid, $4::text::pg_snapshot)
-		  AND seq > $1
 		ORDER BY seq LIMIT $3`
 )
 
@@ -114,12 +126,22 @@ func drain(ctx context.Context, conn *pgx.Conn) (bool, error) {
 	// No slice in progress: the transactions committed by now form the next one.
 	// A seq checkpoint cannot work here — it would need the seqs of transactions
 	// that are still open (concepts §2).
-	if slice == nil {
+	if slice == nil && done == nil {
 		var current string
 		if err := tx.QueryRow(ctx, "SELECT pg_current_snapshot()::text").Scan(&current); err != nil {
 			return false, err
 		}
 		slice, sliceSeq = &current, 0
+	} else if slice == nil {
+		var current string
+		var lowest *int64
+		if err := tx.QueryRow(ctx, newSlice, *done).Scan(&current, &lowest); err != nil {
+			return false, err
+		}
+		if lowest == nil {
+			return false, tx.Commit(ctx) // nothing committed since the done snapshot
+		}
+		slice, sliceSeq = &current, *lowest-1
 	}
 
 	query, floor := nextSlice, sliceSeq
