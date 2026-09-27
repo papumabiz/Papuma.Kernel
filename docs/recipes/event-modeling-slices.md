@@ -177,7 +177,9 @@ projection of an append-only event stream and nothing else — then you are in t
 heart of real event sourcing, and a dedicated ES store (Marten, EventStoreDB) is
 more faithful to the model. Papuma deliberately is not that (ADR-002/013: the
 event log is never a replay source for state). Modeling with Event Modeling still
-applies; only the storage choice flips.
+applies; only the storage choice flips. For the middle ground — a stream-shaped
+aggregate like a ledger whose facts matter but need not be the truth — see
+[stream-shaped aggregates](stream-shaped-aggregates.md) (ADR-023).
 
 Rule of thumb: **Event Modeling as a method — always. Document-sourced slices —
 the simpler, better path for almost all business apps. Event-as-truth domains —

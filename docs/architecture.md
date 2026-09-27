@@ -411,7 +411,9 @@ non-superuser role via `Papuma.Kernel.Testing` (ADR-021), so they exercise it.
 ## 11. Deliberately NOT part of Papuma Kernel
 
 - **Provider abstraction / other databases** — Postgres-only, see ADR-001.
-- **Event sourcing / an event store** — changes are derived, not the truth.
+- **Event sourcing / an event store** — changes are derived, not the truth; also
+  not as an opt-in mode (ADR-023). Stream-shaped aggregates:
+  [recipe](recipes/stream-shaped-aggregates.md).
 - **Read-model generation, query DSL, LINQ provider** — projections write their
   own SQL.
 - **Cross-document transactions beyond the session** — within one session,
@@ -453,6 +455,7 @@ non-superuser role via `Papuma.Kernel.Testing` (ADR-021), so they exercise it.
 | [019](adr/adr-019-scope-predicates-for-application-tables.md) | Scope predicates for application tables (papuma.scope_visible / scope_writable as the RLS contract) | Accepted |
 | [020](adr/adr-020-composite-keys.md) | Composite keys (uniqueness and lookup over several fields, one multi-expression index) | Accepted |
 | [021](adr/adr-021-testing-package.md) | A narrow, test-framework-agnostic testing package; broader one deferred against objective triggers | Accepted |
+| [023](adr/adr-023-no-event-sourcing-mode.md) | No event-sourcing mode; stream-shaped aggregates as an application pattern | Accepted |
 
 ## 13. Recipes (tutorial precursors)
 
@@ -484,6 +487,10 @@ Application patterns on top of the ADRs, as drafts for later tutorials:
   — building applications the Dymitruk/Dilger way (command/view/automation/
     translation slices) on a document-sourced kernel; where it's even better and
     where real Event Sourcing is the truer fit.
+- [Stream-shaped aggregates](recipes/stream-shaped-aggregates.md)
+  — ledgers without event sourcing: document as state, postings as event-log
+  facts in the same commit (save before append), reconciled, never replayed
+  (ADR-023).
 - [Causation tracking](recipes/causation-tracking.md)
   — automatic enrichment of actor, causation type and causation id in ASP.NET
   Core (enricher pattern) and manual setup for CLI applications (ADR-017/018).

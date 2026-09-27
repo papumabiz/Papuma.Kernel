@@ -1484,6 +1484,35 @@ is a condition someone can check, not a mood.
 
 ---
 
+## 33. Why there is no event-sourcing mode — and what ledgers get instead
+
+→ [ADR-023](adr/adr-023-no-event-sourcing-mode.md), [recipe](recipes/stream-shaped-aggregates.md)
+
+"Offer event sourcing as an option" sounds like an additive feature. It is a
+fork. Nearly every mechanism rests on the document being the truth: erasure is
+an `UPDATE`, the feed is a diff from `RETURNING OLD, NEW`, schema evolution is
+additive because nothing is ever replayed, policies act on one current state.
+An opt-in mode would need a second answer for each of these, and every guarantee
+would grow an "except in ES mode" footnote. That is two products in one package.
+
+What the question usually wants is narrower: some aggregates *are* streams — an
+account and its postings — and the diff `100 → 70` loses the booking text. The
+answer keeps the Decider but moves the fold. `decide` produces a fact, `evolve`
+applies it to the document, and both are written in one session: **save first,
+append second**. The order is not style. Each write runs under a savepoint, so a
+failed save does not undo an earlier append — saving first makes the optimistic
+check the gate before any fact exists.
+
+The one thing given up is retroactive state: the facts are *reconciled* against
+the document, never used to rebuild it. A mismatch is a bug to fix with a
+documented update, not a replay. Domains where state must be a projection of an
+append-only stream — by regulation or by design — belong on a dedicated event
+store for that bounded context, integrated through the feeds. Papuma stays the
+kernel that gives you the benefits of event sourcing without its mandate, and
+says plainly where that ends.
+
+---
+
 *Maintenance note: add new explainers from later phases here — this document is
 the collection point for the "why behind the how" and raw material for the
 tutorials (phase 9).*
