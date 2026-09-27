@@ -27,3 +27,4 @@ describe the PostgreSQL kernel unless they say otherwise; `Papuma.Kernel.Local`
 | [analyses/](analyses/) | explorations that are not decisions — ideas, trade-offs, open questions |
 | [factsheet.md](factsheet.md) · [factsheet-technical.md](factsheet-technical.md) | one-pagers |
 | [legacy/](https://github.com/papumabiz/Papuma.Kernel/tree/master/docs/legacy) | frozen 0.x/v1 material, mostly German, unmaintained |
+| [feedback/](https://github.com/papumabiz/Papuma.Kernel/tree/master/docs/feedback) | feedback from applications built on the kernel (friction, gaps, what works) — repository only, not shipped |
