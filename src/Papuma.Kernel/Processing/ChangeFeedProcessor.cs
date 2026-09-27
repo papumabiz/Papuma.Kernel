@@ -18,15 +18,17 @@ using Papuma.Kernel.Tenancy;
 namespace Papuma.Kernel.Processing;
 
 /// <summary>
-/// The change feed engine (ADR-009/010): delivers committed changes to registered
-/// handlers in strict <c>seq</c> order with persisted checkpoints, retry with
-/// exponential backoff, poison skipping, and rebuild support.
+/// The change feed engine (ADR-009/010/022): delivers committed changes to registered
+/// handlers in commit order with persisted checkpoints, retry with exponential backoff,
+/// poison skipping, and rebuild support.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Gapless reads (ADR-010):</b> only changes whose transaction lies before
-/// <c>pg_snapshot_xmin(pg_current_snapshot())</c> count as stable-visible — a change
-/// committed late by a long-running transaction can never be skipped.
+/// <b>Snapshot cursor (ADR-022):</b> a handler's position is a transaction snapshot.
+/// Each cycle delivers the transactions committed since it, whole and in <c>seq</c>
+/// order within one slice — a change committed late can never land behind the cursor,
+/// and an open transaction holds back only its own changes. Per document, delivery is
+/// strictly by version.
 /// </para>
 /// <para>
 /// <b>Leader coordination:</b> the per-handler checkpoint row is taken with
@@ -34,7 +36,7 @@ namespace Papuma.Kernel.Processing;
 /// another instance is currently working on — no distributed consensus (ADR-010).
 /// </para>
 /// <para>
-/// <b>Delivery:</b> at-least-once, stop-on-failure per handler (strict ordering); after
+/// <b>Delivery:</b> at-least-once, stop-on-failure per handler (ordering kept); after
 /// <see cref="ChangeFeedProcessorOptions.MaxAttempts"/> a change is skipped as poison
 /// and stays recorded in <c>papuma.failure</c>.
 /// </para>
@@ -206,11 +208,7 @@ public sealed class ChangeFeedProcessor : IDisposable
         await using (var checkpointCmd = conn.CreateCommand())
         {
             checkpointCmd.Transaction = tx;
-            checkpointCmd.CommandText = """
-                INSERT INTO papuma.checkpoint (handler_name, last_seq, updated_at)
-                VALUES (@name, 0, now())
-                ON CONFLICT (handler_name) DO UPDATE SET last_seq = 0, updated_at = now()
-                """;
+            checkpointCmd.CommandText = SnapshotCursor.ResetSql;
             checkpointCmd.Parameters.AddWithValue("name", handlerName);
             await checkpointCmd.ExecuteNonQueryAsync(ct);
         }
@@ -243,25 +241,23 @@ public sealed class ChangeFeedProcessor : IDisposable
         await using (var headCmd = conn.CreateCommand())
         {
             headCmd.Transaction = tx;
-            headCmd.CommandText = """
-                SELECT COALESCE(MAX(seq), 0)
-                FROM papuma.change
-                WHERE txid < pg_snapshot_xmin(pg_current_snapshot())
-                """;
+            headCmd.CommandText = "SELECT COALESCE(MAX(seq), 0) FROM papuma.change";
             latestSeq = (long)(await headCmd.ExecuteScalarAsync(ct))!;
         }
 
+        // Lag = committed rows not yet delivered (ADR-022), counted — a seq difference has
+        // no meaning once delivery follows commit order.
         var snapshots = new List<ChangeFeedLagSnapshot>(_handlers.Count);
         foreach (var handler in _handlers)
         {
-            await using var checkpointCmd = conn.CreateCommand();
-            checkpointCmd.Transaction = tx;
-            checkpointCmd.CommandText = "SELECT last_seq FROM papuma.checkpoint WHERE handler_name = @name";
-            checkpointCmd.Parameters.AddWithValue("name", handler.Name);
-            var checkpoint = await checkpointCmd.ExecuteScalarAsync(ct) is long seq ? seq : 0L;
+            var cursor = await SnapshotCursor.ReadOrInitialAsync(conn, tx, handler.Name, ct);
+            await using var lagCmd = conn.CreateCommand();
+            lagCmd.Transaction = tx;
+            var undelivered = cursor.UndeliveredPredicate(lagCmd, "c");
+            lagCmd.CommandText = $"SELECT count(*) FROM papuma.change c WHERE {undelivered}";
+            var lag = (long)(await lagCmd.ExecuteScalarAsync(ct))!;
 
-            var lag = latestSeq > checkpoint ? latestSeq - checkpoint : 0L;
-            snapshots.Add(new ChangeFeedLagSnapshot(handler.Name, checkpoint, latestSeq, lag));
+            snapshots.Add(new ChangeFeedLagSnapshot(handler.Name, cursor.LastSeq, latestSeq, lag));
             _lagByHandler[handler.Name] = lag; // feeds the observable gauge
         }
 
@@ -296,33 +292,41 @@ public sealed class ChangeFeedProcessor : IDisposable
         await conn.SetAllScopesAsync(tx, ct);
 
         // Leader coordination: skip the handler when another processor holds its checkpoint.
-        long? checkpoint;
-        await using (var lockCmd = conn.CreateCommand())
-        {
-            lockCmd.Transaction = tx;
-            lockCmd.CommandText = """
-                SELECT last_seq FROM papuma.checkpoint
-                WHERE handler_name = @name
-                FOR UPDATE SKIP LOCKED
-                """;
-            lockCmd.Parameters.AddWithValue("name", handler.Name);
-            checkpoint = await lockCmd.ExecuteScalarAsync(ct) as long?;
-        }
-
-        if (checkpoint is null)
+        var locked = await SnapshotCursor.LockAsync(conn, tx, handler.Name, ct);
+        if (locked is null)
         {
             return 0; // locked by another instance (or not yet registered)
         }
 
-        var batch = await LoadBatchAsync(conn, tx, handler.Name, checkpoint.Value, ct);
+        var cursor = await locked.WithSliceAsync(conn, tx, ct);
+        var batch = await LoadBatchAsync(conn, tx, handler.Name, cursor, ct);
+        if (batch.Count == 0 && locked.SliceSnapshot is not null)
+        {
+            // The slice in progress has run dry, so it is complete — go straight on with a
+            // fresh one: a drained slice must not make the cycle look idle while newer
+            // commits wait.
+            cursor = await cursor.After(cursor.SliceSeq, 0, sliceCompleted: true).WithSliceAsync(conn, tx, ct);
+            batch = await LoadBatchAsync(conn, tx, handler.Name, cursor, ct);
+        }
+
         if (batch.Count == 0)
         {
+            // Nothing to deliver. Keep a completed slice; drop an empty fresh one — the next
+            // cycle takes a newer snapshot anyway, and an idle cycle then writes nothing.
+            var idle = cursor with { SliceSnapshot = null, SliceSeq = 0 };
+            if (idle != locked)
+            {
+                await idle.SaveAsync(conn, tx, handler.Name, ct);
+            }
+
             await tx.CommitAsync(ct);
             return 0;
         }
 
         var processed = 0;
-        var newCheckpoint = checkpoint.Value;
+        var position = cursor.SliceSeq;
+        var highest = 0L;
+        var stopped = false;
         foreach (var item in batch)
         {
             ct.ThrowIfCancellationRequested();
@@ -336,12 +340,14 @@ public sealed class ChangeFeedProcessor : IDisposable
                 KernelDiagnostics.FeedPoisoned.Add(1,
                     new KeyValuePair<string, object?>("papuma.feed", FeedTag),
                     new KeyValuePair<string, object?>("papuma.handler", handler.Name));
-                newCheckpoint = item.Record.Seq;
+                position = item.Record.Seq;
+                highest = Math.Max(highest, item.Record.Seq);
                 continue;
             }
 
             if (item.RetryPending)
             {
+                stopped = true;
                 break; // stop-the-line: strict ordering, retry after backoff (ADR-009)
             }
 
@@ -367,6 +373,7 @@ public sealed class ChangeFeedProcessor : IDisposable
                 _logger.LogWarning(ex,
                     "Handler {Handler} failed on change seq {Seq} (attempt {Attempts}/{MaxAttempts}).",
                     handler.Name, item.Record.Seq, attempts, _options.MaxAttempts);
+                stopped = true;
                 break; // stop-the-line; checkpoint stays before the failed seq
             }
 
@@ -382,13 +389,17 @@ public sealed class ChangeFeedProcessor : IDisposable
                 await ClearFailureAsync(conn, tx, handler.Name, item.Record.Seq, ct);
             }
 
-            newCheckpoint = item.Record.Seq;
+            position = item.Record.Seq;
+            highest = Math.Max(highest, item.Record.Seq);
             processed++;
         }
 
-        if (newCheckpoint != checkpoint.Value)
+        // A batch that came back short without stopping the line has emptied the slice.
+        var sliceCompleted = !stopped && batch.Count < _options.BatchSize;
+        var next = cursor.After(position, highest, sliceCompleted);
+        if (next != locked)
         {
-            await SaveCheckpointAsync(conn, tx, handler.Name, newCheckpoint, ct);
+            await next.SaveAsync(conn, tx, handler.Name, ct);
         }
 
         await tx.CommitAsync(ct);
@@ -400,13 +411,14 @@ public sealed class ChangeFeedProcessor : IDisposable
     private sealed record BatchItem(ChangeRecord Record, int Attempts, bool RetryPending);
 
     private async Task<IReadOnlyList<BatchItem>> LoadBatchAsync(
-        NpgsqlConnection conn, NpgsqlTransaction tx, string handlerName, long checkpoint, CancellationToken ct)
+        NpgsqlConnection conn, NpgsqlTransaction tx, string handlerName, SnapshotCursor cursor, CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        // Stable visibility: a change only counts once no concurrently running transaction
-        // could still commit an earlier seq (ADR-010).
-        cmd.CommandText = """
+        // The next rows of the cursor's slice: transactions committed since the done
+        // snapshot, whole, in seq order (ADR-022).
+        var slice = cursor.SlicePredicate(cmd, "c");
+        cmd.CommandText = $"""
             SELECT c.seq, c.scope, c.tenant_id, c.document_type, c.document_id, c.version,
                    c.schema_version, c.operation, c.diff::text, c.actor_id, c.metadata::text,
                    c.occurred_at, COALESCE(f.attempts, 0),
@@ -414,13 +426,11 @@ public sealed class ChangeFeedProcessor : IDisposable
             FROM papuma.change c
             LEFT JOIN papuma.failure f
                    ON f.handler_name = @name AND f.seq = c.seq
-            WHERE c.seq > @checkpoint
-              AND c.txid < pg_snapshot_xmin(pg_current_snapshot())
+            WHERE {slice}
             ORDER BY c.seq
             LIMIT @batchSize
             """;
         cmd.Parameters.AddWithValue("name", handlerName);
-        cmd.Parameters.AddWithValue("checkpoint", checkpoint);
         cmd.Parameters.AddWithValue("batchSize", _options.BatchSize);
 
         var batch = new List<BatchItem>();
@@ -452,21 +462,6 @@ public sealed class ChangeFeedProcessor : IDisposable
         }
 
         return batch;
-    }
-
-    private static async Task SaveCheckpointAsync(
-        NpgsqlConnection conn, NpgsqlTransaction tx, string handlerName, long seq, CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = """
-            UPDATE papuma.checkpoint
-            SET last_seq = @seq, updated_at = now()
-            WHERE handler_name = @name
-            """;
-        cmd.Parameters.AddWithValue("name", handlerName);
-        cmd.Parameters.AddWithValue("seq", seq);
-        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     private async Task<int> RegisterFailureAsync(

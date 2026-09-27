@@ -6,6 +6,7 @@ using System.Text;
 using Npgsql;
 
 using Papuma.Kernel.Model;
+using Papuma.Kernel.Tenancy;
 using Papuma.Kernel.Validation;
 
 namespace Papuma.Kernel.Store;
@@ -64,6 +65,94 @@ public static class SchemaManager
                 await keyCmd.ExecuteNonQueryAsync(ct);
             }
         }
+
+        await RepairFeedAfterLogicalRestoreAsync(conn, ct);
+    }
+
+    /// <summary>
+    /// Detects and repairs the feed state after a logical restore (<c>pg_dump</c> /
+    /// <c>pg_restore</c>) into another cluster (ADR-022, point 7). Transaction ids belong to
+    /// a cluster: restored <c>txid</c>s and stored cursor snapshots can lie beyond the new
+    /// cluster's id counter — then stored snapshots would declare new transactions
+    /// "already delivered" and restored rows would never become visible. Runs as part of
+    /// <see cref="EnsureSchemaAsync(NpgsqlDataSource, KernelModel?, CancellationToken)"/>;
+    /// call it directly when the schema is managed elsewhere. Physical backups, PITR and
+    /// <c>pg_upgrade</c> keep the id space and never trigger it.
+    /// </summary>
+    /// <param name="dataSource">The PostgreSQL data source.</param>
+    /// <param name="ct">A cancellation token.</param>
+    /// <returns><c>true</c> when a restored state was found and repaired.</returns>
+    public static async Task<bool> RepairFeedAfterLogicalRestoreAsync(NpgsqlDataSource dataSource, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(dataSource);
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        return await RepairFeedAfterLogicalRestoreAsync(conn, ct);
+    }
+
+    private static async Task<bool> RepairFeedAfterLogicalRestoreAsync(NpgsqlConnection conn, CancellationToken ct)
+    {
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        await conn.SetAllScopesAsync(tx, ct); // FORCE RLS: without it the owner sees no rows
+
+        await using (var detect = conn.CreateCommand())
+        {
+            // An id at or beyond the next one to be assigned cannot exist within one cluster.
+            detect.Transaction = tx;
+            detect.CommandText = """
+                SELECT EXISTS (SELECT 1 FROM papuma.change WHERE txid >= pg_snapshot_xmax(pg_current_snapshot()))
+                    OR EXISTS (SELECT 1 FROM papuma.event WHERE txid >= pg_snapshot_xmax(pg_current_snapshot()))
+                    OR EXISTS (SELECT 1 FROM papuma.checkpoint
+                               WHERE pg_snapshot_xmax(done_snapshot) > pg_snapshot_xmax(pg_current_snapshot())
+                                  OR pg_snapshot_xmax(slice_snapshot) > pg_snapshot_xmax(pg_current_snapshot()))
+                """;
+            if (!(bool)(await detect.ExecuteScalarAsync(ct))!)
+            {
+                await tx.CommitAsync(ct);
+                return false;
+            }
+        }
+
+        await using (var repair = conn.CreateCommand())
+        {
+            // 1. Each cursor falls back to a seq floor: just below its lowest undelivered row.
+            //    Old txids and old snapshots are consistent with each other, so "undelivered"
+            //    is still exact; rows above the floor that were delivered come again
+            //    (at-least-once). 2. Restored txids become the frozen id, visible to every
+            //    snapshot — every restored row is committed.
+            repair.Transaction = tx;
+            repair.CommandText = """
+                UPDATE papuma.checkpoint cp
+                SET base_seq = COALESCE(
+                        (SELECT min(r.seq) - 1 FROM papuma.change r
+                         WHERE (CASE WHEN cp.done_snapshot IS NULL THEN r.seq > cp.base_seq
+                                     ELSE NOT pg_visible_in_snapshot(r.txid, cp.done_snapshot) END)
+                           AND NOT (cp.slice_snapshot IS NOT NULL
+                                    AND pg_visible_in_snapshot(r.txid, cp.slice_snapshot)
+                                    AND r.seq <= cp.slice_seq)),
+                        (SELECT COALESCE(max(seq), 0) FROM papuma.change)),
+                    done_snapshot = NULL, slice_snapshot = NULL, slice_seq = 0, updated_at = now()
+                WHERE cp.handler_name NOT LIKE 'event:%';
+
+                UPDATE papuma.checkpoint cp
+                SET base_seq = COALESCE(
+                        (SELECT min(r.seq) - 1 FROM papuma.event r
+                         WHERE (CASE WHEN cp.done_snapshot IS NULL THEN r.seq > cp.base_seq
+                                     ELSE NOT pg_visible_in_snapshot(r.txid, cp.done_snapshot) END)
+                           AND NOT (cp.slice_snapshot IS NOT NULL
+                                    AND pg_visible_in_snapshot(r.txid, cp.slice_snapshot)
+                                    AND r.seq <= cp.slice_seq)),
+                        (SELECT COALESCE(max(seq), 0) FROM papuma.event)),
+                    done_snapshot = NULL, slice_snapshot = NULL, slice_seq = 0, updated_at = now()
+                WHERE cp.handler_name LIKE 'event:%';
+
+                UPDATE papuma.change SET txid = '2'::xid8 WHERE txid >= pg_snapshot_xmax(pg_current_snapshot());
+                UPDATE papuma.event SET txid = '2'::xid8 WHERE txid >= pg_snapshot_xmax(pg_current_snapshot());
+                """;
+            await repair.ExecuteNonQueryAsync(ct);
+        }
+
+        await tx.CommitAsync(ct);
+        return true;
     }
 
     /// <summary>

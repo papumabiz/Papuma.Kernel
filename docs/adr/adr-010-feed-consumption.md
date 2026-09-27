@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted (2026-06-11)
+Accepted (2026-06-11); point 2 (gapless reading via `txid < xmin`) superseded by
+[ADR-022](adr-022-snapshot-cursor.md) — it skipped changes of interleaved
+multi-write transactions.
 
 ## Context
 

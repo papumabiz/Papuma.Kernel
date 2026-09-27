@@ -115,36 +115,37 @@ public sealed class ChangeFeedProcessorTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GapTest_LongRunningTransaction_NothingIsSkipped()
+    public async Task GapTest_LongRunningTransaction_HoldsBackOnlyItself_NothingIsSkipped()
     {
         var handler = new RecordingHandler(NewHandlerName());
         var processor = CreateProcessor(handler);
         var slowId = NewId();
         var fastId = NewId();
 
-        // Slow writer: opens first (lower seq/txid) but commits last.
+        // Slow writer: draws the lower seq first, commits last.
         await using var slowSession = _store.OpenSession(NewTenant());
         await slowSession.SaveAsync(new FeedDoc(slowId, "Slow"), 0);
 
-        // Fast writer commits afterwards with a higher seq.
+        // Fast writer commits meanwhile, with a higher seq.
         await using (var fastSession = _store.OpenSession(NewTenant()))
         {
             await fastSession.SaveAsync(new FeedDoc(fastId, "Fast"), 0);
             await fastSession.CommitAsync();
         }
 
-        // While the slow transaction is open, the fast (higher-seq) change must NOT be
-        // delivered — otherwise the checkpoint would advance past the slow one (ADR-010).
+        // Delivery follows commit order (ADR-022): the fast change flows at once, the open
+        // transaction holds back only its own rows — under ADR-010 it stalled everything.
         await processor.ProcessOnceAsync();
-        Assert.DoesNotContain(handler.Received, r => r.DocumentId == fastId);
+        Assert.Contains(handler.Received, r => r.DocumentId == fastId);
         Assert.DoesNotContain(handler.Received, r => r.DocumentId == slowId);
 
         await slowSession.CommitAsync();
         await processor.ProcessOnceAsync();
 
+        // Nothing lost: the slow change arrives after its commit, despite its lower seq.
         var relevant = handler.Received.Where(r => r.DocumentId == slowId || r.DocumentId == fastId).ToList();
-        Assert.Equal(2, relevant.Count);
-        Assert.True(relevant[0].Seq < relevant[1].Seq); // strict seq order, nothing lost
+        Assert.Equal([fastId, slowId], relevant.Select(r => r.DocumentId));
+        Assert.True(relevant[1].Seq < relevant[0].Seq);
     }
 
     [Fact]

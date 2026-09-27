@@ -112,6 +112,19 @@ internal static class SchemaDdl
             updated_at      timestamptz NOT NULL DEFAULT now()
         );
 
+        -- Snapshot cursor (ADR-022). base_seq takes over an existing seq checkpoint once:
+        -- the first slice after the upgrade delivers every committed row above it.
+        ALTER TABLE papuma.checkpoint ADD COLUMN IF NOT EXISTS base_seq bigint;
+        UPDATE papuma.checkpoint SET base_seq = last_seq WHERE base_seq IS NULL;
+        ALTER TABLE papuma.checkpoint ALTER COLUMN base_seq SET DEFAULT 0;
+        ALTER TABLE papuma.checkpoint ALTER COLUMN base_seq SET NOT NULL;
+        ALTER TABLE papuma.checkpoint ADD COLUMN IF NOT EXISTS done_snapshot pg_snapshot;
+        ALTER TABLE papuma.checkpoint ADD COLUMN IF NOT EXISTS slice_snapshot pg_snapshot;
+        ALTER TABLE papuma.checkpoint ADD COLUMN IF NOT EXISTS slice_seq bigint NOT NULL DEFAULT 0;
+
+        CREATE INDEX IF NOT EXISTS ix_papuma_change_txid ON papuma.change (txid);
+        CREATE INDEX IF NOT EXISTS ix_papuma_event_txid ON papuma.event (txid);
+
         CREATE TABLE IF NOT EXISTS papuma.failure
         (
             handler_name    text        NOT NULL,

@@ -19,9 +19,9 @@ namespace Papuma.Kernel.Events;
 
 /// <summary>
 /// The event log engine (ADR-013): delivers committed events to registered handlers
-/// with the same guarantees as the change feed engine (ADR-009/010) — strict
-/// <c>seq</c> order, persisted checkpoints, retry with backoff, poison skipping,
-/// snapshot-stable reads, leader coordination via <c>FOR UPDATE SKIP LOCKED</c>.
+/// with the same guarantees as the change feed engine (ADR-009/010/022) — commit
+/// order via the snapshot cursor, persisted checkpoints, retry with backoff, poison
+/// skipping, leader coordination via <c>FOR UPDATE SKIP LOCKED</c>.
 /// </summary>
 /// <remarks>
 /// Change feed and event log are separate feeds with separate checkpoint spaces
@@ -210,11 +210,7 @@ public sealed class EventFeedProcessor : IDisposable
         await using (var checkpointCmd = conn.CreateCommand())
         {
             checkpointCmd.Transaction = tx;
-            checkpointCmd.CommandText = """
-                INSERT INTO papuma.checkpoint (handler_name, last_seq, updated_at)
-                VALUES (@name, 0, now())
-                ON CONFLICT (handler_name) DO UPDATE SET last_seq = 0, updated_at = now()
-                """;
+            checkpointCmd.CommandText = SnapshotCursor.ResetSql;
             checkpointCmd.Parameters.AddWithValue("name", key);
             await checkpointCmd.ExecuteNonQueryAsync(ct);
         }
@@ -246,25 +242,23 @@ public sealed class EventFeedProcessor : IDisposable
         await using (var headCmd = conn.CreateCommand())
         {
             headCmd.Transaction = tx;
-            headCmd.CommandText = """
-                SELECT COALESCE(MAX(seq), 0)
-                FROM papuma.event
-                WHERE txid < pg_snapshot_xmin(pg_current_snapshot())
-                """;
+            headCmd.CommandText = "SELECT COALESCE(MAX(seq), 0) FROM papuma.event";
             latestSeq = (long)(await headCmd.ExecuteScalarAsync(ct))!;
         }
 
+        // Lag = committed rows not yet delivered (ADR-022), counted — a seq difference has
+        // no meaning once delivery follows commit order.
         var snapshots = new List<ChangeFeedLagSnapshot>(_handlers.Count);
         foreach (var handler in _handlers)
         {
-            await using var checkpointCmd = conn.CreateCommand();
-            checkpointCmd.Transaction = tx;
-            checkpointCmd.CommandText = "SELECT last_seq FROM papuma.checkpoint WHERE handler_name = @name";
-            checkpointCmd.Parameters.AddWithValue("name", CheckpointPrefix + handler.Name);
-            var checkpoint = await checkpointCmd.ExecuteScalarAsync(ct) is long seq ? seq : 0L;
+            var cursor = await SnapshotCursor.ReadOrInitialAsync(conn, tx, CheckpointPrefix + handler.Name, ct);
+            await using var lagCmd = conn.CreateCommand();
+            lagCmd.Transaction = tx;
+            var undelivered = cursor.UndeliveredPredicate(lagCmd, "e");
+            lagCmd.CommandText = $"SELECT count(*) FROM papuma.event e WHERE {undelivered}";
+            var lag = (long)(await lagCmd.ExecuteScalarAsync(ct))!;
 
-            var lag = latestSeq > checkpoint ? latestSeq - checkpoint : 0L;
-            snapshots.Add(new ChangeFeedLagSnapshot(handler.Name, checkpoint, latestSeq, lag));
+            snapshots.Add(new ChangeFeedLagSnapshot(handler.Name, cursor.LastSeq, latestSeq, lag));
             _lagByHandler[handler.Name] = lag; // feeds the observable gauge
         }
 
@@ -279,33 +273,42 @@ public sealed class EventFeedProcessor : IDisposable
         await using var tx = await conn.BeginTransactionAsync(ct);
         await conn.SetAllScopesAsync(tx, ct);
 
-        long? checkpoint;
-        await using (var lockCmd = conn.CreateCommand())
-        {
-            lockCmd.Transaction = tx;
-            lockCmd.CommandText = """
-                SELECT last_seq FROM papuma.checkpoint
-                WHERE handler_name = @name
-                FOR UPDATE SKIP LOCKED
-                """;
-            lockCmd.Parameters.AddWithValue("name", key);
-            checkpoint = await lockCmd.ExecuteScalarAsync(ct) as long?;
-        }
-
-        if (checkpoint is null)
+        // Leader coordination: skip the handler when another processor holds its checkpoint.
+        var locked = await SnapshotCursor.LockAsync(conn, tx, key, ct);
+        if (locked is null)
         {
             return 0; // locked by another instance (or not yet registered)
         }
 
-        var batch = await LoadBatchAsync(conn, tx, key, checkpoint.Value, ct);
+        var cursor = await locked.WithSliceAsync(conn, tx, ct);
+        var batch = await LoadBatchAsync(conn, tx, key, cursor, ct);
+        if (batch.Count == 0 && locked.SliceSnapshot is not null)
+        {
+            // The slice in progress has run dry, so it is complete — go straight on with a
+            // fresh one: a drained slice must not make the cycle look idle while newer
+            // commits wait.
+            cursor = await cursor.After(cursor.SliceSeq, 0, sliceCompleted: true).WithSliceAsync(conn, tx, ct);
+            batch = await LoadBatchAsync(conn, tx, key, cursor, ct);
+        }
+
         if (batch.Count == 0)
         {
+            // Nothing to deliver. Keep a completed slice; drop an empty fresh one — the next
+            // cycle takes a newer snapshot anyway, and an idle cycle then writes nothing.
+            var idle = cursor with { SliceSnapshot = null, SliceSeq = 0 };
+            if (idle != locked)
+            {
+                await idle.SaveAsync(conn, tx, key, ct);
+            }
+
             await tx.CommitAsync(ct);
             return 0;
         }
 
         var processed = 0;
-        var newCheckpoint = checkpoint.Value;
+        var position = cursor.SliceSeq;
+        var highest = 0L;
+        var stopped = false;
         foreach (var item in batch)
         {
             ct.ThrowIfCancellationRequested();
@@ -318,12 +321,14 @@ public sealed class EventFeedProcessor : IDisposable
                 KernelDiagnostics.FeedPoisoned.Add(1,
                     new KeyValuePair<string, object?>("papuma.feed", FeedTag),
                     new KeyValuePair<string, object?>("papuma.handler", handler.Name));
-                newCheckpoint = item.Record.Seq;
+                position = item.Record.Seq;
+                highest = Math.Max(highest, item.Record.Seq);
                 continue;
             }
 
             if (item.RetryPending)
             {
+                stopped = true;
                 break; // stop-the-line (ADR-009)
             }
 
@@ -349,6 +354,7 @@ public sealed class EventFeedProcessor : IDisposable
                 _logger.LogWarning(ex,
                     "Event handler {Handler} failed on event seq {Seq} (attempt {Attempts}/{MaxAttempts}).",
                     handler.Name, item.Record.Seq, attempts, _options.MaxAttempts);
+                stopped = true;
                 break;
             }
 
@@ -364,22 +370,17 @@ public sealed class EventFeedProcessor : IDisposable
                 await ClearFailureAsync(conn, tx, key, item.Record.Seq, ct);
             }
 
-            newCheckpoint = item.Record.Seq;
+            position = item.Record.Seq;
+            highest = Math.Max(highest, item.Record.Seq);
             processed++;
         }
 
-        if (newCheckpoint != checkpoint.Value)
+        // A batch that came back short without stopping the line has emptied the slice.
+        var sliceCompleted = !stopped && batch.Count < _options.BatchSize;
+        var next = cursor.After(position, highest, sliceCompleted);
+        if (next != locked)
         {
-            await using var cmd = conn.CreateCommand();
-            cmd.Transaction = tx;
-            cmd.CommandText = """
-                UPDATE papuma.checkpoint
-                SET last_seq = @seq, updated_at = now()
-                WHERE handler_name = @name
-                """;
-            cmd.Parameters.AddWithValue("name", key);
-            cmd.Parameters.AddWithValue("seq", newCheckpoint);
-            await cmd.ExecuteNonQueryAsync(ct);
+            await next.SaveAsync(conn, tx, key, ct);
         }
 
         await tx.CommitAsync(ct);
@@ -391,24 +392,25 @@ public sealed class EventFeedProcessor : IDisposable
     private sealed record BatchItem(EventRecord Record, int Attempts, bool RetryPending);
 
     private async Task<IReadOnlyList<BatchItem>> LoadBatchAsync(
-        NpgsqlConnection conn, NpgsqlTransaction tx, string checkpointKey, long checkpoint, CancellationToken ct)
+        NpgsqlConnection conn, NpgsqlTransaction tx, string checkpointKey, SnapshotCursor cursor, CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText = """
+        // The next rows of the cursor's slice: transactions committed since the done
+        // snapshot, whole, in seq order (ADR-022).
+        var slice = cursor.SlicePredicate(cmd, "e");
+        cmd.CommandText = $"""
             SELECT e.seq, e.scope, e.tenant_id, e.event_type, e.payload::text, e.actor_id,
                    e.metadata::text, e.occurred_at, COALESCE(f.attempts, 0),
                    COALESCE(f.next_retry_at > now(), false) AS retry_pending
             FROM papuma.event e
             LEFT JOIN papuma.failure f
                    ON f.handler_name = @name AND f.seq = e.seq
-            WHERE e.seq > @checkpoint
-              AND e.txid < pg_snapshot_xmin(pg_current_snapshot())
+            WHERE {slice}
             ORDER BY e.seq
             LIMIT @batchSize
             """;
         cmd.Parameters.AddWithValue("name", checkpointKey);
-        cmd.Parameters.AddWithValue("checkpoint", checkpoint);
         cmd.Parameters.AddWithValue("batchSize", _options.BatchSize);
 
         var batch = new List<BatchItem>();

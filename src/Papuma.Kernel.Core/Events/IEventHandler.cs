@@ -5,7 +5,7 @@ namespace Papuma.Kernel.Events;
 
 /// <summary>
 /// An event log consumer (ADR-013). Same engine guarantees as change handlers
-/// (ADR-009): per-handler ordering by <c>seq</c>, persisted checkpoints, retry with
+/// (ADR-009/022): per-handler delivery in commit order, persisted checkpoints, retry with
 /// backoff, at-least-once delivery — implementations must be idempotent.
 /// </summary>
 public interface IEventHandler

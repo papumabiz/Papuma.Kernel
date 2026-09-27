@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted (2026-06-11)
+Accepted (2026-06-11); ordering amended by [ADR-022](adr-022-snapshot-cursor.md) —
+delivery follows commit order (per document strictly by version), not global `seq`
+order.
 
 ## Context
 
