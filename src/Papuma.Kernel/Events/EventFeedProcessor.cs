@@ -247,7 +247,7 @@ public sealed class EventFeedProcessor : IDisposable
         }
 
         // Lag = committed rows not yet delivered (ADR-022), counted — a seq difference has
-        // no meaning once delivery follows commit order.
+        // no meaning once delivery follows causal order.
         var snapshots = new List<ChangeFeedLagSnapshot>(_handlers.Count);
         foreach (var handler in _handlers)
         {

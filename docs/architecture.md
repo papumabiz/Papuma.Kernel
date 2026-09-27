@@ -334,8 +334,10 @@ no read models ([ADR-009](adr/adr-009-projections-as-dumb-handlers.md)).
 
 The engine provides the infrastructure:
 
-- **Ordering**: per handler in commit order — within a transaction by `seq`, per
-  document strictly by `version`. `seq` identifies a change; it is not a watermark.
+- **Ordering**: per handler in causal order — a transaction after every one that
+  committed before it began (concurrent ones unordered), per document strictly by
+  `version`. `seq` identifies a change; it is not a watermark. Handlers must not decide
+  from the order of unrelated documents (concepts §2).
 - **Checkpoints**: one persisted cursor per handler (`papuma.checkpoint`).
 - **Retry** with backoff and poison handling.
 - **Rebuild**: reset the cursor, feed replay (upcasters optionally in between).
@@ -463,7 +465,7 @@ non-superuser role via `Papuma.Kernel.Testing` (ADR-021), so they exercise it.
 | [019](adr/adr-019-scope-predicates-for-application-tables.md) | Scope predicates for application tables (papuma.scope_visible / scope_writable as the RLS contract) | Accepted |
 | [020](adr/adr-020-composite-keys.md) | Composite keys (uniqueness and lookup over several fields, one multi-expression index) | Accepted |
 | [021](adr/adr-021-testing-package.md) | A narrow, test-framework-agnostic testing package; broader one deferred against objective triggers | Accepted |
-| [022](adr/adr-022-snapshot-cursor.md) | Snapshot cursor: the feed follows commit order (PgQ-style slices, lag counted) | Accepted |
+| [022](adr/adr-022-snapshot-cursor.md) | Snapshot cursor: the feed follows causal order (PgQ-style slices, lag counted) | Accepted |
 | [023](adr/adr-023-no-event-sourcing-mode.md) | No event-sourcing mode; stream-shaped aggregates as an application pattern | Accepted |
 
 ## 13. Recipes (tutorial precursors)

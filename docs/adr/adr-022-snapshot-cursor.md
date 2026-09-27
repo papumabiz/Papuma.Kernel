@@ -1,4 +1,4 @@
-# ADR-022 — Snapshot cursor: the feed follows commit order
+# ADR-022 — Snapshot cursor: the feed follows causal order
 
 ## Status
 
@@ -101,13 +101,19 @@ so paginating it by `seq` neither skips nor repeats.
 
 ### 4. The ordering guarantee
 
-Delivery follows **commit order**: a transaction's changes arrive after those of every
-transaction that committed before it started. Within one transaction, and therefore
-within one slice, by `seq`. **Per document strictly by version**: two transactions
+Delivery follows **causal order**: a transaction's changes arrive after those of every
+transaction that committed before it started. Concurrent transactions get no guaranteed
+order relative to each other — within one slice they come by `seq`, but where a slice
+boundary falls is timing. **Per document strictly by version**: two transactions
 writing the same document serialize on its row lock, so the later one commits later and
 drew later sequence numbers. What no longer holds is "globally by `seq`": a handler may
-receive seq 97 after seq 98. That promise was never kept (F-15) — commit order is the
-order the database itself defines, and unlike `seq` order it respects causality.
+receive seq 97 after seq 98. That promise was never kept (F-15); the causal order is
+what the database's snapshots define.
+
+Consequence for handlers: live delivery and a replay after a reset (which runs by
+`seq`) can order concurrent transactions differently. Handlers must not decide anything
+from the relative order of unrelated documents; such decisions belong in the write path
+(bounded counter, unique key, `expectedVersion`), where the database serializes them.
 
 `seq` stays the record's identity: failure entries, the idempotency key
 `handler + seq`, `GetHistoryAsync` and `GetChangesByCorrelationAsync` are unchanged.
@@ -155,7 +161,7 @@ snapshot). The same repair is callable explicitly
 
 The event feed uses the same cursor with its own checkpoint rows (`event:` prefix).
 `Papuma.Kernel.Local` is unaffected: SQLite's single writer serializes whole
-transactions, so its `seq` order already is commit order. The wire-format document and
+transactions, so its `seq` order is commit order. The wire-format document and
 the polyglot samples adopt the slice query; consumers that implemented the ADR-010
 predicate have the same defect and must switch.
 
@@ -165,7 +171,8 @@ predicate have the same defect and must switch.
   construction, not by a tighter heuristic.
 - **Positive:** A long-running or idle-in-transaction session no longer stalls the whole
   feed — only its own rows wait. Under ADR-010 any open transaction pinned `xmin`.
-- **Positive:** The ordering guarantee matches the database's commit order and causality.
+- **Positive:** The ordering guarantee is the database's own causal order — the one
+  that can actually be kept.
 - **Negative:** "Strictly by `seq`" is gone. Handlers that treat `seq` as a monotonic
   watermark (`skip if seq ≤ last seen`) would drop late rows; the documented
   idempotency is per `handler + seq` or per document version, which stays correct.

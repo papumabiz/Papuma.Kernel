@@ -85,15 +85,28 @@ that commits later can ever fall *behind* the cursor, because the cursor is not 
 line on the `seq` axis. When the slice is exhausted, it becomes the new
 `done_snapshot`. No lag window, no heuristics — MVCC itself is the truth.
 
-**The order you get is commit order.** A's changes arrive before B's if A
-committed before B started; within one slice, by `seq`. **Per document strictly
-by version** — two transactions writing the same document serialize on its row
-lock, so the later one commits later. What you do *not* get is "globally by
-`seq`": a handler may receive 97 after 98. That promise was never actually kept
-(it was the bug), and commit order is the order the database itself defines — it
-is also the causal one. So `seq` identifies a change (idempotency key
-`handler + seq`, failure entries, history), but **it is not a watermark**: a
-handler that skips "everything ≤ the highest `seq` I have seen" drops late rows.
+**The order you get is causal order.** A's changes arrive before B's if A
+committed before B started — so anything B could have read arrives before B.
+Transactions that ran *concurrently* saw nothing of each other; for them there is
+no meaningful order, and the feed promises none (within one slice they come by
+`seq`, but a slice boundary can fall anywhere). **Per document strictly by
+version** — two transactions writing the same document serialize on its row lock,
+so the later one commits later. What you do *not* get is "globally by `seq`": a
+handler may receive 97 after 98. That promise was never actually kept (it was the
+bug). So `seq` identifies a change (idempotency key `handler + seq`, failure
+entries, history), but **it is not a watermark**: a handler that skips
+"everything ≤ the highest `seq` I have seen" drops late rows.
+
+**The rule for handlers that follows: be insensitive to the order of unrelated
+documents.** Live delivery and a rebuild can order concurrent transactions
+differently — live by slices, a replay after a reset by `seq` — and both are
+correct. A projection that folds each document by its own version gives the same
+result either way. A handler that *decides* something from the order of
+independent documents — "the first order gets the last unit", "the most recently
+touched product" — may decide differently after a rebuild. Such decisions belong
+in the write path, where the database serializes them: a bounded counter (§17), a
+unique key, `expectedVersion`. A handler never could make them reliably; the old
+`seq` order only looked like it could.
 
 **Who pays for what?** The writers pay **nothing** — the fast writer never waits
 for the slow one; both commit independently at full throughput; there is no queue
@@ -110,8 +123,9 @@ it commits.
 rows may come again (at-least-once), none is lost.
 
 **Only PostgreSQL.** SQLite (`Papuma.Kernel.Local`) has a single writer: whole
-transactions are serialized, so there `seq` order already *is* commit order and a
-number suffices.
+transactions are serialized, so there `seq` order *is* commit order and a number
+suffices. Code tested only against it will not reveal a hidden `seq`-order
+dependency; PostgreSQL will.
 
 ---
 
@@ -386,7 +400,7 @@ Per process there is **one** `ChangeFeedProcessor` and **one** `EventFeedProcess
 what gets registered are *handlers*, not processors. Parallelism arises across app
 instances — and there, `FOR UPDATE SKIP LOCKED` makes scale-out **failover, not
 throughput**. Per handler, exactly one instance consumes at any time, because
-ordered delivery — commit order, per document by version (§2) — demands exactly
+ordered delivery — causal order, per document by version (§2) — demands exactly
 one consumer (like Kafka with one partition).
 
 The three real limits, in the order you hit them:

@@ -8,7 +8,7 @@ namespace Papuma.Kernel.Processing;
 /// <summary>
 /// A change feed consumer (ADR-009): SQL projection, search index update, webhook,
 /// audit log, event translator — the kernel does not care. The engine guarantees
-/// per-handler delivery in commit order (per document strictly by version, ADR-022),
+/// per-handler delivery in causal order (per document strictly by version, ADR-022),
 /// persisted checkpoints, retry with backoff, and at-least-once delivery:
 /// implementations must be idempotent (natural idempotency key: handler name +
 /// <see cref="ChangeRecord.Seq"/>). <c>Seq</c> identifies a change but is not a

@@ -19,7 +19,7 @@ namespace Papuma.Kernel.Processing;
 
 /// <summary>
 /// The change feed engine (ADR-009/010/022): delivers committed changes to registered
-/// handlers in commit order with persisted checkpoints, retry with exponential backoff,
+/// handlers in causal order with persisted checkpoints, retry with exponential backoff,
 /// poison skipping, and rebuild support.
 /// </summary>
 /// <remarks>
@@ -246,7 +246,7 @@ public sealed class ChangeFeedProcessor : IDisposable
         }
 
         // Lag = committed rows not yet delivered (ADR-022), counted — a seq difference has
-        // no meaning once delivery follows commit order.
+        // no meaning once delivery follows causal order.
         var snapshots = new List<ChangeFeedLagSnapshot>(_handlers.Count);
         foreach (var handler in _handlers)
         {

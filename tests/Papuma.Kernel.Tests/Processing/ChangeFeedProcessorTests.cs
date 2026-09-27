@@ -135,7 +135,7 @@ public sealed class ChangeFeedProcessorTests : IAsyncLifetime
             await fastSession.CommitAsync();
         }
 
-        // Delivery follows commit order (ADR-022): the fast change flows at once, the open
+        // Delivery follows causal order (ADR-022): the fast change flows at once, the open
         // transaction holds back only its own rows — under ADR-010 it stalled everything.
         await processor.ProcessOnceAsync();
         Assert.Contains(handler.Received, r => r.DocumentId == fastId);

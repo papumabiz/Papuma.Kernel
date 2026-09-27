@@ -159,7 +159,8 @@ time, so a foreign-language consumer cannot reach them.
    committed), so paginating it by `seq` neither skips nor repeats. Do not add `txid`
    bounds to the batch query: the planner would read the batch through the `txid`
    index, which re-reads and re-sorts the whole slice for every batch. **Ordering you
-   get:** commit order across transactions, `seq` order within a slice, strictly
+   get:** causal order across transactions (concurrent ones unordered), `seq` order
+   within a slice, strictly
    by `version` per document. A lower `seq` can arrive after a higher one — never
    use `seq` as a "skip everything below" watermark.
 

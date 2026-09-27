@@ -135,7 +135,7 @@ your documents' field paths. When another team or system needs to react, publish
 explicit integration event at the boundary instead of sharing the raw feed
 (concepts §21).
 
-The engine guarantees: per-handler delivery in commit order (per document strictly
+The engine guarantees: per-handler delivery in causal order (per document strictly
 by version — `seq` identifies a change, it is not a watermark), persisted checkpoints,
 retry with backoff, poison skip, at-least-once (handlers must be idempotent —
 natural key: handler name + `change.Seq`). Rebuild:

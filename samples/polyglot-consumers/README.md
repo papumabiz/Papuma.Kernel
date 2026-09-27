@@ -22,7 +22,7 @@ the full pattern.
 3. **Persist the cursor after success, be idempotent.** Each consumer keeps its
    own row in `papuma.checkpoint` (just pick a unique `handler_name`). At-least-once
    delivery means a crash before commit re-delivers the batch — processing must
-   be idempotent. Order is commit order (per document by version): a lower `seq`
+   be idempotent. Order is causal order (per document by version): a lower `seq`
    can arrive after a higher one.
 4. **Wake on NOTIFY, poll for truth.** `LISTEN papuma_changes` gives millisecond
    latency; a missed signal costs at most one poll interval.
@@ -61,7 +61,7 @@ seq=4    Insert Order/a493e01f… v1 changed=[id total status quantity productId
 seq=5    Update Inventory/5979d8a6… v3 changed=[stock]
 ```
 
-Interleaved transactions arrive in commit order. A writes (`seq 6`), B writes
+Interleaved transactions arrive when they commit. A writes (`seq 6`), B writes
 (`seq 7`), A writes again (`seq 8`) and commits; B commits 12 s later — both
 clients print, verified live:
 

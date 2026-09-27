@@ -8,7 +8,7 @@ Two persistence kernels for .NET, sharing one document-sourced model:
 stored as JSON documents; the document is the source of truth. In the same
 transaction as each write, the kernel derives a reversible field-level change
 record and applies declared field policies to it. A processing engine delivers
-those records to application handlers in commit order, with persisted
+those records to application handlers in causal order, with persisted
 checkpoints. It is not event sourcing (state is stored, not folded from
 events), not an ORM, and provides no query DSL.
 
@@ -49,7 +49,7 @@ Three properties follow directly from this, rather than from added machinery:
   updates are not detected-and-recovered, they are structurally excluded.
 - **The feed is gapless and correctly ordered.** Each handler's position is a
   transaction snapshot, so no committed record can be skipped; delivery follows
-  commit order (per document by version) under MVCC, not timestamps or
+  causal order (per document by version) under MVCC, not timestamps or
   heuristics. There is no separate outbox to keep in sync and no dual-write.
 - **The change history is also the audit log.** Each record carries actor,
   timestamp, correlation and causation identifiers, and a reversible diff.

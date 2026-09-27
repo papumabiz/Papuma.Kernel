@@ -10,12 +10,14 @@ Upgrade notes — what a consumer of 1.4.x can notice:
   complete (`ResetCheckpointAsync`) and let it replay. Effect handlers (mails, webhooks)
   may have missed work — the records themselves are intact in `papuma.change` /
   `papuma.event`, so a one-off query can find what was never acted on.
-- **Delivery order is commit order, not global `seq` order.** A handler receives a
+- **Delivery order is causal order, not global `seq` order.** A handler receives a
   transaction's records after those of every transaction that committed before it
-  started; within a transaction by `seq`; per document strictly by version. A lower
-  `seq` can now arrive after a higher one. Handlers that use `seq` as a watermark
-  ("skip everything ≤ the highest seen") drop records — use the documented idempotency
-  (handler + `seq`, or the document version) instead.
+  started; concurrent transactions come in no guaranteed order; per document strictly
+  by version. A lower `seq` can now arrive after a higher one. Handlers that use `seq`
+  as a watermark ("skip everything ≤ the highest seen") drop records — use the
+  documented idempotency (handler + `seq`, or the document version) instead. Handlers
+  must not decide anything from the order of unrelated documents: live delivery and a
+  rebuild may order concurrent transactions differently (concepts §2).
 - **New `txid` indexes** on `papuma.change` and `papuma.event` (`ix_papuma_change_txid`,
   `ix_papuma_event_txid`) and four columns on `papuma.checkpoint` are created at the
   first startup by `EnsureSchemaAsync`; existing checkpoints are carried over. On large
