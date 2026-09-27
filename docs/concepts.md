@@ -114,7 +114,8 @@ at commit. Everything else stays:
 
 - **Identity.** The primary key of every change and event: failure entries
   (`handler + seq`), `RetryFailureAsync`, the dashboard and MCP tools, the
-  documented idempotency key.
+  documented idempotency key — an append-only projection keys its rows by it
+  ([recipe](recipes/projection-schema.md#3-append-only-projections-seq-as-the-row-key)).
 - **Write order — a causally valid total order.** If A committed before B began,
   every `seq` of B is larger than every `seq` of A; within a transaction `seq`
   follows the write order; per document it follows the version (the row lock).

@@ -26,6 +26,10 @@ Changes:
   outside the scope by accident; disposing without `CommitAsync` rolls back. Replaces
   the four-line open/begin/`SetScopeAsync`/`cmd.Transaction` sequence at every read and
   projection site; the same-database recipe uses it.
+- **Docs: append-only projections** (feedback F-20) — `projection-schema.md` §3 keys the
+  rows by the change's `seq` (`ON CONFLICT (seq) DO NOTHING`), so redelivery and rebuild
+  add nothing twice and a reset needs no `TRUNCATE`; reads order by `seq`, which is the
+  same live and after a rebuild; pruning to the newest N stays correct.
 
 ## 2.0.0 (2026-09-27)
 

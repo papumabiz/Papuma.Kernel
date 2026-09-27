@@ -104,7 +104,45 @@ built from the truth, the same way it would be built after a restore. Resetting 
 handler's checkpoint and truncating its table does the same in one step, but leaves
 readers with an empty table until the replay catches up.
 
-## 3. Tests
+## 3. Append-only projections: seq as the row key
+
+An upsert projection is idempotent through its version guard. A projection that
+*appends* a row per change — an activity stream, a timeline — has no row to guard:
+an at-least-once redelivery or a replay after a reset would add every row again. Key
+the rows by the change's `seq`, the identity of the source record:
+
+```sql
+CREATE TABLE IF NOT EXISTS app.activity
+(
+    seq         bigint      NOT NULL PRIMARY KEY,   -- the change's seq
+    scope       text        NOT NULL,
+    tenant_id   text        NOT NULL,
+    document_id text        NOT NULL,
+    version     bigint      NOT NULL,
+    occurred_at timestamptz NOT NULL,
+    summary     text        NOT NULL
+);
+```
+
+```sql
+INSERT INTO app.activity (seq, scope, tenant_id, document_id, version, occurred_at, summary)
+VALUES (@seq, @scope, @tenantId, @id, @version, @occurredAt, @summary)
+ON CONFLICT (seq) DO NOTHING;
+```
+
+- **Redelivery and rebuild become no-ops for rows already there** — a reset needs no
+  `TRUNCATE` first, and readers never see the table empty.
+- **Order the reads by `seq`, not by insertion.** Live delivery and a rebuild may
+  insert concurrent transactions in a different order (ADR-022, concepts §2); `seq` is
+  the write order and the same either way. `ORDER BY seq DESC` is stable across
+  rebuilds; `occurred_at` works too, with `seq` as the tie-breaker.
+- **Keep the newest N per tenant** by pruning after the insert —
+  `DELETE … WHERE tenant_id = @tenantId AND seq < (SELECT seq … ORDER BY seq DESC
+  OFFSET N - 1 LIMIT 1)`. A late, older row is inserted and pruned again; the result
+  is the same as if it had arrived in order.
+- The event feed works the same way, keyed by the event's `seq`.
+
+## 4. Tests
 
 ```csharp
 var store = await database.CreateStoreAsync(model);                // kernel schema + grants
