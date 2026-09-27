@@ -1,23 +1,24 @@
 # Changelog
 
-## Unreleased
+## 1.4.0 (2026-09-27)
 
-- **Write-path storage probe** (`dotnet run -c Release -- writepath` in
-  `benchmarks/Papuma.Kernel.Benchmarks`): saves/s, p50/p95, WAL per save, HOT ratio and
-  table/index growth for 5–50 KB incompressible documents, 0 vs 3 declared keys, 1/16/32
-  sessions, patch and full save, plus `fillfactor` 90 and `lz4` TOAST compression — a
-  fresh PostgreSQL 18 container per scenario, `--rounds`/`--filter` for repeat
-  measurements. Result in concepts §14: declared keys take HOT from 92–100 % to 0 %, but
-  at realistic shape that costs 0–9 % WAL and no measurable throughput — the trigger for
-  the deferred key side table did not fire. jejak feedback F-14.
-- **`GetChangesByCorrelationAsync(correlationId)`** on both kernels' sessions: every
-  change a unit of work produced, across document types, in feed order, scope-bound —
-  "what did this command do?" for audit timelines and for tests asserting a command's
-  complete effect. Backed by a new index on the change table's `correlationId`
-  (created idempotently by `EnsureSchemaAsync`). jejak feedback F-12.
-- **`Papuma.Kernel.Local`: schema contributors** — `AddSchemaContributor<T>()` with an
-  `ISqliteSchemaContributor` (the kernel's open `SqliteConnection`), run after the
-  kernel schema and before the feed workers, like the Postgres hook.
+Upgrade notes — what a consumer of 1.3.x can notice:
+
+- **A new index on `papuma.change`** (`ix_papuma_change_correlation`) is created at the
+  first startup by `EnsureSchemaAsync`. A plain `CREATE INDEX` blocks writes to the table
+  while it builds; on a large change table, create it beforehand without blocking:
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_papuma_change_correlation ON papuma.change
+  (scope, tenant_id, (metadata ->> 'correlationId'));` — startup then finds it in place.
+- **`Papuma.Kernel.Local` feed handlers now run with no transaction open.** Handlers that
+  write to the same database file start working; nothing else changes for correct
+  handlers. Run one feed processor per database file (the hosted service does).
+- **`SqliteChangeNotifier.WaitAsync` is obsolete** — compiler warning; wait on
+  `Subscribe()` instead.
+- **Retry timing on PostgreSQL follows the database clock.** Retries no longer shift by
+  the clock skew between application and database hosts.
+
+Changes:
+
 - **Fixed (`Papuma.Kernel.Local`): handlers could not write to the database file.** The
   feed processors held a `BEGIN IMMEDIATE` transaction — the file's single write lock —
   while handlers ran, so a local projection writing through its own connection got
@@ -38,6 +39,11 @@
   retry by the clock skew between the two (a few ms in a container were enough to make
   zero-delay retries wait). The due check now runs in the database
   (`next_retry_at > now()`), for the change and the event feed.
+- **`GetChangesByCorrelationAsync(correlationId)`** on both kernels' sessions: every
+  change a unit of work produced, across document types, in feed order, scope-bound —
+  "what did this command do?" for audit timelines and for tests asserting a command's
+  complete effect. Backed by a new index on the change table's `correlationId`
+  (created idempotently by `EnsureSchemaAsync`). jejak feedback F-12.
 - **MCP: `get_changes_by_correlation`** — the correlation read as a read-only tool, so an
   agent can answer "what did this command do?" from any change's `correlationId`
   (policy-applied diffs, scope-bound, like `get_document_history`).
@@ -48,10 +54,17 @@
   [schema for projection tables](docs/recipes/projection-schema.md): idempotent DDL,
   an advisory lock for concurrent starts, and breaking changes as a rebuild through a
   new handler name. Verified by `ProjectionSchemaTests`. jejak feedback F-11.
-- **Docs: the raw feed is an in-application contract.** concepts §21, the feed wire
-  format, the playbook, getting-started and both factsheets now separate the stable
-  *format* from the *content* (your documents' field paths) and point other teams and
-  systems to explicit integration events at the boundary. jejak feedback F-13.
+- **`Papuma.Kernel.Local`: schema contributors** — `AddSchemaContributor<T>()` with an
+  `ISqliteSchemaContributor` (the kernel's open `SqliteConnection`), run after the
+  kernel schema and before the feed workers, like the Postgres hook.
+- **Write-path storage probe** (`dotnet run -c Release -- writepath` in
+  `benchmarks/Papuma.Kernel.Benchmarks`): saves/s, p50/p95, WAL per save, HOT ratio and
+  table/index growth for 5–50 KB incompressible documents, 0 vs 3 declared keys, 1/16/32
+  sessions, patch and full save, plus `fillfactor` 90 and `lz4` TOAST compression — a
+  fresh PostgreSQL 18 container per scenario, `--rounds`/`--filter` for repeat
+  measurements. Result in concepts §14: declared keys take HOT from 92–100 % to 0 %, but
+  at realistic shape that costs 0–9 % WAL and no measurable throughput — the trigger for
+  the deferred key side table did not fire. jejak feedback F-14.
 - **Docs: write-path storage costs** (concepts §14). Measured: one declared key anywhere
   in the model makes HOT updates impossible for every document (0 % vs 52–66 % without
   keys), because keys are expression indexes over the always-changing `data` column.
@@ -59,6 +72,10 @@
   `default_toast_compression = lz4` for large documents). A key side table and
   partitioning of `papuma.change` are deferred with measurable triggers; tenant-based
   distribution is noted as the long-range route. jejak feedback F-14.
+- **Docs: the raw feed is an in-application contract.** concepts §21, the feed wire
+  format, the playbook, getting-started and both factsheets now separate the stable
+  *format* from the *content* (your documents' field paths) and point other teams and
+  systems to explicit integration events at the boundary. jejak feedback F-13.
 - **ADR-021 evidence log** records the first consumer data point for a testing-package
   xUnit adapter (jejak, F-10) and that the correlation read API it listed as a
   prerequisite now exists.

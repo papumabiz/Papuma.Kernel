@@ -91,7 +91,7 @@ Measured on commodity hardware (i7, local PG-18 container; reusable probes in
 | Feed engine ceiling (delivery overhead per change) | ~37 µs |
 | Realistic projection handler (1 SQL upsert per change) | ~1,400 changes/s |
 | Diff engine, 1,000-field document | ~0.3 ms |
-| Test suite against real PostgreSQL 18, every CI build | 207, green |
+| Test suite against real PostgreSQL 18, every CI build | 213, green |
 | Architecture decision records | 21 |
 
 Scaling limits are not hidden — they are documented with the metric that
@@ -142,7 +142,7 @@ Honesty is cheaper than disappointment:
 
 ## Maturity, stated plainly
 
-`1.3.0` — the design is complete (13 implementation phases, 21 ADRs,
+`1.4.0` — the design is complete (13 implementation phases, 21 ADRs,
 every identified risk closed with tests or measurements), but it has **not yet
 carried production traffic**. Best fit today: internal line-of-business
 systems and new products built by teams that control their PostgreSQL version.
@@ -196,7 +196,7 @@ Every one of these is documented with the reasoning, not just the diff — see
 [docs/analyses/local-kernel-sqlite-sibling.md](analyses/local-kernel-sqlite-sibling.md).
 
 **Maturity, stated with the same honesty as above:** newer than the Postgres
-kernel. Full API parity, **62 tests green against the real SQLite engine**
+kernel. Full API parity, **71 tests green against the real SQLite engine**
 (including empirically pinned driver behavior — WAL mode, busy timeouts,
 expression-index matching — not assumed), but no production hours yet and no
 throughput benchmarks, only correctness. Right tool for local desktop/mobile

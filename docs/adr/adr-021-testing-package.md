@@ -63,7 +63,7 @@ Candidates, so the revisit does not start from zero:
   with a ready collection fixture) — never inside this package.
 - **Asserting a command's changes by correlation id.** Needs a kernel read API
   for changes by `correlationId` first (today: `GetHistoryAsync` per document) —
-  a kernel decision before a testing one. *Prerequisite met after 1.3.0:*
+  a kernel decision before a testing one. *Prerequisite met in 1.4.0:*
   `GetChangesByCorrelationAsync` (jejak feedback F-12).
 - **Time control for timer slices** (`dueAt`) via `TimeProvider`.
 

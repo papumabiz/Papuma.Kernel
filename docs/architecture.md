@@ -1,6 +1,6 @@
 # Papuma Kernel — Architecture Overview
 
-Status: current (1.3.x) · Background: [concepts.md](concepts.md) (the "why behind the how", narrative)
+Status: current (1.4.x) · Background: [concepts.md](concepts.md) (the "why behind the how", narrative)
 
 > **Describes the PostgreSQL kernel.** Engine differences of `Papuma.Kernel.Local`
 > (SQLite) are in the playbook's [Differences section](ai/papuma-kernel-playbook.md#differences-when-using-papumakernellocal-sqlite-embedded).
