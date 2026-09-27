@@ -20,6 +20,12 @@ Changes:
   commits when the body returns `Ok` and discards on `Error`. A throwing strict mode was
   left out on purpose: a dispose on an exception path would replace the original
   exception.
+- **New: `NpgsqlDataSource.OpenScopedAsync(scope)`** (feedback F-21) — a connection with
+  an open transaction whose scope is already set, for application tables under RLS
+  (ADR-019). Its `CreateCommand()` binds every command to that transaction, so none runs
+  outside the scope by accident; disposing without `CommitAsync` rolls back. Replaces
+  the four-line open/begin/`SetScopeAsync`/`cmd.Transaction` sequence at every read and
+  projection site; the same-database recipe uses it.
 
 ## 2.0.0 (2026-09-27)
 

@@ -74,12 +74,10 @@ public sealed class TicketListProjection(DocumentStore store, NpgsqlDataSource a
             current = await session.LoadAsync<Ticket>(change.DocumentId, ct);
         }
 
-        await using var conn = await appData.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await conn.SetScopeAsync(tx, change.Scope, ct);   // this change's tenant, not All
+        // Connection + transaction + this change's scope (not All); commands carry the transaction.
+        await using var scoped = await appData.OpenScopedAsync(change.Scope, ct);
 
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        await using var cmd = scoped.CreateCommand();
         cmd.Parameters.AddWithValue("scope", change.Scope.Scope.ToString());
         cmd.Parameters.AddWithValue("tenantId", change.Scope.TenantId ?? string.Empty);
         cmd.Parameters.AddWithValue("id", change.DocumentId);
@@ -105,21 +103,24 @@ public sealed class TicketListProjection(DocumentStore store, NpgsqlDataSource a
         }
 
         await cmd.ExecuteNonQueryAsync(ct);
-        await tx.CommitAsync(ct);
+        await scoped.CommitAsync(ct);
     }
 }
 ```
 
 Why each line is there:
 
-- **`SetScopeAsync(tx, change.Scope)` per change.** The feed carries every
+- **`OpenScopedAsync(change.Scope)` per change.** The feed carries every
   tenant's changes; the handler takes on the scope of the one it handles. With
   `scope_writable` in the policy, a bug that writes the wrong `tenant_id` fails
   with an RLS violation instead of landing in another tenant. `All` would not
   help here — it reads everything and writes nothing, by design.
 - **Its own transaction.** The scope settings are transaction-local; the
   handler does not share the kernel's write transaction, so it opens its own.
-  `SetScopeAsync` requires the transaction for exactly that reason.
+  `OpenScopedAsync` is the short form of opening a connection, beginning a
+  transaction and calling `SetScopeAsync(tx, scope)` on it; its
+  `CreateCommand()` binds every command to that transaction, so none can run
+  outside the scope by accident. Disposing without `CommitAsync` rolls back.
 - **Upsert with a version guard, delete as a no-op when absent.** Delivery is
   at-least-once and a rebuild replays everything (ADR-009, concepts §19); both
   statements are idempotent, and an older replay never overwrites a newer row.
@@ -127,14 +128,13 @@ Why each line is there:
 ## 3. Reading
 
 ```csharp
-await using var conn = await appData.OpenConnectionAsync(ct);
-await using var tx = await conn.BeginTransactionAsync(ct);
-await conn.SetScopeAsync(tx, scope, ct);
-
-await using var cmd = conn.CreateCommand();
-cmd.Transaction = tx;
-cmd.CommandText = "SELECT id, title FROM app.ticket_list ORDER BY title";   // no tenant filter needed
+await using var scoped = await appData.OpenScopedAsync(scope, ct);   // read: dispose rolls back
+await using var cmd = scoped.CreateCommand(
+    "SELECT id, title FROM app.ticket_list ORDER BY title");         // no tenant filter needed
 ```
+
+One call per read site. From F#, `runSession` disposes a `ScopedConnection` like a
+session (it takes any `IAsyncDisposable`).
 
 Add the `WHERE tenant_id = @tenantId` anyway where it helps the planner —
 layer 1 of concepts §23. RLS is the layer that holds when you forget it.

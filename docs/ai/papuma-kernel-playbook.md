@@ -113,7 +113,7 @@ Typed errors you should handle (not swallow): `ConcurrencyException`,
 | …**any derived read** — list, join, aggregation, search, external *(the default)* | an `IChangeHandler` projection (eventual, lag observable) |
 | …create or change a projection table | an `ISchemaContributor` with idempotent DDL (`AddSchemaContributor<T>()`); breaking changes = new table + new handler name (replay), not an in-place migration ([recipe](../recipes/projection-schema.md)) |
 | …show or test what one command did | `GetChangesByCorrelationAsync(session.CorrelationId)` — every change of that unit of work, all document types, feed order |
-| …keep tenant isolation on a projection table in the same database | RLS policy `USING (papuma.scope_visible(scope, tenant_id)) WITH CHECK (papuma.scope_writable(scope, tenant_id))`, handler sets `change.Scope` per change via `SetScopeAsync` — never copy the GUC names ([recipe](../recipes/same-database-read-models.md), ADR-019) |
+| …keep tenant isolation on a projection table in the same database | RLS policy `USING (papuma.scope_visible(scope, tenant_id)) WITH CHECK (papuma.scope_writable(scope, tenant_id))`, handler opens `appData.OpenScopedAsync(change.Scope)` per change (reads the same way, with the reader's scope) — never copy the GUC names ([recipe](../recipes/same-database-read-models.md), ADR-019) |
 | …ad-hoc SQL/BI, all 4 conditions met *(the exception)* | view with `security_invoker = on` (concepts §16) |
 | …change a single field without loading | `PatchAsync` (field-level LWW is deliberate there) |
 | …bound a stock (never oversell) | `Increment(-1)` + `Validate` (concepts §17) |
