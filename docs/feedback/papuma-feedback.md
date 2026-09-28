@@ -11,39 +11,9 @@ is addressed in the kernel, move it to *Resolved* with the version that fixed it
 ## Open
 
 aksara (F# wiki, 18 feed handlers, 31 own migrations) moved from 1.3.0 to 2.0.0 on
-2026-09-27. Every entry below was checked against the 2.0.0 source (`src/`) and the
-shipped docs, not only against aksara's code. Rough priority: F-16 and F-17 remove the
-most consumer code; F-18 and F-19 are small; F-20 and F-21 are docs or convenience.
-
-### F-21 — Scoped reads outside handlers take four lines per query site
-
-- Found: 2026-09-27 · 2.0.0 · code · **confirmed**
-- The tools are complete (`SetScopeAsync(tx, scope)`, `papuma.scope_visible` /
-  `scope_writable`, recipe `same-database-read-models.md` §3). The friction is volume:
-  aksara has about 60 read sites over its own `aksara.read_*` tables in endpoints and
-  query slices, each today a plain `where workspace_id = @ws`. Moving them under RLS means
-  connection + `BeginTransactionAsync` + `SetScopeAsync` + `cmd.Transaction` at every
-  site — easy to get wrong once (a command without `Transaction` runs outside the scoped
-  transaction) and the reason aksara has not adopted it yet.
-- Suggestion: a helper that makes the safe form the short form, e.g.
-  `await using var scoped = await dataSource.OpenScopedAsync(scope, ct)` returning the
-  connection with an open, scope-set transaction and a `CreateCommand()` that already
-  carries it; commit or roll back on dispose (read-only use: roll back). The recipe's §3
-  would shrink to that call.
-
-### F-20 — Append-only projections: the idempotency pattern is named, not shown
-
-- Found: 2026-09-27 · 2.0.0 · code + docs · **confirmed**
-- concepts §2 names the idempotency key (`handler + seq`), and upsert projections get it
-  for free through a version guard. An append-only projection (aksara's
-  `workspace-activity`: one row per page change, the newest 300 kept) has neither: an
-  at-least-once redelivery or a checkpoint reset duplicates rows. For the 2.0.0 rebuild
-  aksara had to empty the table before resetting the checkpoint (a one-shot
-  `ISchemaContributor`, see F-16).
-- Suggestion (docs only): a short paragraph in `projection-schema.md` or concepts §2 —
-  store `seq` in a unique column, `INSERT … ON CONFLICT (seq) DO NOTHING`; note that a
-  rebuild may order concurrent transactions differently (ADR-022), so ordering columns
-  should come from the change (`occurred_at`, version), not from the insert order.
+2026-09-27. Every entry was checked against the 2.0.0 source (`src/`) and the shipped
+docs, not only against aksara's code. F-16, F-18, F-20 and F-21 were resolved in 2.1.0;
+F-17 is half done, F-19 open.
 
 ### F-19 — Unique keys cannot be conditional
 
@@ -57,20 +27,6 @@ most consumer code; F-18 and F-19 are small; F-20 and F-21 are docs or convenien
 - Suggestion: an optional filter on keys, restricted to what translates into the partial
   index predicate — equality with a constant:
   `UniqueKey(x => x.UserId, where: x => x.Role == "owner")`.
-
-### F-18 — A session disposed with uncommitted writes is silent
-
-- Found: 2026-09-13 · 1.2.1, still in 2.0.0 · code · **confirmed**
-  (`DocumentSession.DisposeAsync`: implicit rollback, no log)
-- aksara's `InvitationStore.accept` saved the membership through `trySaveAsync`, got
-  `Ok`, and never called `CommitAsync`. The write vanished; only a slice test noticed.
-  The docs warn about it (AGENTS snippet, F# README), and aksara's own rules quote the
-  warning — it still happened, because `Ok` reads as done.
-- Suggestion: log a warning (with an `EventId`, document type and id) when a session with
-  pending writes is disposed without commit or explicit rollback; optionally a strict
-  mode that throws, for development and tests. In the F# facade, a
-  `runSessionCommitted` variant that commits when the body returns `Ok` would make the
-  common case impossible to get wrong.
 
 ### F-17 — Every projection reloads the document; changes arrive one at a time
 
@@ -92,29 +48,10 @@ most consumer code; F-18 and F-19 are small; F-20 and F-21 are docs or convenien
   3. Further out: an opt-in, policy-masked post-image on the record (ADR-016's masked
      reads already exist) for handlers that only project fields — only if (1)+(2) turn
      out insufficient, since it contradicts diff-only storage unless computed at read.
-
-### F-16 — The kernel cannot tell a projection from an effect handler; rebuilds are manual
-
-- Found: 2026-09-27 · 2.0.0 · API + code · **confirmed** (`IChangeHandler` has `Name` and
-  `HandleAsync` only; resetting is `ResetCheckpointAsync(name)` per handler)
-- The 2.0.0 upgrade note says "reset every handler whose output must be complete". The
-  kernel does not know which handlers those are: resettable projections and
-  non-resettable effect handlers (aksara: LLM job markers) share one interface. aksara
-  keeps the distinction in a table in its STATUS.md and, since this upgrade, in a
-  hand-written list, and had to build its own one-shot rebuild: a migration inserts a
-  request row, an `ISchemaContributor` (thanks to F-11 it runs before the workers) resets
-  the listed checkpoints under a row lock and marks the request done.
-- The recipe's route for breaking projection changes — a new handler name — leaves the
-  old checkpoint and failure rows behind and fights the "`Name` is identity, never rename
-  it" rule.
-- Suggestions:
-  1. A marker (`IProjection : IChangeHandler`, or `bool IsResettable`) so the kernel and
-     its tools (dashboard, MCP) can show and act on the distinction.
-  2. A `Version` on projections, stored with the checkpoint: when it differs at startup,
-     the kernel resets that checkpoint once (before the workers start). A breaking
-     projection change becomes "bump the version", the name stays stable.
-  3. `ResetProjectionsAsync()` — every resettable handler of both feeds in one call, so
-     an upgrade note like 2.0.0's becomes one line (or an option that runs it once).
+- **Status in 2.1.0**: suggestion 2 is in — `LoadManyAsync<T>(ids)` on both kernels
+  (one query, scope-bound, missing ids absent). Suggestion 1, the batch handler, waits
+  for a measurement: a batch changes the failure semantics (which record is poison?), so
+  it needs a number showing the per-change reload to be the bottleneck first.
 
 ## What works well
 
@@ -146,6 +83,102 @@ Kept so the maintainer knows what not to lose.
   stated and holds; not an open request.
 
 ## Resolved
+
+Resolved in 2.1.0 (2026-09-28) — to be checked against the package by aksara. 2.1.0 also
+fixes row-level security: the `All` scope could delete rows of every tenant (in
+`papuma.*` and in application tables built from the ADR-019 template — add the new
+restrictive `DELETE` policy to aksara's own RLS tables, see the 2.1.0 upgrade notes),
+and event retention deleted nothing under RLS.
+
+### F-21 — Scoped reads outside handlers take four lines per query site
+
+- Found: 2026-09-27 · 2.0.0 · code · **confirmed**
+- The tools are complete (`SetScopeAsync(tx, scope)`, `papuma.scope_visible` /
+  `scope_writable`, recipe `same-database-read-models.md` §3). The friction is volume:
+  aksara has about 60 read sites over its own `aksara.read_*` tables in endpoints and
+  query slices, each today a plain `where workspace_id = @ws`. Moving them under RLS means
+  connection + `BeginTransactionAsync` + `SetScopeAsync` + `cmd.Transaction` at every
+  site — easy to get wrong once (a command without `Transaction` runs outside the scoped
+  transaction) and the reason aksara has not adopted it yet.
+- Suggestion: a helper that makes the safe form the short form, e.g.
+  `await using var scoped = await dataSource.OpenScopedAsync(scope, ct)` returning the
+  connection with an open, scope-set transaction and a `CreateCommand()` that already
+  carries it; commit or roll back on dispose (read-only use: roll back). The recipe's §3
+  would shrink to that call.
+- **Resolved in 2.1.0**: `NpgsqlDataSource.OpenScopedAsync(scope)` returns a
+  `ScopedConnection` — connection, transaction and scope in one call; its
+  `CreateCommand()` binds every command to the scoped transaction, and a dispose without
+  `CommitAsync` rolls back. The same-database recipe and the playbook use it.
+
+### F-20 — Append-only projections: the idempotency pattern is named, not shown
+
+- Found: 2026-09-27 · 2.0.0 · code + docs · **confirmed**
+- concepts §2 names the idempotency key (`handler + seq`), and upsert projections get it
+  for free through a version guard. An append-only projection (aksara's
+  `workspace-activity`: one row per page change, the newest 300 kept) has neither: an
+  at-least-once redelivery or a checkpoint reset duplicates rows. For the 2.0.0 rebuild
+  aksara had to empty the table before resetting the checkpoint (a one-shot
+  `ISchemaContributor`, see F-16).
+- Suggestion (docs only): a short paragraph in `projection-schema.md` or concepts §2 —
+  store `seq` in a unique column, `INSERT … ON CONFLICT (seq) DO NOTHING`; note that a
+  rebuild may order concurrent transactions differently (ADR-022), so ordering columns
+  should come from the change (`occurred_at`, version), not from the insert order.
+- **Resolved in 2.1.0 (docs)**: `projection-schema.md` §3 keys append-only rows by the
+  change's `seq` (`ON CONFLICT (seq) DO NOTHING`), orders reads by `seq` (the same live
+  and after a rebuild) and prunes to the newest N after the insert; concepts §2 links it.
+
+### F-18 — A session disposed with uncommitted writes is silent
+
+- Found: 2026-09-13 · 1.2.1, still in 2.0.0 · code · **confirmed**
+  (`DocumentSession.DisposeAsync`: implicit rollback, no log)
+- aksara's `InvitationStore.accept` saved the membership through `trySaveAsync`, got
+  `Ok`, and never called `CommitAsync`. The write vanished; only a slice test noticed.
+  The docs warn about it (AGENTS snippet, F# README), and aksara's own rules quote the
+  warning — it still happened, because `Ok` reads as done.
+- Suggestion: log a warning (with an `EventId`, document type and id) when a session with
+  pending writes is disposed without commit or explicit rollback; optionally a strict
+  mode that throws, for development and tests. In the F# facade, a
+  `runSessionCommitted` variant that commits when the body returns `Ok` would make the
+  common case impossible to get wrong.
+- **Resolved in 2.1.0**: both kernels log a warning (event id 1001,
+  `UncommittedSessionDisposed`, with correlation id, count and first write) and count
+  `papuma.session.uncommitted_disposals` when a session with uncommitted writes is
+  disposed; `DiscardAsync()` rolls back on purpose, silently. F#: `runSessionCommitted`
+  commits on `Ok` and discards on `Error` — as suggested. The throwing strict mode was
+  left out: on an exception path it would replace the original exception. The F#
+  README's own `runSession` example had the same bug and now uses `runSessionCommitted`.
+
+### F-16 — The kernel cannot tell a projection from an effect handler; rebuilds are manual
+
+- Found: 2026-09-27 · 2.0.0 · API + code · **confirmed** (`IChangeHandler` has `Name` and
+  `HandleAsync` only; resetting is `ResetCheckpointAsync(name)` per handler)
+- The 2.0.0 upgrade note says "reset every handler whose output must be complete". The
+  kernel does not know which handlers those are: resettable projections and
+  non-resettable effect handlers (aksara: LLM job markers) share one interface. aksara
+  keeps the distinction in a table in its STATUS.md and, since this upgrade, in a
+  hand-written list, and had to build its own one-shot rebuild: a migration inserts a
+  request row, an `ISchemaContributor` (thanks to F-11 it runs before the workers) resets
+  the listed checkpoints under a row lock and marks the request done.
+- The recipe's route for breaking projection changes — a new handler name — leaves the
+  old checkpoint and failure rows behind and fights the "`Name` is identity, never rename
+  it" rule.
+- Suggestions:
+  1. A marker (`IProjection : IChangeHandler`, or `bool IsResettable`) so the kernel and
+     its tools (dashboard, MCP) can show and act on the distinction.
+  2. A `Version` on projections, stored with the checkpoint: when it differs at startup,
+     the kernel resets that checkpoint once (before the workers start). A breaking
+     projection change becomes "bump the version", the name stays stable.
+  3. `ResetProjectionsAsync()` — every resettable handler of both feeds in one call, so
+     an upgrade note like 2.0.0's becomes one line (or an option that runs it once).
+- **Resolved in 2.1.0, suggestions 1–3** (kernel ADR-024): `IProjection` (`Version` +
+  idempotent `ResetAsync`) marks a projection; a raised version rebuilds it once at the
+  next start under the same name, and instances running older code in a rolling deploy
+  pause it. `ResetProjectionsAsync()` / `ResetProjectionAsync(name)`; the dashboard and
+  `get_feed_lag` show the kind, and the MCP reset refuses effects. Beyond the suggestion:
+  `[StartsAtFeedHead]` lets an effect's first start skip the history (a new handler
+  starts at the beginning). Note for aksara's hand-written rebuild: the first start of an
+  existing projection only records its version — raise it once to rebuild through the
+  kernel, then the migration row and its contributor can go.
 
 F-10 to F-14 were checked against the 1.4.0 package on 2026-09-27 — `ISchemaContributor`
 and `AddSchemaContributor<T>()` with the `projection-schema.md` recipe,
