@@ -30,6 +30,11 @@ Changes:
   rows by the change's `seq` (`ON CONFLICT (seq) DO NOTHING`), so redelivery and rebuild
   add nothing twice and a reset needs no `TRUNCATE`; reads order by `seq`, which is the
   same live and after a rebuild; pruning to the newest N stays correct.
+- **New: `LoadManyAsync<T>(ids)`** on both kernels' sessions (feedback F-17, part 2) —
+  several documents of one type by id in one query, scope-bound, including the session's
+  own uncommitted writes; missing ids are absent from the result, duplicates load once.
+  The batch handler interface from the same entry is deferred until a measurement shows
+  the per-change reload to be the bottleneck.
 
 ## 2.0.0 (2026-09-27)
 

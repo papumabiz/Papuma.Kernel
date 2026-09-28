@@ -101,6 +101,12 @@ state."* An opt-in mode would cross it inside the same package.
   only purpose is lookup by aggregate id (no reshaping, no aggregation), or a
   measured payload-predicate query on `papuma.event` that exceeds its latency
   budget and cannot be moved to a projection.
+  **Shape, if triggered:** prefer **tags** (`tags text[]`, GIN-indexed,
+  `AppendAsync(event, tags)`) over a single `stream_id`. Tags cover lookup by
+  aggregate id and by any other subject (customer, data subject) without fixing
+  one "stream per aggregate" cut — the model Dynamic Consistency Boundaries
+  (dcb.events) use in place of streams — and they give GDPR tooling an
+  addressable subject handle.
 
 ## Related
 

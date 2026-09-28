@@ -77,6 +77,7 @@ await s.CommitAsync();                              // otherwise: rollback on di
 var r = await s.LoadAsync<User>(id);                // r.Document, r.Version
 var byKey = await s.LoadByKeyAsync<User>(x => x.Email, "x@y.de");
 var ticket = await s.LoadByKeyAsync<Ticket>(x => new { x.ProjectId, x.Number }, ["p1", 42]);
+var many = await s.LoadManyAsync<User>(ids);        // one query; missing ids absent, by id
 var history = await s.GetHistoryAsync<User>(id, fromVersion: 3);
 var commandEffect = await s.GetChangesByCorrelationAsync(correlationId);   // one unit of work, all types
 
@@ -110,6 +111,7 @@ Typed errors you should handle (not swallow): `ConcurrencyException`,
 | Need | Tool |
 |---|---|
 | …read one current document (login, business logic) | `LoadAsync` / `LoadByKeyAsync` (immediately consistent) |
+| …read several documents of one type by id (a projection's batch, a detail view) | `LoadManyAsync<T>(ids)` — one query instead of one per id |
 | …**any derived read** — list, join, aggregation, search, external *(the default)* | an `IChangeHandler` projection (eventual, lag observable) |
 | …create or change a projection table | an `ISchemaContributor` with idempotent DDL (`AddSchemaContributor<T>()`); breaking changes = new table + new handler name (replay), not an in-place migration ([recipe](../recipes/projection-schema.md)) |
 | …show or test what one command did | `GetChangesByCorrelationAsync(session.CorrelationId)` — every change of that unit of work, all document types, feed order |

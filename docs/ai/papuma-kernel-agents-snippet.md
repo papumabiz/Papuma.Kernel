@@ -32,7 +32,7 @@ derived automatically. NOT event sourcing, NOT an ORM, NO query DSL.
 4. Personal fields ARE UNDER A POLICY before they are ever stored:
    `[SensitiveData]` / `[TrackHash]` / `[DoNotTrack]` or a fluent override.
 5. Reading has a default order, not a free menu: one current document →
-   `LoadAsync`/`LoadByKeyAsync` (declared keys, immediately consistent); anything
+   `LoadAsync`/`LoadByKeyAsync`/`LoadManyAsync` (declared keys, immediately consistent); anything
    derived — list, join, aggregation, search, external — → an `IChangeHandler`
    projection, **THE DEFAULT**. A SQL view over `papuma.*` is the exception, not a
    peer choice: only ad-hoc/reporting/BI, read-only, `security_invoker = on`,
@@ -99,7 +99,7 @@ derived automatically. NOT event sourcing, NOT an ORM, NO query DSL.
 4. Personal fields ARE UNDER A POLICY before they are ever stored:
    `[SensitiveData]` / `[TrackHash]` / `[DoNotTrack]` or a fluent override.
 5. Reading has a default order, not a free menu: one current document →
-   `LoadAsync`/`LoadByKeyAsync` (declared keys, immediately consistent); anything
+   `LoadAsync`/`LoadByKeyAsync`/`LoadManyAsync` (declared keys, immediately consistent); anything
    derived — list, join, aggregation, search, external — → an `IChangeHandler`
    projection, **ALWAYS** (there is no SQL-view read lens on SQLite — that
    Postgres exception doesn't apply here). Never invent a query DSL.

@@ -221,6 +221,58 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
     }
 
     /// <summary>
+    /// Loads several documents of one type by id in a single query — for projections and
+    /// read paths that would otherwise load them one at a time. Ids that do not exist in
+    /// this scope are absent from the result; duplicates are loaded once. Sees the
+    /// session's own uncommitted writes.
+    /// </summary>
+    /// <typeparam name="T">The document CLR type.</typeparam>
+    /// <param name="ids">The document identifiers.</param>
+    /// <param name="ct">A cancellation token.</param>
+    /// <returns>The documents found, by id.</returns>
+    public async Task<IReadOnlyDictionary<string, DocumentResult<T>>> LoadManyAsync<T>(
+        IEnumerable<string> ids, CancellationToken ct = default)
+        where T : class
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        var metadata = _model.GetRequired<T>();
+        var distinct = ids.Distinct(StringComparer.Ordinal).ToArray();
+        foreach (var id in distinct)
+        {
+            InputValidator.ValidateDocumentId(id);
+        }
+
+        var documents = new Dictionary<string, DocumentResult<T>>(distinct.Length, StringComparer.Ordinal);
+        if (distinct.Length == 0)
+        {
+            return documents;
+        }
+
+        var (conn, tx) = await EnsureTransactionAsync(ct);
+
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            SELECT id, data, version, schema_version
+            FROM document
+            WHERE scope = @scope AND tenant_id = @tenantId
+              AND document_type = @type AND id IN (SELECT value FROM json_each(@ids))
+            """;
+        AddScopeParameters(cmd, metadata.Name);
+        cmd.Parameters.AddWithValue("ids", JsonSerializer.Serialize(distinct)); // no parameter limit
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var id = reader.GetString(0);
+            var document = DeserializeDocument<T>(metadata, id, reader.GetString(1), reader.GetInt32(3));
+            documents[id] = new DocumentResult<T>(document, reader.GetInt64(2));
+        }
+
+        return documents;
+    }
+
+    /// <summary>
     /// Loads a document by a declared single-field key (ADR-006), or returns <c>null</c>
     /// when no document matches. Throws when the key matches more than one document —
     /// declare the key unique if single-match semantics are required.
