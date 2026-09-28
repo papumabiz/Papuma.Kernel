@@ -1608,6 +1608,47 @@ store for that bounded context, integrated through the feeds. Papuma stays the
 kernel that gives you the benefits of event sourcing without its mandate, and
 says plainly where that ends.
 
+## 34. "At most one per …": a slot document, not a conditional key
+
+→ [ADR-020](adr/adr-020-composite-keys.md) (amended: conditional keys deferred), §31
+
+"At most one owner per workspace, any number of editors." "One active subscription
+per customer", "one default address", "one open draft". A unique key cannot say it —
+it constrains every value — and a *conditional* key
+(`UniqueKey(x => x.WorkspaceId, where: x => x.Role == "owner")`) is deliberately not
+offered.
+
+The rule is expressible today, atomically, through the one uniqueness the kernel
+always enforces: the document id. Give the slot a document of its own, with an id
+derived from what it is unique for:
+
+```csharp
+public sealed record WorkspaceOwner(string Id, string UserId);   // Id = the workspace id
+
+await using var session = store.OpenSession(scope);
+await session.SaveAsync(new WorkspaceOwner(workspaceId, userId), 0);   // taken → ConcurrencyException
+await session.SaveAsync(new Membership(membershipId, workspaceId, userId, "owner"), 0);
+await session.CommitAsync();
+```
+
+Inserting with `expectedVersion: 0` fails when the slot is taken — the same optimistic
+check as every write, on the primary key, in the same transaction as the rest. **The
+slot goes first.** Each write runs under its own savepoint, so a failed slot insert
+does not undo writes made before it; written first, it is the gate before anything
+else exists (the same order as "save first" in §33). Transferring the slot is an update
+with its version, freeing it a delete. The rule is a document: readable, in the feed
+like any other, and nothing to migrate when it changes. When the "one" belongs to a
+parent document anyway, a field on the parent is the other good shape — aksara moved
+its owner onto the workspace.
+
+Why not the conditional key after all? Three costs that the slot document does not
+have. The kernel never drops indexes (ADR-006): change a key's condition and the old
+partial index stays in force, silently enforcing the old rule. The condition's
+constants would have to compare identically in two JSON engines (SQLite reads `true`
+as `1`). And lookups by the key would have to apply the condition too. ADR-020 records
+the trigger to revisit it: two applications with a case the slot document cannot
+model.
+
 ---
 
 *Maintenance note: add new explainers from later phases here — this document is

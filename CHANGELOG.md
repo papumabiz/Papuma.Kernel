@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+Changes:
+
+- **Docs: "at most one per …"** (feedback F-19) — concepts §34 and the playbook show the
+  slot document (an id derived from what it is unique for, inserted first with
+  `expectedVersion: 0`) as the way to express uniqueness among documents in a state.
+  Conditional keys are deferred against a trigger (ADR-020, amended).
+
 ## 2.1.0 (2026-09-28)
 
 The feedback round from aksara (F-16 to F-21) and a row-level security fix. **Every

@@ -127,6 +127,7 @@ Typed errors you should handle (not swallow): `ConcurrencyException`,
 | …change a single field without loading | `PatchAsync` (field-level LWW is deliberate there) |
 | …bound a stock (never oversell) | `Increment(-1)` + `Validate` (concepts §17) |
 | …hand out sequential numbers (ticket keys, invoices) | `PatchAsync(id, p => p.Increment(x => x.Next))`, then `result.GetDocument<T>().Next` — atomic, no reload; make the command idempotent, or a retry issues a second number (concepts §17) |
+| …allow at most one document in a state per parent ("one owner per workspace", "one default address") | a slot document whose id is derived from the parent (`WorkspaceOwner` with `Id = workspaceId`), inserted with `expectedVersion: 0` **first** in the session — not a conditional key (concepts §34, ADR-020) |
 | …enforce uniqueness over two fields ("number per project") | composite key `UniqueKey(x => new { x.ProjectId, x.Number })`; lookup `LoadByKeyAsync<T>(x => new { … }, ["p1", 42])` — no flattened helper field (ADR-020) |
 | …use a GUID as tenant id | `ScopeContext.Tenant(guid)` — canonical lowercase dashed form; string ids match `^[A-Za-z0-9][A-Za-z0-9_-]{1,100}$` and compare case-sensitively |
 | …use the store in tools without a host | `SchemaManager.EnsureSchemaAsync(dataSource, model)` + `new DocumentStore(dataSource, model)`; handlers via `ChangeFeedProcessor.ProcessOnceAsync()` ([getting-started §7](../getting-started.md#7-without-a-host-tests-tools-console-apps)) |

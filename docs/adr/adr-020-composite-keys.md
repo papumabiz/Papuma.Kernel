@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted (2026-09-25) — amends [ADR-006](adr-006-keys-and-constraints.md)
+Accepted (2026-09-25) — amends [ADR-006](adr-006-keys-and-constraints.md); amended
+2026-09-28 — conditional keys deferred against a trigger (see *Amendment*)
 
 ## Context
 
@@ -72,6 +73,28 @@ feedback (jejak, F-5) used it and named the costs:
   comma form, or switch to `KeyPaths`.
 - **Neutral:** Bulk operations over a composite key are not offered; select ids
   and use `PatchManyAsync`/`DeleteManyAsync`. Revisit only on repeated demand.
+
+## Amendment (2026-09-28): conditional keys are deferred
+
+aksara (feedback F-19) asked for a filter on keys — "unique among the documents in state
+X" (`UniqueKey(x => x.UserId, where: x => x.Role == "owner")`), translated into the
+partial index predicate. Not now:
+
+- **Index lifecycle.** The kernel never drops indexes (ADR-006). A changed condition
+  gets a new index; the old one stays in force and silently enforces the old rule. A
+  key without a condition does not have this failure mode in practice.
+- **Constant fidelity.** The constant must compare exactly as the serializer writes it,
+  in two JSON engines (`#>>` text in PostgreSQL, `json_extract` values in SQLite, where
+  `true` reads as `1`) — a type matrix for enums, numbers, booleans and dates.
+- **Surface.** `LoadByKeyAsync` would have to apply the condition, and the F# facade
+  would need it as a quotation.
+- **An alternative exists.** A slot document with a derived id — the kernel's primary
+  key as the uniqueness, written first in the session — expresses "at most one per …"
+  atomically today (concepts §34).
+
+**Trigger to revisit:** two applications report a case the slot document cannot model.
+The design then includes a way to find orphaned key indexes (for example a startup
+check that reports indexes of undeclared keys), so a changed condition cannot linger.
 
 ## Alternatives considered
 

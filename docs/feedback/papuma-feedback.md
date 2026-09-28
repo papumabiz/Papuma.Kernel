@@ -12,21 +12,8 @@ is addressed in the kernel, move it to *Resolved* with the version that fixed it
 
 aksara (F# wiki, 18 feed handlers, 31 own migrations) moved from 1.3.0 to 2.0.0 on
 2026-09-27. Every entry was checked against the 2.0.0 source (`src/`) and the shipped
-docs, not only against aksara's code. F-16, F-18, F-20 and F-21 were resolved in 2.1.0;
-F-17 is half done, F-19 open.
-
-### F-19 — Unique keys cannot be conditional
-
-- Found: 2026-09-13 (aksara ADR-0006 amendment) · 1.2.1, still in 2.0.0 · API ·
-  **confirmed** (`DocumentTypeBuilder<T>.UniqueKey(Expression<…>)` is the only overload)
-- aksara wanted "at most one `Membership` with `Role = "owner"` per workspace, any number
-  of editors". A unique key constrains every value, so it cannot express that; the owner
-  moved to a field on `Workspace`. That model is fine — arguably better — so this is low
-  priority, but "unique among the documents in state X" is a common invariant (one
-  active subscription, one default address, one open draft).
-- Suggestion: an optional filter on keys, restricted to what translates into the partial
-  index predicate — equality with a constant:
-  `UniqueKey(x => x.UserId, where: x => x.Role == "owner")`.
+docs, not only against aksara's code. F-16, F-18, F-20 and F-21 were resolved in 2.1.0,
+F-19 with docs after it; F-17 is half done.
 
 ### F-17 — Every projection reloads the document; changes arrive one at a time
 
@@ -83,6 +70,28 @@ Kept so the maintainer knows what not to lose.
   stated and holds; not an open request.
 
 ## Resolved
+
+Resolved after 2.1.0 (docs only; ships with the next release).
+
+### F-19 — Unique keys cannot be conditional
+
+- Found: 2026-09-13 (aksara ADR-0006 amendment) · 1.2.1, still in 2.0.0 · API ·
+  **confirmed** (`DocumentTypeBuilder<T>.UniqueKey(Expression<…>)` is the only overload)
+- aksara wanted "at most one `Membership` with `Role = "owner"` per workspace, any number
+  of editors". A unique key constrains every value, so it cannot express that; the owner
+  moved to a field on `Workspace`. That model is fine — arguably better — so this is low
+  priority, but "unique among the documents in state X" is a common invariant (one
+  active subscription, one default address, one open draft).
+- Suggestion: an optional filter on keys, restricted to what translates into the partial
+  index predicate — equality with a constant:
+  `UniqueKey(x => x.UserId, where: x => x.Role == "owner")`.
+- **Resolved (docs, after 2.1.0), feature deferred**: concepts §34 and the playbook show
+  the slot document — an id derived from what it is unique for, inserted first with
+  `expectedVersion: 0` — as the atomic way to say "at most one per …" today; aksara's
+  owner-on-the-workspace is named as the other good shape. Conditional keys are deferred
+  in ADR-020 (amended): the kernel never drops indexes, so a changed condition would
+  leave the old rule silently in force; the trigger is two applications with a case the
+  slot document cannot model.
 
 Resolved in 2.1.0 (2026-09-28) — to be checked against the package by aksara. 2.1.0 also
 fixes row-level security: the `All` scope could delete rows of every tenant (in
