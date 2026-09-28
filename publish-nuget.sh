@@ -18,6 +18,15 @@
 # Optional flags:
 #   --dry-run   Pack only, do not upload
 #   --version X Override the version number (e.g. --version 1.2.0)
+#   --tag T     Pack the tagged commit T (e.g. --tag v1.2.0) instead of the working
+#               tree: a temporary git worktree is checked out at the tag, packed and
+#               removed again. Use it for releases — the working tree may already be
+#               ahead of the tag (docs ship inside the packages). For a tag of the
+#               form vX.Y.Z (or X.Y.Z) every package must carry version X.Y.Z, or
+#               nothing is uploaded. Cannot be combined with --version.
+#
+# Without --tag the working tree is packed as it is; the script warns when HEAD is
+# not exactly a tagged commit or has uncommitted changes.
 #
 # Environment variables (optional; derived automatically when unset):
 #   GITHUB_OWNER – GitHub organisation or user the packages land under.
@@ -32,6 +41,7 @@
 #   ./publish-nuget.sh                      # derive owner + token automatically
 #   ./publish-nuget.sh --version 1.1.0
 #   ./publish-nuget.sh --dry-run
+#   ./publish-nuget.sh --tag v1.1.0 --dry-run   # check a release, then run it without --dry-run
 #
 #   # Publish under a different owner (e.g. a fork / another account):
 #   GITHUB_OWNER=other-org ./publish-nuget.sh
@@ -53,6 +63,7 @@ NC='\033[0m' # No Color
 # ── Parse arguments ───────────────────────────────────────────────────────────
 DRY_RUN=false
 VERSION_OVERRIDE=""
+RELEASE_TAG=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -64,12 +75,21 @@ while [[ $# -gt 0 ]]; do
       VERSION_OVERRIDE="$2"
       shift 2
       ;;
+    --tag)
+      RELEASE_TAG="$2"
+      shift 2
+      ;;
     *)
       echo -e "${RED}Unknown argument: $1${NC}"
       exit 1
       ;;
   esac
 done
+
+if [ -n "$RELEASE_TAG" ] && [ -n "$VERSION_OVERRIDE" ]; then
+  echo -e "${RED}--tag and --version cannot be combined: a tag is released with the version it carries.${NC}"
+  exit 1
+fi
 
 # ── Determine the GitHub owner ────────────────────────────────────────────────
 # Parsed from the "origin" remote unless given as an environment variable, so the
@@ -91,8 +111,45 @@ fi
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-OUTPUT_DIR="./nupkg"
+REPO_ROOT=$(pwd)
+OUTPUT_DIR="${REPO_ROOT}/nupkg"
+# dotnet is a native program: on Git for Windows it would read /c/... as C:\c\...
+OUTPUT_DIR_NATIVE=$(cygpath -m "${OUTPUT_DIR}" 2>/dev/null || echo "${OUTPUT_DIR}")
 FEED_URL="https://nuget.pkg.github.com/${GITHUB_OWNER:-unknown}/index.json"
+
+# ── Choose the source: a tagged commit, or the working tree ────────────────────
+# A release packs the tag, not whatever happens to be checked out: the working tree
+# may already be ahead of the tag, and the docs ship inside the packages.
+WORKTREE_DIR=""
+EXPECTED_VERSION=""
+if [ -n "$RELEASE_TAG" ]; then
+  if ! git rev-parse -q --verify "refs/tags/${RELEASE_TAG}^{commit}" >/dev/null; then
+    echo -e "${RED}Tag '${RELEASE_TAG}' not found (git tag --list shows the local tags; git fetch --tags fetches them).${NC}"
+    exit 1
+  fi
+
+  WORKTREE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/publish-nuget.XXXXXX")
+  # Git for Windows needs a native path; elsewhere cygpath does not exist.
+  WORKTREE_GIT_PATH=$(cygpath -m "${WORKTREE_DIR}" 2>/dev/null || echo "${WORKTREE_DIR}")
+
+  cleanup_worktree() {
+    cd "${REPO_ROOT}"
+    git worktree remove --force "${WORKTREE_GIT_PATH}" >/dev/null 2>&1 || rm -rf "${WORKTREE_DIR}"
+    git worktree prune >/dev/null 2>&1 || true
+  }
+  trap cleanup_worktree EXIT
+
+  git worktree add --detach --quiet "${WORKTREE_GIT_PATH}" "${RELEASE_TAG}"
+  cd "${WORKTREE_DIR}"
+
+  # vX.Y.Z / X.Y.Z (optionally with a pre-release suffix) → the version every package must carry.
+  if [[ "${RELEASE_TAG}" =~ ^v?([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$ ]]; then
+    EXPECTED_VERSION="${BASH_REMATCH[1]}"
+  fi
+  SOURCE_DESCRIPTION="tag ${RELEASE_TAG} ($(git rev-parse --short HEAD))"
+else
+  SOURCE_DESCRIPTION="working tree ($(git rev-parse --short HEAD 2>/dev/null || echo 'no commit'))"
+fi
 
 # Display name for the banner: name of the solution file (*.sln/*.slnx) in the
 # repository root, otherwise the name of the current directory.
@@ -101,7 +158,7 @@ if [ -n "$SOLUTION_FILE" ]; then
   REPO_NAME=$(basename "$SOLUTION_FILE")
   REPO_NAME="${REPO_NAME%.*}"
 else
-  REPO_NAME=$(basename "$(pwd)")
+  REPO_NAME=$(basename "${REPO_ROOT}")
 fi
 
 # Discover every project to pack: each project under src/<Name>/<Name>.csproj|.fsproj
@@ -156,6 +213,8 @@ print_box() {
 echo ""
 print_box "${REPO_NAME} – NuGet Publish"
 echo ""
+echo -e "  Source: ${SOURCE_DESCRIPTION}"
+echo ""
 
 if [ "$DRY_RUN" = true ]; then
   echo -e "${YELLOW}  ⚠  DRY RUN – packages are built but NOT uploaded${NC}"
@@ -167,13 +226,25 @@ if [ -n "$VERSION_OVERRIDE" ]; then
   echo ""
 fi
 
+# Packing the working tree for a release is easy to get wrong: say so.
+if [ -z "$RELEASE_TAG" ]; then
+  if ! git describe --exact-match --tags HEAD >/dev/null 2>&1; then
+    echo -e "${YELLOW}  ⚠  HEAD is not a tagged commit — for a release, use --tag <tag>${NC}"
+    echo ""
+  fi
+  if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+    echo -e "${YELLOW}  ⚠  Uncommitted changes in the working tree are packed too${NC}"
+    echo ""
+  fi
+fi
+
 # ── Step 1: pack everything ───────────────────────────────────────────────────
 echo -e "${CYAN}==> Step 1: packing${NC}"
 echo ""
 
 PACK_ARGS=(
   "--configuration" "Release"
-  "--output" "${OUTPUT_DIR}"
+  "--output" "${OUTPUT_DIR_NATIVE}"
 )
 
 # Override the version number when one was given
@@ -190,6 +261,11 @@ for PROJECT in "${PROJECTS[@]}"; do
 done
 
 # ── Show the resulting packages ───────────────────────────────────────────────
+if ! compgen -G "${OUTPUT_DIR}/*.nupkg" >/dev/null; then
+  echo -e "${RED}No packages found in ${OUTPUT_DIR} after packing — nothing to upload.${NC}"
+  exit 1
+fi
+
 echo -e "${CYAN}==> Packages produced:${NC}"
 echo ""
 for NUPKG in "${OUTPUT_DIR}"/*.nupkg; do
@@ -198,12 +274,38 @@ for NUPKG in "${OUTPUT_DIR}"/*.nupkg; do
 done
 echo ""
 
+# ── A tag's packages must carry the tag's version ─────────────────────────────
+# Catches a tag whose version bump was forgotten — before anything is uploaded.
+if [ -n "$EXPECTED_VERSION" ]; then
+  MISMATCHED=0
+  for NUPKG in "${OUTPUT_DIR}"/*.nupkg; do
+    case "$(basename "${NUPKG}")" in
+      *".${EXPECTED_VERSION}.nupkg") ;;
+      *)
+        echo -e "  ${RED}✗ $(basename "${NUPKG}") does not carry version ${EXPECTED_VERSION} (tag ${RELEASE_TAG})${NC}"
+        MISMATCHED=$((MISMATCHED + 1))
+        ;;
+    esac
+  done
+  if [ "$MISMATCHED" -gt 0 ]; then
+    echo ""
+    echo -e "${RED}Version check failed — nothing uploaded. Is the version bump part of tag ${RELEASE_TAG}?${NC}"
+    exit 1
+  fi
+  echo -e "  ${GREEN}✓ All packages carry version ${EXPECTED_VERSION} (tag ${RELEASE_TAG})${NC}"
+  echo ""
+fi
+
 # ── Step 2: upload ────────────────────────────────────────────────────────────
 if [ "$DRY_RUN" = true ]; then
   echo -e "${YELLOW}==> Dry run: upload skipped.${NC}"
   echo ""
   echo -e "  To upload, run:"
-  echo -e "  ${CYAN}./publish-nuget.sh${NC}"
+  if [ -n "$RELEASE_TAG" ]; then
+    echo -e "  ${CYAN}./publish-nuget.sh --tag ${RELEASE_TAG}${NC}"
+  else
+    echo -e "  ${CYAN}./publish-nuget.sh${NC}"
+  fi
   echo ""
   exit 0
 fi

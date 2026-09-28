@@ -8,6 +8,11 @@ Changes:
   slot document (an id derived from what it is unique for, inserted first with
   `expectedVersion: 0`) as the way to express uniqueness among documents in a state.
   Conditional keys are deferred against a trigger (ADR-020, amended).
+- **Tooling: `publish-nuget.sh --tag vX.Y.Z`** packs the tagged commit in a temporary
+  worktree instead of the working tree (which may be ahead of the tag — the docs ship
+  inside the packages), and refuses to upload unless every package carries the tag's
+  version. Without `--tag` it warns when HEAD is not a tagged commit or has uncommitted
+  changes. The output path is passed to `dotnet` natively on Git for Windows.
 
 ## 2.1.0 (2026-09-28)
 
