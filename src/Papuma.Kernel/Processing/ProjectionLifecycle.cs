@@ -11,7 +11,7 @@ namespace Papuma.Kernel.Processing;
 
 /// <summary>
 /// Registration, versioned rebuild and reset of feed handlers (ADR-024), shared by the
-/// change and the event processor. <paramref name="key"/> parameters are checkpoint keys
+/// change and the event processor. <c>key</c> parameters are checkpoint keys
 /// (the event feed prefixes <c>event:</c>); failure entries use the same key.
 /// </summary>
 internal static class ProjectionLifecycle

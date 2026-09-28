@@ -1,6 +1,6 @@
 # Papuma Kernel — Technical Factsheet
 
-Version `2.0.0` · Target framework .NET 10 · MIT licensed
+Version `2.1.0` · Target framework .NET 10 · MIT licensed
 
 Two persistence kernels for .NET, sharing one document-sourced model:
 `Papuma.Kernel` (requires PostgreSQL ≥ 18, for servers) and
@@ -87,7 +87,7 @@ Commodity hardware (i7, local PostgreSQL 18 container). The probes are in
 | Feed delivery overhead per change | ~37 µs |
 | Projection handler, 1 SQL upsert per change | ~1,400 changes/s |
 | Diff of a 1,000-field document | ~0.3 ms |
-| Test suite against real PostgreSQL 18 (per CI build) | 224, passing |
+| Test suite against real PostgreSQL 18 (per CI build) | 244, passing |
 
 Known scaling limits are documented alongside the metric that detects each and
 the intended mitigation (`docs/concepts.md §14`) rather than left implicit.
@@ -133,7 +133,7 @@ the intended mitigation (`docs/concepts.md §14`) rather than left implicit.
 
 ## 6. Maturity (`Papuma.Kernel`)
 
-The design is complete: 13 implementation phases, 23 ADRs, each identified risk
+The design is complete: 13 implementation phases, 24 ADRs, each identified risk
 closed with a test or a measurement; the full suite runs against real
 PostgreSQL 18 on every CI build. It has **not yet run production traffic**.
 Suitable today for internal line-of-business systems and new products by teams
@@ -142,7 +142,7 @@ workloads, run a pilot first; the observability needed to evaluate it is built
 in.
 
 `Papuma.Kernel.Local` is newer and earlier-stage: full API parity with the
-Postgres kernel's write/read/patch/GDPR/rollback/feed-processing surface, 71
+Postgres kernel's write/read/patch/GDPR/rollback/feed-processing surface, 80
 tests green against the real SQLite engine (including empirically pinned
 driver behavior — WAL mode, busy timeouts, expression-index matching — not
 assumed), but zero production hours and no throughput measurements yet, only

@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 2.1.0 (2026-09-28)
+
+The feedback round from aksara (F-16 to F-21) and a row-level security fix. **Every
+PostgreSQL user of 2.0.x should upgrade** — in 2.0.x the `All` scope could delete rows of
+every tenant, and event retention deleted nothing under RLS. Source-compatible; the
+schema migrates itself at startup. Add the `DELETE` policy below to your own RLS tables.
 
 Upgrade notes — what a consumer of 2.0.x can notice:
 
@@ -49,6 +54,9 @@ Changes:
   own uncommitted writes; missing ids are absent from the result, duplicates load once.
   The batch handler interface from the same entry is deferred until a measurement shows
   the per-change reload to be the bottleneck.
+- **`Papuma.Kernel.Testing`: `GrantAppRoleAsync(schema)` also grants `TRUNCATE`** on
+  application schemas — the reset of a projection under row-level security — but never
+  on `papuma`, where `TRUNCATE` would bypass RLS.
 - **New: projections and effects are declared** (ADR-024, feedback F-16). A projection
   implements `IProjection` — a `Version` and an idempotent `ResetAsync` that empties its
   target. A raised version rebuilds it once at the next start, under the same name;
