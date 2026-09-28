@@ -112,9 +112,12 @@ savepoints: a failure does not discard earlier session writes.
 ## 4. Reacting — change handlers
 
 ```csharp
-public sealed class UserProjection : IChangeHandler
+public sealed class UserProjection : IChangeHandler, IProjection
 {
     public string Name => "user-projection";
+    public int Version => 1;                               // raise → rebuilt at the next start
+
+    public Task ResetAsync(CancellationToken ct) => /* empty your target, e.g. TRUNCATE */ Task.CompletedTask;
 
     public async Task HandleAsync(ChangeRecord change, CancellationToken ct)
     {

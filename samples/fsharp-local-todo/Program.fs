@@ -54,7 +54,9 @@ let private createTodo (ctx: HttpContext) : Task =
                         // CommitAsync — disposing without it is an implicit rollback
                         // (SqliteDocumentSession.cs remarks). Easy to miss for a single
                         // write since it "looks" done already; the kernel doesn't
-                        // auto-commit a lone Save/Patch on your behalf.
+                        // auto-commit a lone Save/Patch on your behalf (a dispose with
+                        // uncommitted writes is logged). A body that only returns the
+                        // Result can use runSessionCommitted, which commits on Ok.
                         do! session.CommitAsync()
                         ctx.Response.StatusCode <- 201
                         do! ctx.Response.WriteAsJsonAsync(toResponse result.Version todo)

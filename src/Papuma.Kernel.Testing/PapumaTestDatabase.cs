@@ -144,6 +144,9 @@ public sealed partial class PapumaTestDatabase : IAsyncDisposable
     /// <summary>
     /// Grants the application role usage of a schema and DML on all its current tables —
     /// for the application's own tables (projection targets, ADR-019), after creating them.
+    /// Application schemas also get <c>TRUNCATE</c>, the reset of a projection under
+    /// row-level security (ADR-024); <c>papuma</c> never does — <c>TRUNCATE</c> is not
+    /// subject to RLS.
     /// </summary>
     /// <param name="schema">The schema name.</param>
     /// <param name="ct">A cancellation token.</param>
@@ -154,9 +157,10 @@ public sealed partial class PapumaTestDatabase : IAsyncDisposable
         await using var conn = await OwnerDataSource.OpenConnectionAsync(ct);
         await using var cmd = conn.CreateCommand();
         var quotedSchema = QuoteIdentifier(schema);
+        var truncate = schema == "papuma" ? string.Empty : ", TRUNCATE";
         cmd.CommandText = $"""
             GRANT USAGE ON SCHEMA {quotedSchema} TO {AppRoleName};
-            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {quotedSchema} TO {AppRoleName};
+            GRANT SELECT, INSERT, UPDATE, DELETE{truncate} ON ALL TABLES IN SCHEMA {quotedSchema} TO {AppRoleName};
             """;
         await cmd.ExecuteNonQueryAsync(ct);
     }

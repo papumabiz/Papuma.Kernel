@@ -38,9 +38,16 @@ CREATE POLICY scope_delete ON app.product_embedding AS RESTRICTIVE FOR DELETE
 ```csharp
 public sealed class ProductEmbeddingProjection(
     DocumentStore store, NpgsqlDataSource dataSource, IEmbeddingClient embeddings)
-    : IChangeHandler
+    : IChangeHandler, IProjection
 {
     public string Name => "product-embeddings";   // checkpoint identity
+    public int Version => 1;                      // raise it to re-embed everything (ADR-024)
+
+    public async Task ResetAsync(CancellationToken ct)
+    {
+        await using var cmd = dataSource.CreateCommand("TRUNCATE app.product_embedding");
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
 
     public async Task HandleAsync(ChangeRecord change, CancellationToken ct)
     {
@@ -118,6 +125,7 @@ The event feed is a chronological fact stream per scope — ideal fodder for
 detection logic (rule-based or model-based). Again, just a handler:
 
 ```csharp
+[StartsAtFeedHead] // an effect: added later, it must not flag years of past logins
 public sealed class LoginAnomalyDetector(DocumentStore store) : IEventHandler
 {
     public string Name => "login-anomaly-detector";

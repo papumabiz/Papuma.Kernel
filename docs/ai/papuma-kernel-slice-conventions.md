@@ -88,9 +88,11 @@ public static Task<DocumentResult<Order>?> Handle(DocumentStore store, ScopeCont
 
 // Projection view — for aggregations/search/external targets. INVARIANT shape,
 // VARIABLE mapping body.
-public sealed class OrderSummaryProjection(/* target client */) : IChangeHandler
+public sealed class OrderSummaryProjection(/* target client */) : IChangeHandler, IProjection
 {
     public string Name => "order-summary";   // checkpoint identity — never rename
+    public int Version => 1;                 // INVARIANT: raise to rebuild (ADR-024)
+    public async Task ResetAsync(CancellationToken ct) { /* VARIABLE: empty the target, e.g. TRUNCATE */ }
     public async Task HandleAsync(ChangeRecord change, CancellationToken ct) { /* VARIABLE: upsert */ }
 }
 ```
@@ -113,7 +115,10 @@ public sealed class OnOrderPlaced(DocumentStore store) : IChangeHandler
 ```
 
 Rules: handlers are idempotent (at-least-once), never block on humans (materialize
-a task document instead, §18), and `Name` is the checkpoint identity.
+a task document instead, §18), and `Name` is the checkpoint identity. An automation is
+not a projection — never reset it. Added to a system with history, it starts at the
+beginning of the feed and reacts to every past record; put `[StartsAtFeedHead]` on it
+when it should react to new records only (ADR-024).
 
 ## Translation slice (integration edge)
 

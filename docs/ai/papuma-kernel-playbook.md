@@ -83,16 +83,19 @@ var many = await s.LoadManyAsync<User>(ids);        // one query; missing ids ab
 var history = await s.GetHistoryAsync<User>(id, fromVersion: 3);
 var commandEffect = await s.GetChangesByCorrelationAsync(correlationId);   // one unit of work, all types
 
-// Reacting
-public sealed class UserProjection : IChangeHandler
+// Reacting — a projection declares itself (ADR-024); an effect gets [StartsAtFeedHead]
+public sealed class UserProjection : IChangeHandler, IProjection
 {
     public string Name => "user-projection";        // = checkpoint identity!
+    public int Version => 1;                        // raise → rebuilt once at the next start
+    public Task ResetAsync(CancellationToken ct) { … }   // idempotent, e.g. TRUNCATE
     public Task HandleAsync(ChangeRecord change, CancellationToken ct) { … }
 }
 
 // Diagnostics (phase 11) · GDPR (phase 12)
 await processor.GetLagAsync(); await processor.GetFailuresAsync();
-await processor.RetryFailureAsync(name, seq); await processor.ResetCheckpointAsync(name);
+await processor.RetryFailureAsync(name, seq);
+await processor.ResetProjectionsAsync();           // or ResetProjectionAsync(name) — projections only
 DataInventory.Build(model);                         // Art. 30 + policy review
 
 // Tests (Papuma.Kernel.Testing, ADR-021)
@@ -143,8 +146,9 @@ Typed errors you should handle (not swallow): `ConcurrencyException`,
 - **Lag grows**: look at `papuma.feed.handler.duration` first — almost always a
   slow handler, not the engine (concepts §14: limits + escape routes).
 - **Poison counter > 0**: `GetFailuresAsync()` → fix the cause →
-  `RetryFailureAsync(handler, seq)`; if the checkpoint already passed it,
-  additionally `ResetCheckpointAsync`.
+  `RetryFailureAsync(handler, seq)`; if the checkpoint already passed it, and it is
+  a projection: `ResetProjectionAsync(name)` rebuilds it; an effect is never reset —
+repeat its lost work by hand.
 - **`ConcurrencyException` piles up on one document**: a hot document. Check
   whether `PatchAsync` (independent fields) or `Increment` (counters) can replace
   the load-modify-save (concepts §4/§17).

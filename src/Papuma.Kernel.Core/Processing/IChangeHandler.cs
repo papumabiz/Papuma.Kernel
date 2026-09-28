@@ -14,6 +14,12 @@ namespace Papuma.Kernel.Processing;
 /// <see cref="ChangeRecord.Seq"/>). <c>Seq</c> identifies a change but is not a
 /// watermark — a lower <c>seq</c> can arrive after a higher one.
 /// </summary>
+/// <remarks>
+/// A handler that derives state also implements <see cref="IProjection"/>, so the kernel
+/// can rebuild it; a handler with side effects (mail, webhook, bus) is an effect and is
+/// never reset — mark it <see cref="StartsAtFeedHeadAttribute"/> so its first start does
+/// not act on the whole history (ADR-024).
+/// </remarks>
 public interface IChangeHandler
 {
     /// <summary>Gets the unique, stable handler name (checkpoint key).</summary>

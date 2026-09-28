@@ -29,6 +29,7 @@ An ordinary `IChangeHandler` — the kernel knows no SignalR; the handler is
 application code:
 
 ```csharp
+[StartsAtFeedHead] // an effect: pushing history to today's clients means nothing (ADR-024)
 public sealed class DocumentChangedNotifier : IChangeHandler
 {
     private readonly IHubContext<DocumentHub> _hub;

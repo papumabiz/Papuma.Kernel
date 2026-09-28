@@ -104,7 +104,9 @@ implementations pretending to agree):
   export, history redaction with a mandatory audit trail ([gdpr.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/gdpr.md)).
 - **Processing engine** — per-handler delivery in causal order (per document by
   version), nothing skipped (snapshot cursor), persisted checkpoints,
-  retry/backoff, poison handling, one-call rebuild.
+  retry/backoff, poison handling. Projections declare themselves and rebuild when
+  their version rises; effect handlers are never reset and can start at the feed
+  head ([ADR-024](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/adr/adr-024-projections-and-effect-handlers.md)).
 - **Event log** — first-class facts (`UserLoggedIn`) beside state changes, same
   transaction, same policies, per-type retention.
 - **Schema evolution** — lazy upcasting with version guards, same

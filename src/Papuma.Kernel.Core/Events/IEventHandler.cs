@@ -8,6 +8,12 @@ namespace Papuma.Kernel.Events;
 /// (ADR-009/022): per-handler delivery in causal order, persisted checkpoints, retry with
 /// backoff, at-least-once delivery — implementations must be idempotent.
 /// </summary>
+/// <remarks>
+/// As for change handlers (ADR-024): a handler that derives state also implements
+/// <see cref="Processing.IProjection"/>; an effect handler is never reset — mark it
+/// <see cref="Processing.StartsAtFeedHeadAttribute"/> so its first start does not act on
+/// the whole history.
+/// </remarks>
 public interface IEventHandler
 {
     /// <summary>Gets the unique, stable handler name (checkpoint key).</summary>

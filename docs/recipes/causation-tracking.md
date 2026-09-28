@@ -119,6 +119,8 @@ triggering change's sequence number. This creates a traceable chain within the
 database — no external log lookup needed:
 
 ```csharp
+// An effect, not a projection — never reset it; [StartsAtFeedHead] when it is added
+// to a system whose past orders must not be processed again (ADR-024).
 public sealed class OrderWorkflowHandler(DocumentStore store) : IChangeHandler
 {
     public string Name => "order-workflow";

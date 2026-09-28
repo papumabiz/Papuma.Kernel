@@ -321,8 +321,9 @@ must only be idempotent (here, trivially — see the note below).
 > shows the feed working. A real read model stores the document `version`
 > alongside its state and ignores anything not newer — the
 > [external-read-models recipe](recipes/external-read-models.md) shows the
-> idempotent version-guarded upsert. Keep that in mind, but don't let it
-> distract from the lesson here.
+> idempotent version-guarded upsert, and declares itself a projection
+> (`IProjection`) so the kernel can rebuild it ([concepts §19](concepts.md#19-checkpoints-backup-and-rebuild-what-is-truth-what-is-derivable)).
+> Keep that in mind, but don't let it distract from the lesson here.
 
 ---
 

@@ -14,6 +14,9 @@ machinery: it is an ordinary `IChangeHandler`/`IEventHandler` pair that inherits
 ordering, checkpoints, retry, poison handling and lag metrics from the engine.
 
 ```csharp
+// An effect (ADR-024). Registered at the beginning, it publishes the whole history
+// into the stream on its first start; add [StartsAtFeedHead] when the stream should
+// only carry what happens from now on.
 public sealed class NatsChangePublisher(INatsJSContext jetStream) : IChangeHandler
 {
     public string Name => "nats-change-publisher"; // own checkpoint, own lag metric

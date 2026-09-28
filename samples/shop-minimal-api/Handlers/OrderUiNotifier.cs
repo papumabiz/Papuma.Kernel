@@ -16,7 +16,10 @@ public sealed class ShopHub : Hub;
 /// recipe as running code. Note what is pushed: ids, version, operation and the
 /// changed *paths* — never values. The diff is policy-applied (ADR-007), so even
 /// the paths leak no protected content; clients reload via the authorized read path.
+/// An effect that starts at the feed head: pushing history to today's clients means
+/// nothing (ADR-024).
 /// </summary>
+[StartsAtFeedHead]
 public sealed class OrderUiNotifier(IHubContext<ShopHub> hub) : IChangeHandler
 {
     public string Name => "ui-notifier";

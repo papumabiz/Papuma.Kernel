@@ -74,8 +74,9 @@ IReadOnlyList<FeedFailure> failures = await processor.GetFailuresAsync();
 
 // Manual retry after fixing the cause (removes the poison entry)
 await processor.RetryFailureAsync(handlerName, seq);
-// If the checkpoint already passed the poison seq, additionally
-// ResetCheckpointAsync(handlerName) for a replay.
+// If the checkpoint already passed the poison seq: for a projection,
+// ResetProjectionAsync(handlerName) rebuilds it; an effect is never reset —
+// repeat its lost work by hand (ADR-024).
 ```
 
 Privacy note: spans tag document *ids* and the tenant, never contents; diffs in

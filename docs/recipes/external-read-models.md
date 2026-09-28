@@ -11,9 +11,13 @@ Background: [ADR-009](../adr/adr-009-projections-as-dumb-handlers.md),
 
 ```csharp
 public sealed class SearchIndexProjection(DocumentStore store, ISearchClient search)
-    : IChangeHandler
+    : IChangeHandler, IProjection
 {
     public string Name => "manticore-products";   // checkpoint identity — never rename
+    public int Version => 1;                      // raise it to rebuild (ADR-024)
+
+    // Rebuild: the index is a copy, never the truth — drop its documents, replay.
+    public Task ResetAsync(CancellationToken ct) => search.DeleteAllAsync(ct);
 
     public async Task HandleAsync(ChangeRecord change, CancellationToken ct)
     {
@@ -60,10 +64,10 @@ write transaction**:
    tenant prefix in the document key, a tenant field as a mandatory filter, or
    one index/collection per tenant. (A table in the *same* PostgreSQL database
    can keep RLS instead — see [read models in the same database](same-database-read-models.md).)
-5. **Rebuild = reset + replay, and it must be safe.** `ResetCheckpointAsync`
-   replays everything (concepts §19); because of rules 1–3 that is idempotent.
-   For a clean slate, truncate the external index first — it is a copy, never
-   the truth.
+5. **Rebuild = reset + replay, and it must be safe.** Raise `Version`, or call
+   `ResetProjectionAsync(name)`: the kernel calls `ResetAsync` — the clean slate —
+   and replays everything (concepts §19, ADR-024); because of rules 1–3 the replay
+   is idempotent even where `ResetAsync` cannot empty the target completely.
 
 Operationally, all of this is visible for free: the handler has its own
 checkpoint, lag gauge and failure entries. A slow external system shows up as
