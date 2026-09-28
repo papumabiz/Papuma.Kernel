@@ -16,6 +16,12 @@ Upgrade notes — what a consumer of 2.0.x can notice:
   handlers you reset through it with `IProjection`; it empties their target
   (`ResetAsync`) before the replay, and refuses effect handlers.
 - **`papuma.checkpoint` gains `projection_version`** (both kernels), added at startup.
+- **Add a `DELETE` policy to your own RLS tables** (PostgreSQL). The ADR-019 template —
+  `USING (scope_visible) WITH CHECK (scope_writable)` — let the `All` scope delete every
+  tenant's rows, because PostgreSQL checks a `DELETE` against `USING` only. Add to each
+  table built from it:
+  `CREATE POLICY scope_delete ON <table> AS RESTRICTIVE FOR DELETE USING (papuma.scope_writable(scope, tenant_id));`
+  The kernel's own tables get it from `EnsureSchemaAsync`.
 
 Changes:
 
@@ -51,6 +57,20 @@ Changes:
   `ResetProjectionAsync(name)` one. `[StartsAtFeedHead]` makes an effect handler's first
   start skip the history. Lag snapshots carry `ProjectionVersion` and `Paused`; the
   dashboard and `get_feed_lag` show each handler's kind. Both kernels, both feeds.
+- **Fixed (PostgreSQL, security): the `All` scope could delete** rows of every tenant in
+  `papuma.document`, `papuma.change` and `papuma.event` (and in application tables built
+  from the ADR-019 template): a `DELETE` is checked against the policy's `USING` only.
+  A restrictive `DELETE` policy now requires a writable scope; `All` reads and never
+  writes, as ADR-019 always stated (amended).
+- **Fixed (PostgreSQL): event retention deleted nothing under row-level security.** The
+  purge set no scope, so a role subject to RLS — the application login, even as table
+  owner under `FORCE ROW LEVEL SECURITY` — saw no rows. It now finds the affected tenants
+  under `All` and deletes under each tenant's scope. Its test ran as a superuser, which
+  RLS does not filter; it now runs as a plain login role.
+- **Fixed (PostgreSQL): the repair after a logical restore (2.0.0) failed under RLS** —
+  its `UPDATE` ran under `All`, which `WITH CHECK` rejects, so `EnsureSchemaAsync` would
+  have stopped the application's start after a `pg_restore`. It now writes tenant by
+  tenant; tested as a plain login role.
 
 ## 2.0.0 (2026-09-27)
 

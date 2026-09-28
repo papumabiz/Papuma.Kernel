@@ -265,5 +265,19 @@ internal static class SchemaDdl
                     AND row_scope = 'Platform'),
                 false)
         $$;
+
+        -- A DELETE is checked against USING only, never WITH CHECK — so the scope policies
+        -- above would let the All scope delete every tenant's rows. The All scope reads and
+        -- never writes (ADR-019): a restrictive policy (ANDed with the permissive one)
+        -- requires a writable scope for deletes.
+        DROP POLICY IF EXISTS scope_delete_document ON papuma.document;
+        CREATE POLICY scope_delete_document ON papuma.document AS RESTRICTIVE FOR DELETE
+            USING (papuma.scope_writable(scope, tenant_id));
+        DROP POLICY IF EXISTS scope_delete_event ON papuma.event;
+        CREATE POLICY scope_delete_event ON papuma.event AS RESTRICTIVE FOR DELETE
+            USING (papuma.scope_writable(scope, tenant_id));
+        DROP POLICY IF EXISTS scope_delete_change ON papuma.change;
+        CREATE POLICY scope_delete_change ON papuma.change AS RESTRICTIVE FOR DELETE
+            USING (papuma.scope_writable(scope, tenant_id));
         """;
 }

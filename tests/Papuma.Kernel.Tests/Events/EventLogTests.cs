@@ -170,7 +170,10 @@ public sealed class EventLogTests : IAsyncLifetime
             await session.CommitAsync();
         }
 
-        var deleted = await EventRetention.PurgeExpiredAsync(_fixture.DataSource, _model);
+        // As the application role: RLS applies (the superuser would pass a purge that
+        // sets no scope and so deletes nothing in production).
+        await _fixture.GrantAppRoleAccessAsync();
+        var deleted = await EventRetention.PurgeExpiredAsync(_fixture.AppRoleDataSource, _model);
 
         Assert.True(deleted >= 1);
         var shortLived = await LoadScalarAsync(

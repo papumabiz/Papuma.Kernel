@@ -68,6 +68,10 @@ public sealed class ProjectionSchemaTests
                 CREATE POLICY scope_isolation ON app.ticket_board
                     USING (papuma.scope_visible(scope, tenant_id))
                     WITH CHECK (papuma.scope_writable(scope, tenant_id));
+                -- DELETE is checked against USING only: without this the All scope could delete
+                DROP POLICY IF EXISTS scope_delete ON app.ticket_board;
+                CREATE POLICY scope_delete ON app.ticket_board AS RESTRICTIVE FOR DELETE
+                    USING (papuma.scope_writable(scope, tenant_id));
                 """;
             await cmd.ExecuteNonQueryAsync(ct);
             await tx.CommitAsync(ct);
@@ -160,7 +164,7 @@ public sealed class ProjectionSchemaTests
             }
         }
 
-        Assert.Equal(1, await CountPoliciesAsync());
+        Assert.Equal(2, await CountPoliciesAsync()); // isolation + delete, each exactly once
     }
 
     [Fact]
@@ -171,7 +175,7 @@ public sealed class ProjectionSchemaTests
 
         await Task.WhenAll(contributors.Select(c => c.EnsureSchemaAsync(_fixture.DataSource, CancellationToken.None)));
 
-        Assert.Equal(1, await CountPoliciesAsync());
+        Assert.Equal(2, await CountPoliciesAsync()); // isolation + delete, each exactly once
     }
 
     private async Task WaitForRowAsync(ScopeContext tenant, string ticketId)

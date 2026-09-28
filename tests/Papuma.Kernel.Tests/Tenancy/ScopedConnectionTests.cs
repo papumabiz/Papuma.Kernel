@@ -43,6 +43,9 @@ public sealed class ScopedConnectionTests : IAsyncLifetime
             CREATE POLICY scope_isolation ON app.scoped_note
                 USING (papuma.scope_visible(scope, tenant_id))
                 WITH CHECK (papuma.scope_writable(scope, tenant_id));
+            DROP POLICY IF EXISTS scope_delete ON app.scoped_note;
+            CREATE POLICY scope_delete ON app.scoped_note AS RESTRICTIVE FOR DELETE
+                USING (papuma.scope_writable(scope, tenant_id));
             GRANT USAGE ON SCHEMA app TO {PostgresFixture.AppRoleName};
             GRANT SELECT, INSERT, UPDATE, DELETE ON app.scoped_note TO {PostgresFixture.AppRoleName};
             """);
@@ -121,6 +124,35 @@ public sealed class ScopedConnectionTests : IAsyncLifetime
 
         var ex = await Assert.ThrowsAsync<PostgresException>(() => cmd.ExecuteNonQueryAsync());
         Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, ex.SqlState); // row-level security violation
+    }
+
+    [Fact]
+    public async Task AllScope_DeletesNothing_InKernelAndApplicationTables()
+    {
+        var tenant = ScopeContext.Tenant(Guid.NewGuid());
+        var noteId = NewId();
+        await InsertAsync(tenant, noteId);
+
+        await using var conn = await _fixture.AppRoleDataSource.OpenConnectionAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+        await conn.SetAllScopesAsync(tx);
+        foreach (var sql in new[]
+        {
+            "DELETE FROM app.scoped_note WHERE id = @id",   // the recipe's policy pair
+            "DELETE FROM papuma.document",                  // the kernel's own tables
+            "DELETE FROM papuma.change",
+            "DELETE FROM papuma.event",
+        })
+        {
+            await using var delete = conn.CreateCommand();
+            delete.Transaction = tx;
+            delete.CommandText = sql;
+            delete.Parameters.AddWithValue("id", noteId);
+            Assert.Equal(0, await delete.ExecuteNonQueryAsync()); // All reads, never writes (ADR-019)
+        }
+
+        await tx.RollbackAsync();
+        Assert.Equal([noteId], await VisibleIdsAsync(tenant, [noteId]));
     }
 
     [Fact]

@@ -117,8 +117,7 @@ public static class SchemaManager
             // 1. Each cursor falls back to a seq floor: just below its lowest undelivered row.
             //    Old txids and old snapshots are consistent with each other, so "undelivered"
             //    is still exact; rows above the floor that were delivered come again
-            //    (at-least-once). 2. Restored txids become the frozen id, visible to every
-            //    snapshot — every restored row is committed.
+            //    (at-least-once).
             repair.Transaction = tx;
             repair.CommandText = """
                 UPDATE papuma.checkpoint cp
@@ -144,11 +143,23 @@ public static class SchemaManager
                         (SELECT COALESCE(max(seq), 0) FROM papuma.event)),
                     done_snapshot = NULL, slice_snapshot = NULL, slice_seq = 0, updated_at = now()
                 WHERE cp.handler_name LIKE 'event:%';
-
-                UPDATE papuma.change SET txid = '2'::xid8 WHERE txid >= pg_snapshot_xmax(pg_current_snapshot());
-                UPDATE papuma.event SET txid = '2'::xid8 WHERE txid >= pg_snapshot_xmax(pg_current_snapshot());
                 """;
             await repair.ExecuteNonQueryAsync(ct);
+        }
+
+        // 2. Restored txids become the frozen id, visible to every snapshot — every restored
+        //    row is committed. Written tenant by tenant: the All scope reads, never writes.
+        foreach (var table in new[] { "papuma.change", "papuma.event" })
+        {
+            var scopes = await ScopedMaintenance.ReadScopesAsync(conn, tx, $"""
+                SELECT DISTINCT scope, tenant_id FROM {table}
+                WHERE txid >= pg_snapshot_xmax(pg_current_snapshot())
+                """, bind: null, ct);
+            await ScopedMaintenance.ExecutePerScopeAsync(conn, tx, scopes, $"""
+                UPDATE {table} SET txid = '2'::xid8
+                WHERE scope = @scope AND tenant_id = @tenantId
+                  AND txid >= pg_snapshot_xmax(pg_current_snapshot())
+                """, bind: null, ct);
         }
 
         await tx.CommitAsync(ct);

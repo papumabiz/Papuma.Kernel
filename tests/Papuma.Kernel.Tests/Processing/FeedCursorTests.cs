@@ -286,7 +286,7 @@ public sealed class FeedCursorTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task LogicalRestore_IsRepairedByEnsureSchema_UndeliveredRowsAndNewWritesFlow()
+    public async Task LogicalRestore_IsRepaired_UnderRowLevelSecurity_UndeliveredRowsAndNewWritesFlow()
     {
         await using var db = await ScratchDatabase.CreateAsync(_fixture.Database);
         await SchemaManager.EnsureSchemaAsync(db.DataSource, _model);
@@ -319,8 +319,14 @@ public sealed class FeedCursorTests : IAsyncLifetime
                 ("s", Shift(snapshot, Offset)), ("n", name));
         }
 
-        await SchemaManager.EnsureSchemaAsync(db.DataSource, _model);
-        Assert.False(await SchemaManager.RepairFeedAfterLogicalRestoreAsync(db.DataSource)); // already repaired
+        // As a plain login role — RLS applies (a superuser would pass even a broken repair).
+        await using (var appRole = await db.CreateRestrictedRoleAsync())
+        {
+            Assert.True(await SchemaManager.RepairFeedAfterLogicalRestoreAsync(appRole));
+        }
+
+        await SchemaManager.EnsureSchemaAsync(db.DataSource, _model); // runs the repair too — nothing left
+        Assert.False(await SchemaManager.RepairFeedAfterLogicalRestoreAsync(db.DataSource));
 
         var fresh = await WriteAsync(store, 2);
         using (var processor = new ChangeFeedProcessor(db.DataSource, [changes]))
@@ -392,6 +398,7 @@ public sealed class FeedCursorTests : IAsyncLifetime
     {
         private readonly PapumaTestDatabase _server;
         private readonly string _name;
+        private readonly List<string> _roles = [];
 
         private ScratchDatabase(PapumaTestDatabase server, string name, NpgsqlDataSource dataSource)
         {
@@ -412,6 +419,29 @@ public sealed class FeedCursorTests : IAsyncLifetime
 
             var builder = new NpgsqlConnectionStringBuilder(server.OwnerConnectionString) { Database = name };
             return new ScratchDatabase(server, name, NpgsqlDataSource.Create(builder.ConnectionString));
+        }
+
+        /// <summary>
+        /// A login role of its own (no superuser, not the table owner) with DML on
+        /// <c>papuma.*</c> — so RLS applies, as for an application in production.
+        /// </summary>
+        public async Task<NpgsqlDataSource> CreateRestrictedRoleAsync()
+        {
+            var role = $"scratch_{Guid.NewGuid():N}";
+            var password = Guid.NewGuid().ToString("N");
+            await ExecuteAsync($"""
+                CREATE ROLE {role} LOGIN PASSWORD '{password}';
+                GRANT USAGE ON SCHEMA papuma TO {role};
+                GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA papuma TO {role};
+                """);
+            _roles.Add(role);
+
+            var builder = new NpgsqlConnectionStringBuilder(DataSource.ConnectionString)
+            {
+                Username = role,
+                Password = password,
+            };
+            return NpgsqlDataSource.Create(builder.ConnectionString);
         }
 
         public async Task ExecuteAsync(string sql, params (string Name, object Value)[] parameters)
@@ -447,8 +477,16 @@ public sealed class FeedCursorTests : IAsyncLifetime
         public async ValueTask DisposeAsync()
         {
             await DataSource.DisposeAsync();
-            await using var cmd = _server.OwnerDataSource.CreateCommand($"DROP DATABASE {_name} WITH (FORCE)");
-            await cmd.ExecuteNonQueryAsync();
+            await using (var drop = _server.OwnerDataSource.CreateCommand($"DROP DATABASE {_name} WITH (FORCE)"))
+            {
+                await drop.ExecuteNonQueryAsync();
+            }
+
+            foreach (var role in _roles) // roles are cluster-wide; their grants went with the database
+            {
+                await using var dropRole = _server.OwnerDataSource.CreateCommand($"DROP ROLE {role}");
+                await dropRole.ExecuteNonQueryAsync();
+            }
         }
     }
 }

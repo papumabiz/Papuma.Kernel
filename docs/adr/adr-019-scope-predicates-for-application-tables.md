@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted (2026-09-25)
+Accepted (2026-09-25); amended 2026-09-28 — the policy template gains a restrictive
+`DELETE` policy, and the kernel's own tables have one (see *Amendment*).
 
 ## Context
 
@@ -81,6 +82,30 @@ shows the table, the policy and the handler.
   equivalence test guards against drift.
 - **Neutral:** `Papuma.Kernel.Local` (SQLite) has no RLS and no counterpart;
   there, isolation stays explicit predicates only.
+
+## Amendment (2026-09-28): `DELETE` needs its own policy
+
+PostgreSQL checks a `DELETE` against the policy's `USING` expression only — `WITH CHECK`
+applies to new rows, and a delete creates none. With `USING (scope_visible(...))`, the
+`All` scope could therefore delete every tenant's rows, in `papuma.*` and in application
+tables built from the template: "reads everything and writes nothing" held for `INSERT`
+and `UPDATE`, not for `DELETE`. Found while testing projection resets under RLS; no
+kernel path deleted under `All`.
+
+The template gains a restrictive policy, `AND`-ed with the permissive one:
+
+```sql
+CREATE POLICY scope_delete ON app.ticket_list AS RESTRICTIVE FOR DELETE
+    USING (papuma.scope_writable(scope, tenant_id));
+```
+
+`papuma.document`, `papuma.change` and `papuma.event` get the same policy from
+`EnsureSchemaAsync`. Kernel maintenance that writes across tenants — event retention, the
+repair after a logical restore (ADR-022) — reads the affected `(scope, tenant_id)` pairs
+under `All` and writes each under its own scope, in one transaction. Both had been tested
+only as a superuser, which RLS does not filter: retention deleted nothing under RLS, and
+the restore repair's `UPDATE` failed `WITH CHECK`. Their tests now run as a plain login
+role.
 
 ## Alternatives considered
 

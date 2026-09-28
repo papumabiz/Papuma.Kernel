@@ -30,6 +30,9 @@ ALTER TABLE app.product_embedding FORCE ROW LEVEL SECURITY;
 CREATE POLICY scope_isolation ON app.product_embedding
     USING (papuma.scope_visible(scope, tenant_id))
     WITH CHECK (papuma.scope_writable(scope, tenant_id));
+-- DELETE is checked against USING only: without this the All scope could delete
+CREATE POLICY scope_delete ON app.product_embedding AS RESTRICTIVE FOR DELETE
+    USING (papuma.scope_writable(scope, tenant_id));
 ```
 
 ```csharp

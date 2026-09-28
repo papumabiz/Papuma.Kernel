@@ -58,6 +58,10 @@ public sealed class ScopeFunctionTests : IAsyncLifetime
             CREATE POLICY scope_isolation ON app.ticket_list
                 USING (papuma.scope_visible(scope, tenant_id))
                 WITH CHECK (papuma.scope_writable(scope, tenant_id));
+            -- DELETE is checked against USING only: without this the All scope could delete
+            DROP POLICY IF EXISTS scope_delete ON app.ticket_list;
+            CREATE POLICY scope_delete ON app.ticket_list AS RESTRICTIVE FOR DELETE
+                USING (papuma.scope_writable(scope, tenant_id));
             GRANT USAGE ON SCHEMA app TO {PostgresFixture.AppRoleName};
             GRANT SELECT, INSERT, UPDATE, DELETE ON app.ticket_list TO {PostgresFixture.AppRoleName};
             """;

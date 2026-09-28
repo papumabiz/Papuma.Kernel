@@ -71,6 +71,10 @@ public sealed class TicketBoardSchema : ISchemaContributor
             CREATE POLICY scope_isolation ON app.ticket_board
                 USING (papuma.scope_visible(scope, tenant_id))
                 WITH CHECK (papuma.scope_writable(scope, tenant_id));
+            -- DELETE is checked against USING only: without this the All scope could delete
+            DROP POLICY IF EXISTS scope_delete ON app.ticket_board;
+            CREATE POLICY scope_delete ON app.ticket_board AS RESTRICTIVE FOR DELETE
+                USING (papuma.scope_writable(scope, tenant_id));
             """;
         await cmd.ExecuteNonQueryAsync(ct);
         await tx.CommitAsync(ct);
