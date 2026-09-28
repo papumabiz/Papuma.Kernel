@@ -138,8 +138,14 @@ explicit integration event at the boundary instead of sharing the raw feed
 The engine guarantees: per-handler delivery in causal order (per document strictly
 by version — `seq` identifies a change, it is not a watermark), persisted checkpoints,
 retry with backoff, poison skip, at-least-once (handlers must be idempotent —
-natural key: handler name + `change.Seq`). Rebuild:
-`ChangeFeedProcessor.ResetCheckpointAsync(name)`.
+natural key: handler name + `change.Seq`).
+
+**Projection or effect?** A handler that derives state (a table, an index) is a
+projection: implement `IProjection` as well — a `Version` and a `ResetAsync` that
+empties its target. Raise the version and the next start rebuilds it;
+`ResetProjectionsAsync()` rebuilds all of them. A handler with side effects (mail,
+webhook, bus) is an effect: mark it `[StartsAtFeedHead]`, or its first start acts on
+the whole history (ADR-024, concepts §19).
 
 ## 5. Schema evolution
 

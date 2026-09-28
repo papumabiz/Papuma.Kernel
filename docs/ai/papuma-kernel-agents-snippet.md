@@ -42,6 +42,10 @@ derived automatically. NOT event sourcing, NOT an ORM, NO query DSL.
 6. Reacting: `IChangeHandler`/`IEventHandler`. Handlers are IDEMPOTENT
    (at-least-once) and never block (no waiting for humans — write a task
    document instead). `Name` is the checkpoint identity: never rename it.
+   A projection also implements `IProjection` (`Version` + idempotent
+   `ResetAsync`, e.g. `TRUNCATE`) — a breaking change raises `Version`, the next
+   start rebuilds it. An effect (mail, webhook, bus) gets `[StartsAtFeedHead]`
+   and is never reset.
 7. Schema evolution: make changes additive when possible; register
    renames/restructurings as `Upcast(fromVersion, …)`. Never simulate a rename
    additively.
@@ -60,7 +64,7 @@ derived automatically. NOT event sourcing, NOT an ORM, NO query DSL.
 
 - Scope resolution: <HOW THIS APP DETERMINES THE TENANT, e.g. subdomain/claim>
 - Registered document types: <LIST OR POINTER TO THE MODEL BOOTSTRAP FILE>
-- Projections vs. effect handlers: <WHICH HANDLERS MAY BE RESET>
+- Projections vs. effect handlers: declared in code (`IProjection` / `[StartsAtFeedHead]`); <NOTES, e.g. external targets a reset does not reach>
 
 ### Reference
 
@@ -106,6 +110,10 @@ derived automatically. NOT event sourcing, NOT an ORM, NO query DSL.
 6. Reacting: `IChangeHandler`/`IEventHandler`. Handlers are IDEMPOTENT
    (at-least-once) and never block (no waiting for humans — write a task
    document instead). `Name` is the checkpoint identity: never rename it.
+   A projection also implements `IProjection` (`Version` + idempotent
+   `ResetAsync`, e.g. `TRUNCATE`) — a breaking change raises `Version`, the next
+   start rebuilds it. An effect (mail, webhook, bus) gets `[StartsAtFeedHead]`
+   and is never reset.
 7. Schema evolution: make changes additive when possible; register
    renames/restructurings as `Upcast(fromVersion, …)`. Never simulate a rename
    additively.
@@ -124,7 +132,7 @@ derived automatically. NOT event sourcing, NOT an ORM, NO query DSL.
 
 - DB file location: <WHERE THE .db FILE LIVES, e.g. per-user app-data dir>
 - Registered document types: <LIST OR POINTER TO THE MODEL BOOTSTRAP FILE>
-- Projections vs. effect handlers: <WHICH HANDLERS MAY BE RESET>
+- Projections vs. effect handlers: declared in code (`IProjection` / `[StartsAtFeedHead]`); <NOTES, e.g. external targets a reset does not reach>
 
 ### Reference
 

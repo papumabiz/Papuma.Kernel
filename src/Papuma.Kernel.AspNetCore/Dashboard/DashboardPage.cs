@@ -50,11 +50,11 @@ internal static class DashboardPage
 <div class="cards" id="cards"></div>
 
 <h2>Change feed — lag per handler</h2>
-<table><thead><tr><th>Handler</th><th title="Highest seq delivered to the handler">Delivered up to</th><th title="Highest seq in the feed">Head</th><th style="width:45%">Lag</th></tr></thead>
+<table><thead><tr><th>Handler</th><th>Kind</th><th title="Highest seq delivered to the handler">Delivered up to</th><th title="Highest seq in the feed">Head</th><th style="width:45%">Lag</th></tr></thead>
 <tbody id="changeLag"></tbody></table>
 
 <h2>Event feed — lag per handler</h2>
-<table><thead><tr><th>Handler</th><th title="Highest seq delivered to the handler">Delivered up to</th><th title="Highest seq in the feed">Head</th><th style="width:45%">Lag</th></tr></thead>
+<table><thead><tr><th>Handler</th><th>Kind</th><th title="Highest seq delivered to the handler">Delivered up to</th><th title="Highest seq in the feed">Head</th><th style="width:45%">Lag</th></tr></thead>
 <tbody id="eventLag"></tbody></table>
 
 <h2>Failures (retry pending / poison)</h2>
@@ -85,12 +85,13 @@ function sumByPrefix(counters, prefix) {
 
 function lagRows(rows, tbody) {
   const el = document.getElementById(tbody);
-  if (!rows.length) { el.innerHTML = '<tr><td colspan="4" class="empty">no handlers registered</td></tr>'; return; }
+  if (!rows.length) { el.innerHTML = '<tr><td colspan="5" class="empty">no handlers registered</td></tr>'; return; }
   const max = Math.max(1, ...rows.map(r => r.lag));
   el.innerHTML = rows.map(r => {
     const cls = r.lag === 0 ? "ok" : r.lag < 1000 ? "warn" : "bad";
     const width = Math.max(2, Math.round(160 * r.lag / max));
-    return `<tr><td>${r.handler}</td><td class="num">${r.checkpoint.toLocaleString()}</td>` +
+    const kind = r.kind === "projection" ? `projection v${r.projectionVersion}${r.paused ? " — paused (newer deploy)" : ""}` : "effect";
+    return `<tr><td>${r.handler}</td><td>${kind}</td><td class="num">${r.checkpoint.toLocaleString()}</td>` +
            `<td class="num">${r.latestSeq.toLocaleString()}</td>` +
            `<td><span class="bar" style="width:${r.lag === 0 ? 2 : width}px"></span>` +
            `<span class="${cls}">${r.lag.toLocaleString()}</span></td></tr>`;

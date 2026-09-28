@@ -58,6 +58,8 @@ public sealed class ChangeFeedProcessor : IDisposable
     // come from a cache refreshed by GetLagAsync and the idle moments of RunAsync.
     private readonly Meter _meter;
     private readonly ConcurrentDictionary<string, long> _lagByHandler = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int?> _projectionVersions;
+    private readonly ConcurrentDictionary<string, bool> _pauseLogged = new(StringComparer.Ordinal);
     private bool _registered;
 
     /// <summary>
@@ -88,12 +90,15 @@ public sealed class ChangeFeedProcessor : IDisposable
             throw new ArgumentException($"Handler name '{duplicate.Key}' is registered more than once.", nameof(handlers));
         }
 
+        _projectionVersions = _handlers.ToDictionary(
+            h => h.Name, h => HandlerKind.Validate(h, h.Name), StringComparer.Ordinal);
+
         _meter = new Meter(KernelDiagnostics.SourceName);
         _meter.CreateObservableGauge(
             "papuma.feed.lag",
             ObserveLag,
             unit: "{record}",
-            description: "Stable-visible feed head minus checkpoint, per handler. " +
+            description: "Committed records not yet delivered, per handler (ADR-022). " +
                          "Refreshed by GetLagAsync and the idle moments of the run loop.");
     }
 
@@ -194,7 +199,9 @@ public sealed class ChangeFeedProcessor : IDisposable
 
     /// <summary>
     /// Resets a handler's checkpoint to 0 and clears its failure entries — the next
-    /// cycle replays the full feed (rebuild, ADR-009).
+    /// cycle replays the full feed (rebuild, ADR-009). The raw tool: it does not empty the
+    /// handler's target. For projections prefer <see cref="ResetProjectionsAsync"/>, which
+    /// calls <see cref="IProjection.ResetAsync"/> first; never reset an effect handler.
     /// </summary>
     /// <param name="handlerName">The handler name.</param>
     /// <param name="ct">A cancellation token.</param>
@@ -204,25 +211,57 @@ public sealed class ChangeFeedProcessor : IDisposable
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-
-        await using (var checkpointCmd = conn.CreateCommand())
-        {
-            checkpointCmd.Transaction = tx;
-            checkpointCmd.CommandText = SnapshotCursor.ResetSql;
-            checkpointCmd.Parameters.AddWithValue("name", handlerName);
-            await checkpointCmd.ExecuteNonQueryAsync(ct);
-        }
-
-        await using (var failureCmd = conn.CreateCommand())
-        {
-            failureCmd.Transaction = tx;
-            failureCmd.CommandText = "DELETE FROM papuma.failure WHERE handler_name = @name";
-            failureCmd.Parameters.AddWithValue("name", handlerName);
-            await failureCmd.ExecuteNonQueryAsync(ct);
-        }
-
+        await ProjectionLifecycle.ResetCursorAsync(conn, tx, handlerName, version: null, ct);
         await tx.CommitAsync(ct);
         _logger.LogInformation("Checkpoint for handler {Handler} reset — full replay on next cycle.", handlerName);
+    }
+
+    /// <summary>
+    /// Rebuilds every projection (<see cref="IProjection"/>) this processor runs: empties
+    /// its target via <see cref="IProjection.ResetAsync"/>, then resets its checkpoint and
+    /// failures — the next cycles replay the feed into it (ADR-024). Effect handlers are
+    /// left alone; a projection a newer instance owns (higher stored version) is skipped.
+    /// </summary>
+    /// <param name="ct">A cancellation token.</param>
+    /// <returns>The number of projections reset.</returns>
+    public async Task<int> ResetProjectionsAsync(CancellationToken ct = default)
+    {
+        await EnsureRegisteredAsync(ct);
+
+        var reset = 0;
+        foreach (var handler in _handlers)
+        {
+            if (handler is IProjection && await ResetProjectionAsync(handler.Name, ct))
+            {
+                reset++;
+            }
+        }
+
+        return reset;
+    }
+
+    /// <summary>
+    /// Rebuilds one projection: empties its target via <see cref="IProjection.ResetAsync"/>,
+    /// then resets its checkpoint and failures (ADR-024).
+    /// </summary>
+    /// <param name="handlerName">The projection's handler name.</param>
+    /// <param name="ct">A cancellation token.</param>
+    /// <returns><c>false</c> when a newer instance owns the projection (higher stored version).</returns>
+    /// <exception cref="ArgumentException">No handler of that name, or it is not a projection.</exception>
+    public async Task<bool> ResetProjectionAsync(string handlerName, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(handlerName);
+        var handler = _handlers.FirstOrDefault(h => h.Name == handlerName)
+            ?? throw new ArgumentException($"No handler named {handlerName} runs in this processor.", nameof(handlerName));
+        if (handler is not IProjection projection || _projectionVersions[handlerName] is not int declared)
+        {
+            throw new ArgumentException(
+                $"Handler {handlerName} is not a projection (IProjection) — resetting it would repeat its effects.",
+                nameof(handlerName));
+        }
+
+        await EnsureRegisteredAsync(ct);
+        return await ProjectionLifecycle.ResetProjectionAsync(_dataSource, handlerName, projection, declared, _logger, ct);
     }
 
     /// <summary>
@@ -253,7 +292,12 @@ public sealed class ChangeFeedProcessor : IDisposable
             var cursor = await SnapshotCursor.ReadOrInitialAsync(conn, tx, handler.Name, ct);
             var lag = await cursor.CountUndeliveredAsync(conn, tx, "papuma.change", ct);
 
-            snapshots.Add(new ChangeFeedLagSnapshot(handler.Name, cursor.LastSeq, latestSeq, lag));
+            var declared = _projectionVersions[handler.Name];
+            snapshots.Add(new ChangeFeedLagSnapshot(handler.Name, cursor.LastSeq, latestSeq, lag)
+            {
+                ProjectionVersion = declared,
+                Paused = declared is int d && cursor.ProjectionVersion > d,
+            });
             _lagByHandler[handler.Name] = lag; // feeds the observable gauge
         }
 
@@ -292,6 +336,12 @@ public sealed class ChangeFeedProcessor : IDisposable
         if (locked is null)
         {
             return 0; // locked by another instance (or not yet registered)
+        }
+
+        if (IsPaused(handler, locked.ProjectionVersion))
+        {
+            await tx.CommitAsync(ct);
+            return 0;
         }
 
         var cursor = await locked.WithSliceAsync(conn, tx, "papuma.change", ct);
@@ -506,19 +556,33 @@ public sealed class ChangeFeedProcessor : IDisposable
             return;
         }
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
+        // Before the first delivery: new checkpoints, and projection versions reconciled
+        // (record, rebuild once, or pause for a newer instance — ADR-024).
         foreach (var handler in _handlers)
         {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                INSERT INTO papuma.checkpoint (handler_name, last_seq)
-                VALUES (@name, 0)
-                ON CONFLICT (handler_name) DO NOTHING
-                """;
-            cmd.Parameters.AddWithValue("name", handler.Name);
-            await cmd.ExecuteNonQueryAsync(ct);
+            await ProjectionLifecycle.RegisterAsync(
+                _dataSource, handler.Name, "papuma.change", handler, _projectionVersions[handler.Name], _logger, ct);
         }
 
         _registered = true;
+    }
+
+    // An instance declaring a lower version than the stored one runs older code: it must
+    // not write the old shape into the target a newer instance rebuilt (ADR-024).
+    private bool IsPaused(IChangeHandler handler, int? storedVersion)
+    {
+        if (_projectionVersions[handler.Name] is not int declared || storedVersion is not int stored || stored <= declared)
+        {
+            return false;
+        }
+
+        if (_pauseLogged.TryAdd(handler.Name, true))
+        {
+            _logger.LogWarning(
+                "Projection {Handler} is at version {Stored}, this instance declares {Declared} — paused until this instance is replaced.",
+                handler.Name, stored, declared);
+        }
+
+        return true;
     }
 }

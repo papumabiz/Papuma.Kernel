@@ -14,4 +14,18 @@ public sealed record ChangeFeedLagSnapshot(
     string HandlerName,
     long Checkpoint,
     long LatestSeq,
-    long Lag);
+    long Lag)
+{
+    /// <summary>
+    /// Gets the projection version the handler declares (<c>IProjection</c>, ADR-024), or
+    /// <c>null</c> for an effect handler.
+    /// </summary>
+    public int? ProjectionVersion { get; init; }
+
+    /// <summary>
+    /// Gets whether this processor pauses the projection: its stored version is higher
+    /// than the declared one — a newer deploy has rebuilt it, and this instance runs older
+    /// code (ADR-024).
+    /// </summary>
+    public bool Paused { get; init; }
+}

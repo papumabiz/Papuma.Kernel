@@ -39,6 +39,18 @@ public static class SqliteSchemaManager
             await schemaCmd.ExecuteNonQueryAsync(ct);
         }
 
+        // Files created before ADR-024: SQLite has no ADD COLUMN IF NOT EXISTS.
+        await using (var columnCmd = connection.CreateCommand())
+        {
+            columnCmd.CommandText =
+                "SELECT count(*) FROM pragma_table_info('checkpoint') WHERE name = 'projection_version'";
+            if ((long)(await columnCmd.ExecuteScalarAsync(ct))! == 0)
+            {
+                columnCmd.CommandText = "ALTER TABLE checkpoint ADD COLUMN projection_version INTEGER";
+                await columnCmd.ExecuteNonQueryAsync(ct);
+            }
+        }
+
         if (model is not null)
         {
             var keyDdl = BuildKeyIndexDdl(model);

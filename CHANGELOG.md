@@ -8,6 +8,14 @@ Upgrade notes — what a consumer of 2.0.x can notice:
   `UncommittedSessionDisposed`) and counts `papuma.session.uncommitted_disposals`. The
   rollback itself is unchanged. Where a rollback is intended, call `DiscardAsync()` first;
   a dispose on an exception path still logs — next to the exception.
+- **Projections declare themselves** (`IProjection`, ADR-024) — optional, nothing changes
+  for unmarked handlers. When you mark an *existing* projection, its first start only
+  records the declared `Version`: it does **not** rebuild, or the upgrade would rebuild
+  everything. To rebuild, raise the version or call `ResetProjectionsAsync()`.
+- **The MCP tool `reset_feed_checkpoint` only resets projections now** — mark the
+  handlers you reset through it with `IProjection`; it empties their target
+  (`ResetAsync`) before the replay, and refuses effect handlers.
+- **`papuma.checkpoint` gains `projection_version`** (both kernels), added at startup.
 
 Changes:
 
@@ -35,6 +43,14 @@ Changes:
   own uncommitted writes; missing ids are absent from the result, duplicates load once.
   The batch handler interface from the same entry is deferred until a measurement shows
   the per-change reload to be the bottleneck.
+- **New: projections and effects are declared** (ADR-024, feedback F-16). A projection
+  implements `IProjection` — a `Version` and an idempotent `ResetAsync` that empties its
+  target. A raised version rebuilds it once at the next start, under the same name;
+  instances still running older code in a rolling deploy pause it instead of writing the
+  old shape. `ResetProjectionsAsync()` rebuilds all projections of a processor,
+  `ResetProjectionAsync(name)` one. `[StartsAtFeedHead]` makes an effect handler's first
+  start skip the history. Lag snapshots carry `ProjectionVersion` and `Paused`; the
+  dashboard and `get_feed_lag` show each handler's kind. Both kernels, both feeds.
 
 ## 2.0.0 (2026-09-27)
 

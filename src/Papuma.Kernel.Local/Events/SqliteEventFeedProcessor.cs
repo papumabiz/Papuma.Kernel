@@ -42,6 +42,8 @@ public sealed class SqliteEventFeedProcessor : IDisposable
 
     private readonly Meter _meter;
     private readonly ConcurrentDictionary<string, long> _lagByHandler = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int?> _projectionVersions;
+    private readonly ConcurrentDictionary<string, bool> _pauseLogged = new(StringComparer.Ordinal);
     private bool _registered;
 
     /// <summary>
@@ -69,6 +71,9 @@ public sealed class SqliteEventFeedProcessor : IDisposable
         {
             throw new ArgumentException($"Handler name '{duplicate.Key}' is registered more than once.", nameof(handlers));
         }
+
+        _projectionVersions = _handlers.ToDictionary(
+            h => h.Name, h => HandlerKind.Validate(h, h.Name), StringComparer.Ordinal);
 
         _meter = new Meter(KernelDiagnostics.SourceName);
         _meter.CreateObservableGauge(
@@ -231,29 +236,7 @@ public sealed class SqliteEventFeedProcessor : IDisposable
 
         await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
         await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
-
-        var now = DateTimeOffset.UtcNow.ToString("O");
-        await using (var checkpointCmd = conn.CreateCommand())
-        {
-            checkpointCmd.Transaction = tx;
-            checkpointCmd.CommandText = """
-                INSERT INTO checkpoint (handler_name, last_seq, updated_at)
-                VALUES (@name, 0, @now)
-                ON CONFLICT (handler_name) DO UPDATE SET last_seq = 0, updated_at = @now
-                """;
-            checkpointCmd.Parameters.AddWithValue("name", key);
-            checkpointCmd.Parameters.AddWithValue("now", now);
-            await checkpointCmd.ExecuteNonQueryAsync(ct);
-        }
-
-        await using (var failureCmd = conn.CreateCommand())
-        {
-            failureCmd.Transaction = tx;
-            failureCmd.CommandText = "DELETE FROM failure WHERE handler_name = @name";
-            failureCmd.Parameters.AddWithValue("name", key);
-            await failureCmd.ExecuteNonQueryAsync(ct);
-        }
-
+        await SqliteProjectionLifecycle.ResetCursorAsync(conn, tx, key, version: null, ct);
         await tx.CommitAsync(ct);
     }
 
@@ -285,7 +268,13 @@ public sealed class SqliteEventFeedProcessor : IDisposable
             var checkpoint = await checkpointCmd.ExecuteScalarAsync(ct) is long seq ? seq : 0L;
 
             var lag = latestSeq > checkpoint ? latestSeq - checkpoint : 0L;
-            snapshots.Add(new ChangeFeedLagSnapshot(handler.Name, checkpoint, latestSeq, lag));
+            var declared = _projectionVersions[handler.Name];
+            var stored = await SqliteProjectionLifecycle.ReadVersionAsync(conn, tx, CheckpointPrefix + handler.Name, ct);
+            snapshots.Add(new ChangeFeedLagSnapshot(handler.Name, checkpoint, latestSeq, lag)
+            {
+                ProjectionVersion = declared,
+                Paused = declared is int d && stored > d,
+            });
             _lagByHandler[handler.Name] = lag;
         }
 
@@ -311,7 +300,9 @@ public sealed class SqliteEventFeedProcessor : IDisposable
         await using (var tx = conn.BeginTransaction(deferred: true))
         {
             checkpoint = await ReadCheckpointAsync(conn, tx, key, ct);
-            batch = await LoadBatchAsync(conn, tx, key, checkpoint, ct);
+            batch = await IsPausedAsync(handler, conn, tx, key, ct)
+                ? []
+                : await LoadBatchAsync(conn, tx, key, checkpoint, ct);
             await tx.CommitAsync(ct);
         }
 
@@ -552,20 +543,83 @@ public sealed class SqliteEventFeedProcessor : IDisposable
             return;
         }
 
-        await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
+        // Before the first delivery: new checkpoints, and projection versions reconciled
+        // (record, rebuild once, or pause for a newer version — ADR-024).
         foreach (var handler in _handlers)
         {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                INSERT INTO checkpoint (handler_name, last_seq, updated_at)
-                VALUES (@name, 0, @now)
-                ON CONFLICT (handler_name) DO NOTHING
-                """;
-            cmd.Parameters.AddWithValue("name", CheckpointPrefix + handler.Name);
-            cmd.Parameters.AddWithValue("now", DateTimeOffset.UtcNow.ToString("O"));
-            await cmd.ExecuteNonQueryAsync(ct);
+            await SqliteProjectionLifecycle.RegisterAsync(
+                _connectionString, CheckpointPrefix + handler.Name, "event", handler, _projectionVersions[handler.Name], _logger, ct);
         }
 
         _registered = true;
+    }
+
+    // A stored version above the declared one means newer code rebuilt the projection;
+    // this (older) code must not write the old shape into it (ADR-024).
+    private async Task<bool> IsPausedAsync(
+        IEventHandler handler, SqliteConnection conn, SqliteTransaction tx, string key, CancellationToken ct)
+    {
+        if (_projectionVersions[handler.Name] is not int declared
+            || await SqliteProjectionLifecycle.ReadVersionAsync(conn, tx, key, ct) is not int stored
+            || stored <= declared)
+        {
+            return false;
+        }
+
+        if (_pauseLogged.TryAdd(handler.Name, true))
+        {
+            _logger.LogWarning(
+                "Projection {Handler} is at version {Stored}, this instance declares {Declared} — paused.",
+                handler.Name, stored, declared);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Rebuilds every projection (<see cref="IProjection"/>) this processor runs: empties
+    /// its target via <see cref="IProjection.ResetAsync"/>, then resets its checkpoint and
+    /// failures (ADR-024). Effect handlers are left alone.
+    /// </summary>
+    /// <param name="ct">A cancellation token.</param>
+    /// <returns>The number of projections reset.</returns>
+    public async Task<int> ResetProjectionsAsync(CancellationToken ct = default)
+    {
+        await EnsureRegisteredAsync(ct);
+
+        var reset = 0;
+        foreach (var handler in _handlers)
+        {
+            if (handler is IProjection && await ResetProjectionAsync(handler.Name, ct))
+            {
+                reset++;
+            }
+        }
+
+        return reset;
+    }
+
+    /// <summary>
+    /// Rebuilds one projection: empties its target via <see cref="IProjection.ResetAsync"/>,
+    /// then resets its checkpoint and failures (ADR-024).
+    /// </summary>
+    /// <param name="handlerName">The projection's handler name.</param>
+    /// <param name="ct">A cancellation token.</param>
+    /// <returns><c>false</c> when a newer instance owns the projection (higher stored version).</returns>
+    /// <exception cref="ArgumentException">No handler of that name, or it is not a projection.</exception>
+    public async Task<bool> ResetProjectionAsync(string handlerName, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(handlerName);
+        var handler = _handlers.FirstOrDefault(h => h.Name == handlerName)
+            ?? throw new ArgumentException($"No handler named {handlerName} runs in this processor.", nameof(handlerName));
+        if (handler is not IProjection projection || _projectionVersions[handlerName] is not int declared)
+        {
+            throw new ArgumentException(
+                $"Handler {handlerName} is not a projection (IProjection) — resetting it would repeat its effects.",
+                nameof(handlerName));
+        }
+
+        await EnsureRegisteredAsync(ct);
+        return await SqliteProjectionLifecycle.ResetProjectionAsync(_connectionString, CheckpointPrefix + handlerName, projection, declared, _logger, ct);
     }
 }

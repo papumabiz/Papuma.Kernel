@@ -122,6 +122,9 @@ internal static class SchemaDdl
         ALTER TABLE papuma.checkpoint ADD COLUMN IF NOT EXISTS slice_snapshot pg_snapshot;
         ALTER TABLE papuma.checkpoint ADD COLUMN IF NOT EXISTS slice_seq bigint NOT NULL DEFAULT 0;
 
+        -- Declared projection version (ADR-024); NULL for effect handlers.
+        ALTER TABLE papuma.checkpoint ADD COLUMN IF NOT EXISTS projection_version int;
+
         CREATE INDEX IF NOT EXISTS ix_papuma_change_txid ON papuma.change (txid);
         CREATE INDEX IF NOT EXISTS ix_papuma_event_txid ON papuma.event (txid);
 

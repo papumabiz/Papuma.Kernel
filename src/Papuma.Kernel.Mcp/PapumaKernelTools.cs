@@ -65,7 +65,8 @@ public sealed class PapumaKernelTools
 
     [McpServerTool(Name = "get_feed_lag", ReadOnly = true)]
     [Description("Returns the current lag (committed records not yet delivered) per handler " +
-        "for both the change feed and the event feed.")]
+        "for both the change feed and the event feed, with each handler's kind: 'projection' " +
+        "(replayable, with its version; 'paused' when a newer deploy owns it) or 'effect'.")]
     public async Task<string> GetFeedLagAsync(CancellationToken ct = default)
     {
         var json = new JsonObject
@@ -225,28 +226,25 @@ public sealed class PapumaKernelTools
     }
 
     [McpServerTool(Name = "reset_feed_checkpoint", ReadOnly = false, Destructive = true, Idempotent = true)]
-    [Description("Resets a handler's checkpoint to 0 for a full replay (projection " +
-        "rebuild). Requires AllowMutations. ONLY for projections — never reset an " +
-        "effect handler (it would repeat its side effects, e.g. resend emails).")]
+    [Description("Rebuilds a projection: empties its target and replays the feed into it " +
+        "from the beginning. Requires AllowMutations. Refuses effect handlers (kind 'effect' " +
+        "in get_feed_lag) — resetting one would repeat its side effects, e.g. resend emails.")]
     public async Task<string> ResetFeedCheckpointAsync(
         [Description("Which feed: 'change' or 'event'.")] string feed,
         [Description("The handler name.")] string handlerName,
         CancellationToken ct = default)
     {
         EnsureMutationsAllowed();
-        switch (feed)
+        var reset = feed switch
         {
-            case "change":
-                await _changeProcessor.ResetCheckpointAsync(handlerName, ct);
-                break;
-            case "event":
-                await _eventProcessor.ResetCheckpointAsync(handlerName, ct);
-                break;
-            default:
-                throw new ArgumentException("feed must be 'change' or 'event'.");
-        }
+            "change" => await _changeProcessor.ResetProjectionAsync(handlerName, ct),
+            "event" => await _eventProcessor.ResetProjectionAsync(handlerName, ct),
+            _ => throw new ArgumentException("feed must be 'change' or 'event'."),
+        };
 
-        return $"Checkpoint for {handlerName} reset — the handler replays from the beginning.";
+        return reset
+            ? $"Projection {handlerName} reset — its target was emptied and it replays from the beginning."
+            : $"Projection {handlerName} was not reset: a newer deploy owns it (higher stored version).";
     }
 
     // ── Internals ──────────────────────────────────────────────────────────────
@@ -294,6 +292,9 @@ public sealed class PapumaKernelTools
             json.Add(new JsonObject
             {
                 ["handler"] = snapshot.HandlerName,
+                ["kind"] = snapshot.ProjectionVersion is null ? "effect" : "projection",
+                ["projectionVersion"] = snapshot.ProjectionVersion,
+                ["paused"] = snapshot.Paused,
                 ["checkpoint"] = snapshot.Checkpoint,
                 ["latestSeq"] = snapshot.LatestSeq,
                 ["lag"] = snapshot.Lag,

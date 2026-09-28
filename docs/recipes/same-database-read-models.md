@@ -36,7 +36,7 @@ CREATE POLICY scope_isolation ON app.ticket_list
     USING      (papuma.scope_visible(scope, tenant_id))
     WITH CHECK (papuma.scope_writable(scope, tenant_id));
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON app.ticket_list TO app_role;
+GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON app.ticket_list TO app_role;  -- TRUNCATE: the reset
 GRANT USAGE ON SCHEMA papuma TO app_role;               -- to call the functions
 ```
 
@@ -57,9 +57,17 @@ Write your policy against the functions, never against the settings they read
 
 ```csharp
 public sealed class TicketListProjection(DocumentStore store, NpgsqlDataSource appData)
-    : IChangeHandler
+    : IChangeHandler, IProjection
 {
     public string Name => "ticket-list";   // checkpoint identity — never rename
+    public int Version => 1;               // raise it to rebuild (ADR-024)
+
+    // Rebuild: TRUNCATE is not subject to RLS, so it empties every tenant's rows.
+    public async Task ResetAsync(CancellationToken ct)
+    {
+        await using var cmd = appData.CreateCommand("TRUNCATE app.ticket_list");
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
 
     public async Task HandleAsync(ChangeRecord change, CancellationToken ct)
     {

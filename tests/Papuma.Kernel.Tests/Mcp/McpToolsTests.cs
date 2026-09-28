@@ -33,9 +33,20 @@ public sealed class McpToolsTests : IAsyncLifetime
 
     private sealed record McpEvent(string UserId);
 
-    private sealed class NoopChangeHandler : IChangeHandler
+    private sealed class NoopChangeHandler : IChangeHandler, IProjection
     {
         public string Name => "mcp-test-projection";
+
+        public int Version => 1;
+
+        public Task HandleAsync(ChangeRecord change, CancellationToken ct) => Task.CompletedTask;
+
+        public Task ResetAsync(CancellationToken ct) => Task.CompletedTask;
+    }
+
+    private sealed class NoopEffectHandler : IChangeHandler
+    {
+        public string Name => "mcp-test-effect";
 
         public Task HandleAsync(ChangeRecord change, CancellationToken ct) => Task.CompletedTask;
     }
@@ -173,7 +184,7 @@ public sealed class McpToolsTests : IAsyncLifetime
     [Fact]
     public async Task Mutations_AreDisabledByDefault_AndOptIn()
     {
-        using var change = new ChangeFeedProcessor(_fixture.DataSource, [new NoopChangeHandler()]);
+        using var change = new ChangeFeedProcessor(_fixture.DataSource, [new NoopChangeHandler(), new NoopEffectHandler()]);
         using var events = new EventFeedProcessor(_fixture.DataSource, [new NoopEventHandler()]);
 
         var readOnly = CreateTools(change, events);
@@ -187,6 +198,13 @@ public sealed class McpToolsTests : IAsyncLifetime
             await mutating.RetryFeedFailureAsync("change", "mcp-test-projection", 999));
         Assert.Contains("replays from the beginning",
             await mutating.ResetFeedCheckpointAsync("change", "mcp-test-projection"));
+        var refused = await Assert.ThrowsAsync<ArgumentException>(
+            () => mutating.ResetFeedCheckpointAsync("change", "mcp-test-effect"));
+        Assert.Contains("not a projection", refused.Message);
+
+        var lag = JsonNode.Parse(await mutating.GetFeedLagAsync())!["changeFeed"]!.AsArray();
+        Assert.Equal("projection", (string?)lag.Single(h => (string?)h!["handler"] == "mcp-test-projection")!["kind"]);
+        Assert.Equal("effect", (string?)lag.Single(h => (string?)h!["handler"] == "mcp-test-effect")!["kind"]);
 
         await Assert.ThrowsAsync<ArgumentException>(
             () => mutating.RetryFeedFailureAsync("neither", "x", 1));

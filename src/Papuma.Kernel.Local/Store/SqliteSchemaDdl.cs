@@ -92,9 +92,10 @@ internal static class SqliteSchemaDdl
         -- ── Handler infrastructure (ADR-009): no tenant data ──────────────────────
         CREATE TABLE IF NOT EXISTS checkpoint
         (
-            handler_name    TEXT    NOT NULL PRIMARY KEY,
-            last_seq        INTEGER NOT NULL DEFAULT 0,
-            updated_at      TEXT    NOT NULL
+            handler_name        TEXT    NOT NULL PRIMARY KEY,
+            last_seq            INTEGER NOT NULL DEFAULT 0,
+            projection_version  INTEGER,
+            updated_at          TEXT    NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS failure

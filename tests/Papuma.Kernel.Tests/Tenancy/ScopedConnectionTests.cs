@@ -124,6 +124,29 @@ public sealed class ScopedConnectionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ProjectionReset_Truncate_ByTheAppRole_EmptiesEveryTenant()
+    {
+        await InsertAsync(ScopeContext.Tenant(Guid.NewGuid()), NewId());
+        await InsertAsync(ScopeContext.Tenant(Guid.NewGuid()), NewId());
+
+        // TRUNCATE is not subject to row-level security, so a projection's ResetAsync
+        // empties every tenant's rows without a scope (ADR-024); the role needs the privilege.
+        await using (var grant = _fixture.DataSource.CreateCommand(
+            $"GRANT TRUNCATE ON app.scoped_note TO {PostgresFixture.AppRoleName}"))
+        {
+            await grant.ExecuteNonQueryAsync();
+        }
+
+        await using (var truncate = _fixture.AppRoleDataSource.CreateCommand("TRUNCATE app.scoped_note"))
+        {
+            await truncate.ExecuteNonQueryAsync();
+        }
+
+        await using var count = _fixture.DataSource.CreateCommand("SELECT count(*) FROM app.scoped_note");
+        Assert.Equal(0L, await count.ExecuteScalarAsync());
+    }
+
+    [Fact]
     public async Task CreateCommand_AfterCommit_Throws()
     {
         await using var scoped = await _fixture.AppRoleDataSource.OpenScopedAsync(ScopeContext.Tenant(Guid.NewGuid()));

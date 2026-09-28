@@ -4,7 +4,8 @@
 
 Accepted (2026-06-11); ordering amended by [ADR-022](adr-022-snapshot-cursor.md) —
 delivery follows causal order (per document strictly by version), not global `seq`
-order.
+order; extended by [ADR-024](adr-024-projections-and-effect-handlers.md) — projections
+are declared and versioned, effects can start at the head.
 
 ## Context
 

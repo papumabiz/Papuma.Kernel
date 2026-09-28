@@ -840,13 +840,13 @@ mechanisms below, decisions above.
 ## 19. Checkpoints, backup and rebuild: what is truth, what is derivable?
 
 → [ADR-009](adr/adr-009-projections-as-dumb-handlers.md) (checkpoints),
+[ADR-024](adr/adr-024-projections-and-effect-handlers.md) (projections vs. effects),
 [ADR-013](adr/adr-013-business-event-log.md) (retention), §16 (projections)
 
 **How does a processor know where it was after a restart?** From
-`papuma.checkpoint`: one row per handler (`handler_name → last_seq`), in the same
-database as the feed itself. After every successfully processed record, the
-processor advances `last_seq`; at startup it reads the row and continues exactly
-there — whether the process shut down cleanly, crashed, or moved to another
+`papuma.checkpoint`: one row per handler — its cursor (§2) — in the same database
+as the feed itself. After every successfully processed batch, the processor
+advances the cursor; at startup it reads the row and continues exactly there — whether the process shut down cleanly, crashed, or moved to another
 machine. There is no in-memory state that could get lost: the position *is* a
 database row.
 
@@ -860,19 +860,41 @@ For derived state, "duplicated but idempotent" is the only right choice.
 **When do you rebuild a projection?** Four typical situations:
 
 1. **A bug in the handler logic** — the projection is *computed* wrong. Deploy the
-   fix, `ResetCheckpointAsync(handlerName)`, replay from seq 0.
+   fix with a raised `Version`; the next start rebuilds it.
 2. **A new projection** — a freshly registered handler starts at seq 0. The
    "rebuild" is thus not a special mode but the normal case of the first start:
    every projection comes into being as a replay of the entire history.
 3. **A read-model schema change** — the new column needs historical values that
-   only exist in the feed.
+   only exist in the feed. Again: raise `Version`.
 4. **The projection target is lost** — Elasticsearch index deleted, cache flushed,
    external database restored.
 
-The hard boundary: reset only **projections** (idempotent, derivable) — never
+The hard boundary: replay only **projections** (idempotent, derivable) — never
 effect handlers. A reset email handler re-sends the entire mail history. The
-distinction "projection vs. effect" is a design decision per handler, made when
-writing it, not when resetting.
+distinction is a design decision made when writing a handler, and the handler
+declares it (ADR-024):
+
+- **A projection implements `IProjection`**: a `Version` of its output shape and a
+  `ResetAsync` that empties its own target (`TRUNCATE`; it must be idempotent). The
+  kernel does the rest. A raised version rebuilds the projection once, at the next
+  start, under the same name — older instances still running in a rolling deploy
+  pause it instead of writing the old shape into the rebuilt target.
+  `ResetProjectionsAsync()` rebuilds them all (the one line an upgrade note needs),
+  `ResetProjectionAsync(name)` one; the dashboard and the MCP tools show the kind,
+  and the MCP reset refuses effects.
+- **An effect implements nothing.** A new handler starts at the beginning of the
+  feed — right for a projection, wrong for a mail: mark an effect
+  `[StartsAtFeedHead]`, and its first start counts everything already committed as
+  delivered.
+- **One subtlety on upgrading:** the first start of an *existing* projection with
+  this feature only records its version — it does not rebuild, or an upgrade would
+  rebuild everything. Rebuild deliberately: raise the version, or call
+  `ResetProjectionsAsync()`.
+
+A version bump empties the target, so readers see it incomplete until the replay
+catches up. Where that is not acceptable, build the new shape next to the old one —
+a new table under a new handler name — and switch reads when its lag is 0
+([recipe](recipes/projection-schema.md#2-breaking-changes-rebuild-dont-migrate)).
 
 **What belongs in the backup?** Logically only the truth: `papuma.document` (the
 state), `papuma.change` (the complete history) and `papuma.event` (the facts) —

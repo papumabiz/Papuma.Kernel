@@ -340,7 +340,9 @@ The engine provides the infrastructure:
   from the order of unrelated documents (concepts §2).
 - **Checkpoints**: one persisted cursor per handler (`papuma.checkpoint`).
 - **Retry** with backoff and poison handling.
-- **Rebuild**: reset the cursor, feed replay (upcasters optionally in between).
+- **Rebuild**: projections declare themselves (`IProjection`: `Version`, `ResetAsync`);
+  a raised version is rebuilt once at the next start, `ResetProjectionsAsync()` rebuilds
+  all; effects can start at the head (`[StartsAtFeedHead]`) — ADR-024.
 
 ### Reading by snapshot cursor
 
@@ -452,7 +454,7 @@ non-superuser role via `Papuma.Kernel.Testing` (ADR-021), so they exercise it.
 | [006](adr/adr-006-keys-and-constraints.md) | Keys and constraints via metamodel and expression indexes | Accepted; amended by ADR-020 |
 | [007](adr/adr-007-privacy-policies.md) | Privacy policies: attributes as defaults, fluent as override | Accepted |
 | [008](adr/adr-008-rollback-is-update.md) | Rollback is an update with metadata | Accepted |
-| [009](adr/adr-009-projections-as-dumb-handlers.md) | Projections as dumb change handlers | Accepted; ordering amended by ADR-022 |
+| [009](adr/adr-009-projections-as-dumb-handlers.md) | Projections as dumb change handlers | Accepted; ordering amended by ADR-022, extended by ADR-024 |
 | [010](adr/adr-010-feed-consumption.md) | Snapshot-based polling with LISTEN/NOTIFY wakeup | Accepted; point 2 superseded by ADR-022 |
 | [011](adr/adr-011-no-business-events-in-storage.md) | No domain events in the storage layer | Accepted |
 | [012](adr/adr-012-partial-updates.md) | Partial updates as a patch primitive (no load, atomic via jsonb_set + RETURNING) | Accepted |
@@ -467,6 +469,7 @@ non-superuser role via `Papuma.Kernel.Testing` (ADR-021), so they exercise it.
 | [021](adr/adr-021-testing-package.md) | A narrow, test-framework-agnostic testing package; broader one deferred against objective triggers | Accepted |
 | [022](adr/adr-022-snapshot-cursor.md) | Snapshot cursor: the feed follows causal order (PgQ-style slices, lag counted) | Accepted |
 | [023](adr/adr-023-no-event-sourcing-mode.md) | No event-sourcing mode; stream-shaped aggregates as an application pattern | Accepted |
+| [024](adr/adr-024-projections-and-effect-handlers.md) | Projections are declared (`IProjection`: versioned rebuild, reset hook); effects can start at the head | Accepted |
 
 ## 13. Recipes (tutorial precursors)
 

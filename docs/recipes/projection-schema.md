@@ -6,7 +6,8 @@ the test runs). `Papuma.Kernel.Local` has the same hook — see the SQLite secti
 the end.
 Background: [read models in the same database](same-database-read-models.md) (the
 table and its RLS policy), [concepts §19](../concepts.md#19-checkpoints-backup-and-rebuild-what-is-truth-what-is-derivable)
-(projections are derivable), [ADR-009](../adr/adr-009-projections-as-dumb-handlers.md).
+(projections are derivable), [ADR-009](../adr/adr-009-projections-as-dumb-handlers.md),
+[ADR-024](../adr/adr-024-projections-and-effect-handlers.md) (versioned rebuild).
 
 The kernel creates and evolves its own schema at startup. Projection tables are the
 application's — but they have one property that changes how to migrate them: **they
@@ -16,7 +17,7 @@ kinds of change, and neither needs a migration framework to start with:
 | Change | How |
 |---|---|
 | **Additive** — new table, new nullable/defaulted column, new index, new policy | idempotent DDL, applied on every startup |
-| **Breaking** — rename, type change, different key, different meaning | a new table filled by a handler with a **new name** (replays the feed from the start), then switch reads, then drop the old table |
+| **Breaking** — rename, type change, different key, different meaning | raise the projection's **`Version`**: the next start empties the table and replays the feed into it. For zero downtime instead: a new table filled by a handler with a new name, switch reads, drop the old table |
 
 ## 1. Where the DDL runs: a schema contributor
 
@@ -88,21 +89,52 @@ tables, and set `EnsureSchema = false` where the application role runs.
 
 ## 2. Breaking changes: rebuild, don't migrate
 
-Suppose `title` becomes `summary` plus `description`. Instead of an `ALTER` with a data
-conversion:
+Suppose `title` becomes `summary` plus `description`. Nothing is converted in place,
+so nothing can be converted wrongly: the table is rebuilt from the truth, the same
+way it would be built after a restore. Two routes:
+
+**Raise the version (the default).** The projection declares itself (ADR-024):
+
+```csharp
+public sealed class TicketBoardProjection(NpgsqlDataSource appData) : IChangeHandler, IProjection
+{
+    public string Name => "ticket-board";   // stays — the identity of the checkpoint
+    public int Version => 2;                // was 1: summary + description replace title
+
+    public async Task ResetAsync(CancellationToken ct)
+    {
+        // Idempotent. TRUNCATE, not DELETE: it is not subject to row-level security,
+        // so it empties every tenant's rows.
+        await using var cmd = appData.CreateCommand("TRUNCATE app.ticket_board");
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public Task HandleAsync(ChangeRecord change, CancellationToken ct) { /* … */ }
+}
+```
+
+Change the contributor's DDL for the new shape (idempotently, as always), raise
+`Version`, deploy. At the next start the processor finds the lower stored version,
+calls `ResetAsync`, and replays the feed into the empty table — once, however many
+instances start. Instances still running the old code pause the projection instead of
+writing the old shape into it. `TRUNCATE` needs the `TRUNCATE` privilege: the table
+owner has it; grant it to the application role if a separate role owns the tables.
+Readers see the table incomplete until the replay catches up (`GetLagAsync`, the
+dashboard).
+
+**A new name, for zero downtime.** When readers must never see a partial table:
 
 1. Add `app.ticket_board_v2` to the contributor (keep `ticket_board` for now).
 2. Add a handler `TicketBoardProjectionV2` with `Name => "ticket-board-v2"`. A new name
    is a new checkpoint at 0 — it replays the whole feed and fills the new table while
    the old one keeps serving.
-3. When its lag reaches 0 (`GetLagAsync`, the dashboard), switch the reads.
+3. When its lag reaches 0, switch the reads.
 4. In a later release, remove the old handler and add `DROP TABLE IF EXISTS
-   app.ticket_board;` to the contributor.
+   app.ticket_board;` to the contributor. The old checkpoint row stays behind — delete
+   it from `papuma.checkpoint` if it bothers you.
 
-Nothing is converted in place, so nothing can be converted wrongly: the new table is
-built from the truth, the same way it would be built after a restore. Resetting the old
-handler's checkpoint and truncating its table does the same in one step, but leaves
-readers with an empty table until the replay catches up.
+**After a kernel upgrade that asks for a rebuild**, one call rebuilds every projection
+of a processor: `ResetProjectionsAsync()` — effect handlers are left alone.
 
 ## 3. Append-only projections: seq as the row key
 
@@ -186,8 +218,10 @@ Differences: no advisory lock (one process owns the file), no RLS (isolation is 
 explicit `scope`/`tenant_id` predicate), and no `ADD COLUMN IF NOT EXISTS` — read
 `pragma_table_info('ticket_board')` and add the column only when it is missing. The
 projection handler writes through its own connection to the same file; the feed
-processor holds no transaction while handlers run. Verified by
-`SqliteProjectionSchemaTests`.
+processor holds no transaction while handlers run — and none while it calls
+`ResetAsync` for a rebuild, so `DELETE FROM ticket_board` there cannot block on the
+file's write lock. Verified by `SqliteProjectionSchemaTests` and
+`SqliteProjectionLifecycleTests`.
 
 ## When to reach for a migration tool
 

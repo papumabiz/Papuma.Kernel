@@ -27,7 +27,9 @@ This document is the entry map. The truth lives in the reference chain:
    seen") — a lower `seq` can arrive later. Never decide in a handler from the order
    of unrelated documents (first-come-first-served, "latest across documents") — a
    rebuild may order them differently; put such decisions in the write path (bounded
-   counter, unique key, `expectedVersion`). The kernel generates no projections —
+   counter, unique key, `expectedVersion`). A projection implements `IProjection`
+   (`Version` + idempotent `ResetAsync`, `TRUNCATE`); an effect handler gets
+   `[StartsAtFeedHead]`. The kernel generates no projections —
    handlers are "dumb" and write wherever they want.
 4. **Everything is scope-bound.** Every session belongs to a scope (`Platform` or
    `Tenant(id)`); isolation comes in two layers (explicit predicates + row level
@@ -113,7 +115,9 @@ Typed errors you should handle (not swallow): `ConcurrencyException`,
 | …read one current document (login, business logic) | `LoadAsync` / `LoadByKeyAsync` (immediately consistent) |
 | …read several documents of one type by id (a projection's batch, a detail view) | `LoadManyAsync<T>(ids)` — one query instead of one per id |
 | …**any derived read** — list, join, aggregation, search, external *(the default)* | an `IChangeHandler` projection (eventual, lag observable) |
-| …create or change a projection table | an `ISchemaContributor` with idempotent DDL (`AddSchemaContributor<T>()`); breaking changes = new table + new handler name (replay), not an in-place migration ([recipe](../recipes/projection-schema.md)) |
+| …create or change a projection table | an `ISchemaContributor` with idempotent DDL (`AddSchemaContributor<T>()`); breaking changes = raise the projection's `Version` (rebuilt once at the next start), or new table + new handler name for zero downtime — never an in-place data migration ([recipe](../recipes/projection-schema.md)) |
+| …rebuild projections (bug fix, kernel upgrade note) | raise `Version`, or `ResetProjectionsAsync()` on the processor — effects are left alone; never `ResetCheckpointAsync` on an effect (ADR-024) |
+| …add a handler with side effects (mail, webhook, bus) to a system with history | `[StartsAtFeedHead]` on the class — otherwise its first start acts on every past record (ADR-024) |
 | …show or test what one command did | `GetChangesByCorrelationAsync(session.CorrelationId)` — every change of that unit of work, all document types, feed order |
 | …keep tenant isolation on a projection table in the same database | RLS policy `USING (papuma.scope_visible(scope, tenant_id)) WITH CHECK (papuma.scope_writable(scope, tenant_id))`, handler opens `appData.OpenScopedAsync(change.Scope)` per change (reads the same way, with the reader's scope) — never copy the GUC names ([recipe](../recipes/same-database-read-models.md), ADR-019) |
 | …ad-hoc SQL/BI, all 4 conditions met *(the exception)* | view with `security_invoker = on` (concepts §16) |

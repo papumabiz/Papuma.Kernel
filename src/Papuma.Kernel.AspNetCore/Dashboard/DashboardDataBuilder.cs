@@ -45,6 +45,9 @@ internal static class DashboardDataBuilder
             lagJson.Add(new JsonObject
             {
                 ["handler"] = snapshot.HandlerName,
+                ["kind"] = snapshot.ProjectionVersion is null ? "effect" : "projection",
+                ["projectionVersion"] = snapshot.ProjectionVersion,
+                ["paused"] = snapshot.Paused,
                 ["checkpoint"] = snapshot.Checkpoint,
                 ["latestSeq"] = snapshot.LatestSeq,
                 ["lag"] = snapshot.Lag,

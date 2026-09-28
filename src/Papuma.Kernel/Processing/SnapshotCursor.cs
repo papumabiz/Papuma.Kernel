@@ -19,12 +19,14 @@ namespace Papuma.Kernel.Processing;
 /// <param name="SliceSnapshot">The slice in progress: its target snapshot; <c>null</c> = none.</param>
 /// <param name="SliceSeq">Within the slice, rows with <c>seq</c> at most this are delivered.</param>
 /// <param name="LastSeq">Highest <c>seq</c> delivered so far — informational.</param>
+/// <param name="ProjectionVersion">The stored projection version (ADR-024) — read, never written by the cursor.</param>
 internal sealed record SnapshotCursor(
     long BaseSeq,
     string? DoneSnapshot,
     string? SliceSnapshot,
     long SliceSeq,
-    long LastSeq)
+    long LastSeq,
+    int? ProjectionVersion = null)
 {
     /// <summary>
     /// Locks the handler's checkpoint row for this processor (leader coordination,
@@ -37,7 +39,7 @@ internal sealed record SnapshotCursor(
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
-            SELECT base_seq, done_snapshot::text, slice_snapshot::text, slice_seq, last_seq
+            SELECT base_seq, done_snapshot::text, slice_snapshot::text, slice_seq, last_seq, projection_version
             FROM papuma.checkpoint
             WHERE handler_name = @name
             FOR UPDATE SKIP LOCKED
@@ -53,7 +55,7 @@ internal sealed record SnapshotCursor(
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
-            SELECT base_seq, done_snapshot::text, slice_snapshot::text, slice_seq, last_seq
+            SELECT base_seq, done_snapshot::text, slice_snapshot::text, slice_seq, last_seq, projection_version
             FROM papuma.checkpoint
             WHERE handler_name = @name
             """;
@@ -252,7 +254,8 @@ internal sealed record SnapshotCursor(
             DoneSnapshot: reader.IsDBNull(1) ? null : reader.GetString(1),
             SliceSnapshot: reader.IsDBNull(2) ? null : reader.GetString(2),
             SliceSeq: reader.GetInt64(3),
-            LastSeq: reader.GetInt64(4));
+            LastSeq: reader.GetInt64(4),
+            ProjectionVersion: reader.IsDBNull(5) ? null : reader.GetInt32(5));
     }
 
     // "Not visible in a snapshot" is exactly: at or beyond its xmax, or in progress when it
