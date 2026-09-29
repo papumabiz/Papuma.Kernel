@@ -140,6 +140,23 @@ dashboard).
 **After a kernel upgrade that asks for a rebuild**, one call rebuilds every projection
 of a processor: `ResetProjectionsAsync()` — effect handlers are left alone.
 
+**Marking an existing projection and changing its shape in the same release.** The
+first start of a projection that existed before it implemented `IProjection` records
+its `Version` and does not rebuild (an upgrade would otherwise rebuild everything). If
+the release that adds `IProjection` also makes a breaking change to the table, the old
+rows must go now, not at the next version bump. Two ways, both in one deploy:
+
+- **A new name** (above): a new table and a new handler name replay from the beginning;
+  no one-shot logic needed.
+- **Reset once from the contributor.** A breaking DDL step needs a guard anyway
+  (`ALTER TABLE … PRIMARY KEY` is not idempotent) — typically "the old shape is still
+  there". In that branch, after the DDL, call `ResetProjectionAsync(name)` on the
+  processor: it empties the target through `ResetAsync` and resets the cursor. It runs
+  once because the guard does. Contributors run before the feed workers start, so no
+  delivery interleaves.
+
+From then on the normal rule applies: raise `Version` for the next breaking change.
+
 ## 3. Append-only projections: seq as the row key
 
 An upsert projection is idempotent through its version guard. A projection that

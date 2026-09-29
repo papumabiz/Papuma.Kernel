@@ -889,7 +889,9 @@ declares it (ADR-024):
 - **One subtlety on upgrading:** the first start of an *existing* projection with
   this feature only records its version — it does not rebuild, or an upgrade would
   rebuild everything. Rebuild deliberately: raise the version, or call
-  `ResetProjectionsAsync()`.
+  `ResetProjectionsAsync()`. When the release that marks a projection also changes its
+  table's shape, reset it once from the schema contributor's guarded DDL step
+  ([projection-schema recipe](recipes/projection-schema.md)).
 
 A version bump empties the target, so readers see it incomplete until the replay
 catches up. Where that is not acceptable, build the new shape next to the old one —

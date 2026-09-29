@@ -8,6 +8,10 @@ Changes:
   slot document (an id derived from what it is unique for, inserted first with
   `expectedVersion: 0`) as the way to express uniqueness among documents in a state.
   Conditional keys are deferred against a trigger (ADR-020, amended).
+- **Docs: marking an existing projection and changing its shape in one release**
+  (feedback F-22) — the projection-schema recipe shows the one-deploy routes: a new
+  name, or `ResetProjectionAsync(name)` from the contributor's guarded breaking DDL step.
+  The first-marking rule (record the version, no rebuild) is unchanged.
 - **Tooling: `publish-nuget.sh --tag vX.Y.Z`** packs the tagged commit in a temporary
   worktree instead of the working tree (which may be ahead of the tag — the docs ship
   inside the packages), and refuses to upload unless every package carries the tag's

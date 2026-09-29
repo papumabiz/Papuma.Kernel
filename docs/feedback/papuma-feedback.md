@@ -13,7 +13,7 @@ is addressed in the kernel, move it to *Resolved* with the version that fixed it
 aksara (F# wiki, 18 feed handlers, 31 own migrations) moved from 1.3.0 to 2.0.0 on
 2026-09-27. Every entry was checked against the 2.0.0 source (`src/`) and the shipped
 docs, not only against aksara's code. F-16, F-18, F-20 and F-21 were resolved in 2.1.0,
-F-19 with docs after it; F-17 is half done.
+F-19 and F-22 (which came out of adopting 2.1.0) with docs after it; F-17 is half done.
 
 ### F-17 — Every projection reloads the document; changes arrive one at a time
 
@@ -73,6 +73,35 @@ Kept so the maintainer knows what not to lose.
 
 Resolved after 2.1.0 (docs only; ships with the next release).
 
+### F-22 — Marking an existing projection cannot rebuild it in the same release
+
+- Found: 2026-09-29 · 2.1.0 · API + docs · **confirmed** (`ProjectionLifecycle.RegisterAsync`:
+  stored version null → record the declared one, never rebuild)
+- Recording instead of rebuilding on first marking is right as a default — otherwise an
+  upgrade would rebuild everything. But it leaves no way to say "mark it *and* rebuild
+  it" in one deploy: whatever `Version` the first marking declares is recorded. The
+  F-16 resolution note suggests "raise it once to rebuild through the kernel, then the
+  migration row and its contributor can go" — that takes two releases (mark at 1, ship,
+  then raise to 2). aksara needed both at once: `workspace-activity` gained its `seq`
+  key (F-20) in the release that marked it, so the existing rows had to be replaced
+  immediately. It keeps a slimmed one-shot request table for that (now calling
+  `ResetProjectionAsync(name)` from an `ISchemaContributor`), about 60 lines.
+- Low priority — the workaround is small and uses public API. Suggestions, either would
+  do:
+  1. A documented convention: a first marking at `Version` > 1 means "rebuild now" (the
+     projection existed before at an implicit version 1, and the declared one says its
+     shape moved past it). Changes nothing for the recommended `Version = 1`.
+  2. Or document the two-step route and the `ResetProjectionAsync` call from a schema
+     contributor as the one-deploy alternative in `projection-schema.md`.
+- **Resolved (docs, after 2.1.0), behavior unchanged**: the projection-schema recipe now
+  names both one-deploy routes — a new table and handler name (replays from the
+  beginning, no one-shot logic), or `ResetProjectionAsync(name)` from the contributor's
+  breaking DDL step, whose guard ("old shape still there") already makes it run once.
+  concepts §19 points there. Suggestion 1 was not taken: the case only arises once per
+  projection, when an existing one is first marked and reshaped in the same release, and
+  an implicit version 1 would be a hidden rule that changes the documented first-marking
+  behavior of 2.1.0 (and would pause projections declared at `Version = 0`).
+
 ### F-19 — Unique keys cannot be conditional
 
 - Found: 2026-09-13 (aksara ADR-0006 amendment) · 1.2.1, still in 2.0.0 · API ·
@@ -93,7 +122,14 @@ Resolved after 2.1.0 (docs only; ships with the next release).
   leave the old rule silently in force; the trigger is two applications with a case the
   slot document cannot model.
 
-Resolved in 2.1.0 (2026-09-28) — to be checked against the package by aksara. 2.1.0 also
+Resolved in 2.1.0 (2026-09-28) — **checked by aksara on 2026-09-29** against the nuget.org
+package (restored into an empty package folder, not from a cache): 16 projections implement
+`IProjection` (effects left unmarked), `ResetProjectionsAsync`/`ResetProjectionAsync` drive
+aksara's one-shot rebuilds, `workspace-activity` is keyed by `seq` per the recipe, and the
+full suite (473 slice tests, host logs captured) logged no `UncommittedSessionDisposed` —
+so F-18's warning found no further forgotten commit in aksara. `OpenScopedAsync`,
+`LoadManyAsync` and `runSessionCommitted` were checked in the XML docs but are not in use
+yet; the `DELETE` policy fix does not apply (aksara has no RLS on its own tables yet). 2.1.0 also
 fixes row-level security: the `All` scope could delete rows of every tenant (in
 `papuma.*` and in application tables built from the ADR-019 template — add the new
 restrictive `DELETE` policy to aksara's own RLS tables, see the 2.1.0 upgrade notes),
