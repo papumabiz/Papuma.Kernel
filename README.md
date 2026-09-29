@@ -1,17 +1,15 @@
 # Papuma Kernel
 
-<p align="center"><img src="https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/assets/logo.png" width="300" /></p>
+![Papuma Kernel](https://raw.githubusercontent.com/papumabiz/Papuma.Kernel/master/assets/logo-readme.png)
 
-<p align="center">
-  <a href="https://github.com/papumabiz/Papuma.Kernel/actions/workflows/ci.yml"><img src="https://github.com/papumabiz/Papuma.Kernel/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10" />
-  <img src="https://img.shields.io/badge/PostgreSQL-%E2%89%A518-336791" alt="PostgreSQL 18+" />
-  <img src="https://img.shields.io/badge/SQLite-embedded-003B57" alt="SQLite embedded" />
-  <img src="https://img.shields.io/badge/version-2.1.0-blue" alt="2.1.0" />
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT" />
-</p>
+[![CI](https://github.com/papumabiz/Papuma.Kernel/actions/workflows/ci.yml/badge.svg)](https://github.com/papumabiz/Papuma.Kernel/actions/workflows/ci.yml)
+![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)
+![PostgreSQL 18+](https://img.shields.io/badge/PostgreSQL-%E2%89%A518-336791)
+![SQLite embedded](https://img.shields.io/badge/SQLite-embedded-003B57)
+![2.1.0](https://img.shields.io/badge/version-2.1.0-blue)
+![MIT](https://img.shields.io/badge/license-MIT-green)
 
-<p align="center"><strong>Your documents are the truth. The change feed follows automatically.</strong></p>
+**Your documents are the truth. The change feed follows automatically.**
 
 Papuma Kernel is a small application kernel for .NET 10, built as **two
 independent products sharing one model**. You store plain C# objects as JSON
