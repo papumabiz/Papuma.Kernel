@@ -4,13 +4,16 @@ name: Release
 # stored anywhere. Requires a Trusted Publishing policy on nuget.org pointing at
 # this repository and this workflow file (see docs/README.md release notes).
 #
-# Triggered by pushing a tag vX.Y.Z. Every package's <Version> must equal X.Y.Z,
+# Triggered by pushing a tag vX.Y.Z, or manually (Actions tab / `gh workflow run
+# release.yml --ref vX.Y.Z`) for a tag that already existed before this workflow
+# did, or to retry a failed publish. Every package's <Version> must equal X.Y.Z,
 # or the push is refused before anything reaches nuget.org.
 
 on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
 
 permissions:
   contents: read
