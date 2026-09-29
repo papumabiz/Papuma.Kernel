@@ -5,15 +5,21 @@ name: Release
 # this repository and this workflow file (see docs/README.md release notes).
 #
 # Triggered by pushing a tag vX.Y.Z, or manually (Actions tab / `gh workflow run
-# release.yml --ref vX.Y.Z`) for a tag that already existed before this workflow
-# did, or to retry a failed publish. Every package's <Version> must equal X.Y.Z,
-# or the push is refused before anything reaches nuget.org.
+# release.yml -f tag=vX.Y.Z`) — the manual path takes an explicit tag input and
+# checks that tag out, because a tag from before this workflow existed carries no
+# copy of it to dispatch against. Every package's <Version> must equal X.Y.Z, or
+# the push is refused before anything reaches nuget.org.
 
 on:
   push:
     tags:
       - "v*.*.*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v2.1.0) — must already exist"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -24,8 +30,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Resolve the tag to publish
+        id: ref
+        run: echo "tag=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout ${{ steps.ref.outputs.tag }}
         uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ steps.ref.outputs.tag }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
@@ -49,7 +61,8 @@ jobs:
       - name: Verify every package matches the tag
         run: |
           set -euo pipefail
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          TAG="${{ steps.ref.outputs.tag }}"
+          TAG_VERSION="${TAG#v}"
           echo "Tag version: ${TAG_VERSION}"
           shopt -s nullglob
           count=0
@@ -57,7 +70,7 @@ jobs:
             count=$((count + 1))
             base="$(basename "$f" .nupkg)"
             if [[ "$base" != *"${TAG_VERSION}" ]]; then
-              echo "::error file=$f::package version does not match tag ${GITHUB_REF_NAME}"
+              echo "::error file=$f::package version does not match tag ${TAG}"
               exit 1
             fi
           done
@@ -65,12 +78,12 @@ jobs:
             echo "::error::no .nupkg files were produced"
             exit 1
           fi
-          echo "${count} package(s) match ${GITHUB_REF_NAME}"
+          echo "${count} package(s) match ${TAG}"
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: papuma-kernel-nupkg-${{ github.ref_name }}
+          name: papuma-kernel-nupkg-${{ steps.ref.outputs.tag }}
           path: |
             artifacts/*.nupkg
             artifacts/*.snupkg
