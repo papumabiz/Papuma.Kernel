@@ -1,0 +1,89 @@
+name: Release
+
+# Publishes to nuget.org via Trusted Publishing (OIDC) — no long-lived API key
+# stored anywhere. Requires a Trusted Publishing policy on nuget.org pointing at
+# this repository and this workflow file (see docs/README.md release notes).
+#
+# Triggered by pushing a tag vX.Y.Z. Every package's <Version> must equal X.Y.Z,
+# or the push is refused before anything reaches nuget.org.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+  id-token: write # required for NuGet Trusted Publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore Papuma.Kernel.slnx
+
+      - name: Build
+        run: dotnet build Papuma.Kernel.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test Papuma.Kernel.slnx --configuration Release --no-build --verbosity normal
+
+      - name: Pack
+        run: dotnet pack Papuma.Kernel.slnx --configuration Release --output artifacts
+
+      # Fails closed: a tag that doesn't match every packed version must not publish
+      # a partial or wrongly-versioned release.
+      - name: Verify every package matches the tag
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          echo "Tag version: ${TAG_VERSION}"
+          shopt -s nullglob
+          count=0
+          for f in artifacts/*.nupkg; do
+            count=$((count + 1))
+            base="$(basename "$f" .nupkg)"
+            if [[ "$base" != *"${TAG_VERSION}" ]]; then
+              echo "::error file=$f::package version does not match tag ${GITHUB_REF_NAME}"
+              exit 1
+            fi
+          done
+          if [ "$count" -eq 0 ]; then
+            echo "::error::no .nupkg files were produced"
+            exit 1
+          fi
+          echo "${count} package(s) match ${GITHUB_REF_NAME}"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: papuma-kernel-nupkg-${{ github.ref_name }}
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+          if-no-files-found: error
+
+      # NuGet.org username (profile name, not email) — stored as a secret per
+      # NuGet's own Trusted Publishing guidance, even though it isn't a credential.
+      - name: NuGet login (OIDC -> short-lived API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Push to nuget.org
+        run: |
+          dotnet nuget push "artifacts/*.nupkg" \
+            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
