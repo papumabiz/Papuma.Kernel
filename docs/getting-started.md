@@ -226,6 +226,25 @@ Why it is more than convenience:
 No container runtime? `PapumaTestDatabase.ConnectAsync(ownerConnectionString)`
 uses an existing server (a CI service container, say).
 
+**Tests that boot the real host.** A fixture that runs the application's own
+composition (`AddPapumaKernel` plus its hosted services) turns the hosted feed loops
+off and drains instead:
+
+```csharp
+builder.Services.AddPapumaKernel(o =>
+{
+    o.DataSource = fixture.Database.AppDataSource;
+    o.Model(/* the app's model */);
+    o.RunFeedWorkers = false;   // schema and contributors still run; processors stay registered
+});
+// … in the test, after writing:
+await host.Services.GetRequiredService<ChangeFeedProcessor>().DrainAsync();
+```
+
+With the loops running, a drain competes with them for the same checkpoints: a handler
+the hosted worker holds at that moment counts as "nothing delivered", and the drain can
+end before the projection is written. `AddPapumaKernelLocal` has the same option.
+
 Tests share one database, so isolate them by data:
 
 - **A fresh tenant per test** — `ScopeContext.Tenant(Guid.NewGuid())`.

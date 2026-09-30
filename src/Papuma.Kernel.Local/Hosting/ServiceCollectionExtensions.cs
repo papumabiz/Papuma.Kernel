@@ -72,8 +72,12 @@ public static class ServiceCollectionExtensions
         // Order matters: the schema initializer's StartAsync completes before the
         // background workers start (sequential IHostedService startup).
         services.AddHostedService<SqliteKernelSchemaInitializer>();
-        services.AddHostedService<SqliteChangeFeedHostedService>();
-        services.AddHostedService<SqliteEventFeedHostedService>();
+        if (options.RunFeedWorkers)
+        {
+            services.AddHostedService<SqliteChangeFeedHostedService>();
+            services.AddHostedService<SqliteEventFeedHostedService>();
+        }
+
         services.AddHostedService<SqliteEventRetentionHostedService>();
 
         return new PapumaKernelLocalBuilder(services);

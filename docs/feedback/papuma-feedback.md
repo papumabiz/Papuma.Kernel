@@ -14,6 +14,7 @@ aksara (F# wiki, 18 feed handlers, 31 own migrations) moved from 1.3.0 to 2.0.0 
 2026-09-27. Every entry was checked against the 2.0.0 source (`src/`) and the shipped
 docs, not only against aksara's code. F-16, F-18, F-20 and F-21 were resolved in 2.1.0,
 F-19 and F-22 (which came out of adopting 2.1.0) with docs after it; F-17 is half done.
+F-23 (from slimming aksara's code against 2.1.0) is resolved for the next release.
 
 ### F-17 — Every projection reloads the document; changes arrive one at a time
 
@@ -71,7 +72,30 @@ Kept so the maintainer knows what not to lose.
 
 ## Resolved
 
-Resolved after 2.1.0 (docs only; ships with the next release).
+Resolved after 2.1.0 (ships with the next release).
+
+### F-23 — `DrainAsync` cannot be used in a test host that runs the feed workers
+
+- Found: 2026-09-30 · 2.1.0 · code · **confirmed** (`ProcessHandlerBatchAsync`: a handler
+  whose checkpoint another processor holds is skipped with 0 delivered)
+- aksara's slice tests boot the real composition in a generic host (`AddPapumaKernel`
+  plus the app's own hosted services: realtime listener, collaboration stack). The kernel
+  registers `ChangeFeedHostedService` / `EventFeedHostedService` unconditionally, so the
+  hosted loop and a test's `DrainAsync` compete for the same checkpoints: while the
+  hosted worker holds one, `ProcessOnceAsync` reports 0 for that handler and the drain
+  can end before the projection is written. aksara therefore keeps polling read models
+  (158 call sites; its 25 copies of the poll helper are now one) instead of draining.
+- Suggestion: an option to register the processors without their hosted loops, e.g.
+  `o.Processing.RunHosted = false` (schema initializer and contributors still run), so a
+  host-based fixture drives the feeds with `DrainAsync` only. Worth a line in
+  getting-started §7 next to the host-less setup.
+- **Resolved (after 2.1.0; ships with the next release)**: `o.RunFeedWorkers = false` on
+  `PapumaKernelOptions` and `PapumaKernelLocalOptions` registers the processors without
+  their hosted loops; schema setup, contributors and event retention still run. It sits
+  next to `EnsureSchema` rather than under `o.Processing`, because those settings go into
+  the processor itself, while this one decides what the host starts. getting-started §7
+  shows the fixture, the playbook names it. Tests for both backends: with the option off
+  nothing is delivered until the test drains, then everything is.
 
 ### F-22 — Marking an existing projection cannot rebuild it in the same release
 

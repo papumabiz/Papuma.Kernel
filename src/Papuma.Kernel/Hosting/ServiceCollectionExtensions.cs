@@ -77,8 +77,12 @@ public static class ServiceCollectionExtensions
         // Order matters: the schema initializer's StartAsync completes before the
         // background workers start (sequential IHostedService startup).
         services.AddHostedService<KernelSchemaInitializer>();
-        services.AddHostedService<ChangeFeedHostedService>();
-        services.AddHostedService<EventFeedHostedService>();
+        if (options.RunFeedWorkers)
+        {
+            services.AddHostedService<ChangeFeedHostedService>();
+            services.AddHostedService<EventFeedHostedService>();
+        }
+
         services.AddHostedService<EventRetentionHostedService>();
 
         return new PapumaKernelBuilder(services);

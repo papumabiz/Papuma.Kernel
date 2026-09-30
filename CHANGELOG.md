@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+Added:
+
+- **`RunFeedWorkers`** on `PapumaKernelOptions` and `PapumaKernelLocalOptions` (default
+  `true`; feedback F-23). `false` registers the feed processors without their hosted
+  loops — schema setup, contributors and event retention still run — so a test fixture
+  that boots the real host drives the feeds with `DrainAsync` (or `ProcessOnceAsync`)
+  alone instead of racing the hosted worker for its checkpoints. Also for instances
+  that should not process feeds. getting-started §7 shows the fixture.
+
 Changes:
 
 - **Docs: "at most one per …"** (feedback F-19) — concepts §34 and the playbook show the

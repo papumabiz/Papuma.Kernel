@@ -33,6 +33,17 @@ public sealed class PapumaKernelOptions
     /// </summary>
     public bool EnsureSchema { get; set; } = true;
 
+    /// <summary>
+    /// Gets or sets whether the change feed and event feed run as hosted background
+    /// workers (default: true). Turn it off in a host-based test fixture that drives the
+    /// feeds itself (<c>DrainAsync</c> from <c>Papuma.Kernel.Testing</c>, or
+    /// <c>ProcessOnceAsync</c>): a hosted worker holding a checkpoint makes a concurrent
+    /// cycle skip that handler. Also for instances that should not process feeds, such as
+    /// web nodes next to dedicated worker nodes. Schema setup, the processors and event
+    /// retention are registered either way.
+    /// </summary>
+    public bool RunFeedWorkers { get; set; } = true;
+
     /// <summary>Gets the feed engine options (shared by change feed and event log).</summary>
     public ChangeFeedProcessorOptions Processing { get; } = new();
 
