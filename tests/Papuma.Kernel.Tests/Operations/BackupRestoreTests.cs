@@ -23,6 +23,7 @@ public sealed class BackupRestoreTests
 {
     private const string Image = PapumaTestDatabase.DefaultImage;
     private const string DumpPath = "/tmp/app.dump";
+    private const int RestoredPort = 5433;
 
     private readonly KernelModel _model =
         new KernelModelBuilder().Document<BackupDoc>().Event<BackupEvent>().Build();
@@ -109,6 +110,67 @@ public sealed class BackupRestoreTests
 
         // The documents themselves are intact.
         Assert.Equal(delivered.Count + pending.Count + fresh.Count, await CountAsync(restoredDb, "papuma.document"));
+    }
+
+    [Fact]
+    public async Task IncrementalBasebackup_Combined_StartsWithoutRepair_AndDeliversExactlyTheUndelivered()
+    {
+        // Incremental physical backups (PostgreSQL 17+) need WAL summarization on the server.
+        await using var server = new PostgreSqlBuilder(Image)
+            .WithCommand("-c", "summarize_wal=on")
+            .WithPortBinding(RestoredPort, assignRandomHostPort: true)
+            .Build();
+        await server.StartAsync();
+
+        await using var db = NpgsqlDataSource.Create(server.GetConnectionString());
+        await SchemaManager.EnsureSchemaAsync(db, _model);
+        var store = new DocumentStore(db, _model);
+        await WriteAsync(store, 3);
+
+        const string Handler = "backup-recipe";
+        using (var processor = new ChangeFeedProcessor(db, [new Recorder(Handler)]))
+        {
+            await processor.DrainAsync();
+        }
+
+        // The recipe's chain: a full base backup, later an incremental one on top of it.
+        await AsPostgres(server, "pg_basebackup -U postgres -D /tmp/full -c fast");
+        var pending = await WriteAsync(store, 2);
+        await AsPostgres(
+            server, "pg_basebackup -U postgres -D /tmp/incr -c fast -i /tmp/full/backup_manifest");
+
+        // The recipe's restore: combine the chain, start a server on the result.
+        await AsPostgres(server, "pg_combinebackup /tmp/full /tmp/incr -o /tmp/combined && chmod 700 /tmp/combined");
+        await AsPostgres(
+            server,
+            $"pg_ctl -D /tmp/combined -o '-p {RestoredPort} -c listen_addresses=*' -w -l /tmp/combined.log start");
+
+        var restored = new NpgsqlConnectionStringBuilder(server.GetConnectionString())
+        {
+            Host = server.Hostname,
+            Port = server.GetMappedPublicPort(RestoredPort),
+        };
+        await using var restoredDb = NpgsqlDataSource.Create(restored.ConnectionString);
+
+        // Same cluster identity: transaction ids are valid, nothing to repair.
+        Assert.False(await SchemaManager.RepairFeedAfterLogicalRestoreAsync(restoredDb));
+        await SchemaManager.EnsureSchemaAsync(restoredDb, _model);
+
+        var recorder = new Recorder(Handler);
+        using (var processor = new ChangeFeedProcessor(restoredDb, [recorder]))
+        {
+            await processor.DrainAsync();
+        }
+
+        // The checkpoint came with the full backup: only what was written before the
+        // incremental backup and not yet delivered arrives — exactly once.
+        Assert.Equal(pending, recorder.Seqs);
+    }
+
+    private static async Task AsPostgres(PostgreSqlContainer container, string command)
+    {
+        var result = await container.ExecAsync(["su", "postgres", "-c", command]);
+        Assert.True(result.ExitCode == 0, $"{command}: {result.Stderr}");
     }
 
     private static async Task<List<long>> WriteAsync(DocumentStore store, int count)

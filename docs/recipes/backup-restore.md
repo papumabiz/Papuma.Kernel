@@ -1,7 +1,7 @@
 # Recipe: Backup, restore and replication
 
 Status: operations recipe (2026-10-06). The dump/restore path is verified against two
-independent PostgreSQL 18 clusters by `BackupRestoreTests`, the lost-`LISTEN` behaviour
+independent PostgreSQL 18 clusters by `BackupRestoreTests` (also the incremental chain), the lost-`LISTEN` behaviour
 by `ListenConnectionTests`, both in the kernel's test suite. Statements about
 replication and PITR describe PostgreSQL itself and are not kernel-tested — they
 follow from the kernel's few cluster-bound facts (§4). PostgreSQL kernel only —
@@ -39,6 +39,31 @@ configured on the server, `archive_command`/`archive_library`):
 pg_basebackup -D /backup/base -Ft -z -P
 ```
 
+**Incremental** is a physical-backup feature; `pg_dump` is always a full dump. Two
+mechanisms, usable together:
+
+- **Continuous WAL archiving** — every committed change is shipped as it happens, so
+  the base backup plus the archive restores to any moment (PITR) and the RPO is seconds.
+- **Incremental base backups** (PostgreSQL 17+, so on every supported kernel server):
+  with `summarize_wal = on`, a base backup can store only the blocks changed since the
+  previous one; `pg_combinebackup` merges the chain into a normal data directory.
+
+```bash
+pg_basebackup -D /backup/full -c fast
+# ... the application keeps running ...
+pg_basebackup -D /backup/incr1 -c fast -i /backup/full/backup_manifest
+pg_combinebackup /backup/full /backup/incr1 -o /backup/restored   # then start a server on it
+```
+
+Tools such as pgBackRest, Barman or WAL-G wrap exactly this (full/differential/incremental
+chains, retention, verification, object storage); use one in production rather than
+scripts. The kernel suits block-level increments: `papuma.change` and `papuma.event`
+only grow, and a physical copy keeps the transaction ids, so a restored chain needs
+**no feed repair** (verified by `BackupRestoreTests`: the checkpoint rides along, and
+exactly the rows that were undelivered at backup time arrive, once). Do not build a
+"backup" from the change feed itself — it lacks purged events, checkpoints and your own
+tables, and is an integration channel, not a copy.
+
 Whichever you pick: restore it regularly into a scratch environment. A backup that was
 never restored is a hope.
 
@@ -55,7 +80,7 @@ depends on how the copy was made:
 | Restore | Transaction ids | You do |
 |---|---|---|
 | `pg_restore` into **another cluster** (logical) | foreign to the new cluster | nothing — `EnsureSchemaAsync` detects and repairs it once; rows delivered before the backup may come again (at-least-once), none is lost |
-| Physical backup, PITR, `pg_upgrade` | preserved | nothing |
+| Physical backup (full or incremental chain), PITR, `pg_upgrade` | preserved | nothing |
 
 After the restore, in this order:
 
@@ -133,6 +158,7 @@ id; and sequences are not replicated. Use logical replication for what it is mea
 
 ## 5. Checklist
 
+- [ ] Production: physical backups with WAL archiving (a tool like pgBackRest or Barman), not just `pg_dump`.
 - [ ] Backup covers the whole database; restores into a scratch environment run on a schedule.
 - [ ] Backup retention is shorter than your erasure deadlines — or erasures are replayed after a restore.
 - [ ] Erasure requests are logged outside the database.

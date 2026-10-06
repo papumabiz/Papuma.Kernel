@@ -24,7 +24,8 @@ Docs:
 - **Recipe `backup-restore`**: what to back up, `pg_dump`/`pg_basebackup`, the restore
   checklist (cluster-bound transaction ids, external targets, erased data coming back),
   and replication — physical streaming replication yes, logical no, never read from a
-  standby, poolers. Verified by a real dump/restore between two clusters.
+  standby, poolers. Verified by a real dump/restore between two clusters and by an incremental
+  `pg_basebackup` chain merged with `pg_combinebackup`.
 
 Changes:
 
