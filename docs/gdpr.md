@@ -116,6 +116,13 @@ This deliberately violates the append-only purity of the feed: **Art. 17 beats
 architectural aesthetics.** Redaction is not part of normal application flows —
 whoever needs it regularly has a policy omission (→ inventory review).
 
+## Backups revive erased data
+
+Erasure and redaction act on the live database. A backup taken earlier still holds the
+data, and a restore brings it back. Keep a log of erasure requests outside the database
+and re-apply the ones newer than the backup before serving traffic; keep backup
+retention within your erasure deadlines ([backup-restore recipe](recipes/backup-restore.md#3-restore)).
+
 ## What deliberately remains application business
 
 | Task | Why not in the kernel |

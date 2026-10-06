@@ -11,6 +11,21 @@ Added:
   alone instead of racing the hosted worker for its checkpoints. Also for instances
   that should not process feeds. getting-started §7 shows the fixture.
 
+Fixed:
+
+- **A lost `LISTEN` connection no longer makes the feed loops spin.** After a failover,
+  a server restart or a killed backend, the idle wait threw immediately and the loop
+  re-ran at full speed (hundreds of warnings per second, the database polled flat out).
+  Both processors now degrade to plain polling and re-establish `LISTEN` on the next
+  idle wait; a database that is down at startup no longer stops `RunAsync` either.
+
+Docs:
+
+- **Recipe `backup-restore`**: what to back up, `pg_dump`/`pg_basebackup`, the restore
+  checklist (cluster-bound transaction ids, external targets, erased data coming back),
+  and replication — physical streaming replication yes, logical no, never read from a
+  standby, poolers. Verified by a real dump/restore between two clusters.
+
 Changes:
 
 - **Docs: "at most one per …"** (feedback F-19) — concepts §34 and the playbook show the

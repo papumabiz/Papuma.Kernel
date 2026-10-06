@@ -181,7 +181,8 @@ Pattern guides on kernel primitives ([docs/recipes](https://github.com/papumabiz
 [nats-bridge](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/recipes/nats-bridge.md) ·
 [field-level-encryption](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/recipes/field-level-encryption.md) ·
 [event-modeling-slices](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/recipes/event-modeling-slices.md) ·
-[ai-consumers](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/recipes/ai-consumers.md).
+[ai-consumers](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/recipes/ai-consumers.md) ·
+[backup-restore](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/recipes/backup-restore.md) (backup, restore, replication).
 
 ## Documentation map
 
