@@ -128,12 +128,8 @@ public sealed class ChangeFeedProcessor : IDisposable
             return;
         }
 
-        await using var listenConn = await _dataSource.OpenConnectionAsync(ct);
-        await using (var listenCmd = listenConn.CreateCommand())
-        {
-            listenCmd.CommandText = $"LISTEN {NotifyChannel}";
-            await listenCmd.ExecuteNonQueryAsync(ct);
-        }
+        await using var listen = new ListenConnection(_dataSource, _logger);
+        await listen.TryOpenAsync(ct);
 
         _logger.LogInformation("Change feed processor started ({HandlerCount} handlers).", _handlers.Count);
 
@@ -160,7 +156,7 @@ public sealed class ChangeFeedProcessor : IDisposable
                 {
                     await RefreshLagCacheAsync(ct); // gauge freshness ≈ poll interval
                     // Returns early on NOTIFY; otherwise the poll interval elapses.
-                    await listenConn.WaitAsync(_options.PollInterval, ct);
+                    await listen.WaitAsync(_options.PollInterval, ct);
                 }
                 catch (OperationCanceledException)
                 {

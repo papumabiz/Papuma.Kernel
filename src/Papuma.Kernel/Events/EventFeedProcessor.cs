@@ -112,12 +112,8 @@ public sealed class EventFeedProcessor : IDisposable
             return;
         }
 
-        await using var listenConn = await _dataSource.OpenConnectionAsync(ct);
-        await using (var listenCmd = listenConn.CreateCommand())
-        {
-            listenCmd.CommandText = $"LISTEN {ChangeFeedProcessor.NotifyChannel}";
-            await listenCmd.ExecuteNonQueryAsync(ct);
-        }
+        await using var listen = new ListenConnection(_dataSource, _logger);
+        await listen.TryOpenAsync(ct);
 
         _logger.LogInformation("Event feed processor started ({HandlerCount} handlers).", _handlers.Count);
 
@@ -143,7 +139,7 @@ public sealed class EventFeedProcessor : IDisposable
                 try
                 {
                     await GetLagAsync(ct); // gauge freshness ≈ poll interval
-                    await listenConn.WaitAsync(_options.PollInterval, ct);
+                    await listen.WaitAsync(_options.PollInterval, ct);
                 }
                 catch (OperationCanceledException)
                 {
