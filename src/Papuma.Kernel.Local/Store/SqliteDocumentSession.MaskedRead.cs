@@ -139,7 +139,7 @@ public sealed partial class SqliteDocumentSession
     /// read projection. Upcasting keeps the masked shape consistent with what the
     /// in-process <see cref="LoadAsync{T}"/> would deserialize.
     /// </summary>
-    private static MaskedDocumentResult MaskRow(
+    private MaskedDocumentResult MaskRow(
         DocumentTypeMetadata metadata, string json, long version, int storedSchemaVersion)
     {
         EnsureSchemaNotNewer(metadata, "(masked read)", storedSchemaVersion);
@@ -149,6 +149,6 @@ public sealed partial class SqliteDocumentSession
             metadata.Upcast(raw, storedSchemaVersion);
         }
 
-        return new MaskedDocumentResult(PolicyProjector.Apply(raw, metadata), version);
+        return new MaskedDocumentResult(PolicyProjector.Apply(raw, metadata, _hashKeys, Scope), version);
     }
 }

@@ -3,6 +3,7 @@
 
 using Npgsql;
 
+using Papuma.Kernel.Changes;
 using Papuma.Kernel.Model;
 using Papuma.Kernel.Processing;
 
@@ -44,6 +45,21 @@ public sealed class PapumaKernelOptions
     /// </summary>
     public bool RunFeedWorkers { get; set; } = true;
 
+    /// <summary>
+    /// Gets or sets the master key of the keyed <c>Hash</c> policy (ADR-025), base64, at least
+    /// 32 random bytes. Every process that writes must use the same key and
+    /// <see cref="HashKeyId"/>. Read it from a secret store or an environment variable — never
+    /// commit it. For per-tenant keys from a KMS register your own
+    /// <see cref="IHashKeyProvider"/> instead.
+    /// </summary>
+    public string? HashMasterKey { get; set; }
+
+    /// <summary>
+    /// Gets or sets the identifier of <see cref="HashMasterKey"/> (default <c>k1</c>), written into
+    /// every hash. Configure a new id together with a new key to rotate.
+    /// </summary>
+    public string HashKeyId { get; set; } = "k1";
+
     /// <summary>Gets the feed engine options (shared by change feed and event log).</summary>
     public ChangeFeedProcessorOptions Processing { get; } = new();
 
@@ -83,6 +99,12 @@ public sealed class PapumaKernelOptions
         if (RetentionInterval <= TimeSpan.Zero)
         {
             throw new InvalidOperationException("RetentionInterval must be positive.");
+        }
+
+        if (HashMasterKey is not null)
+        {
+            // Fail at startup, not at the first write that hashes a field.
+            _ = MasterKeyHashKeyProvider.FromBase64(HashMasterKey, HashKeyId);
         }
 
         Processing.Validate();

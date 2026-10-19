@@ -102,8 +102,10 @@ spec.
   per-tenant key derived by HKDF from an application master key, `v2:<kid>:<hex>` output, a
   key-check value in the database, fail closed without a key, `v1` read-only. Done 2026-10-19: the
   canonical-JSON spec chapter (`docs/spec/canonical-json.md`), the Python reference, 43 canonical
-  and 16 hash vectors, and `CanonicalJson` / `HashV2` in Core reproducing them. Next: wire it
-  into the kernels (provider, options, key-check table, fail closed, masked reads, events).
+  and 16 hash vectors, and `CanonicalJson` / `HashV2` in Core reproducing them. Wired in as an opt-in the same day:
+  `IHashKeyProvider`, `MasterKeyHashKeyProvider`, the options, and the key context in the diff, masked-read
+  and event-payload paths of both kernels. Next: the key-check table, fail closed, the test key in
+  `Papuma.Kernel.Testing`, then v1 read-only and the upgrade note.
 - (Original sketch, superseded by the ADR:) choose the scheme. Likely `HMAC-SHA-256` over canonical JSON with a
   tenant-scoped key from configuration (a salt alone defeats precomputed tables
   but not a keyed attacker model; decide explicitly).

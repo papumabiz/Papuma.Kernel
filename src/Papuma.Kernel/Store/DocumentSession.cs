@@ -48,6 +48,7 @@ public sealed partial class DocumentSession : IAsyncDisposable
     private readonly KernelModel _model;
     private readonly SessionOptions _options;
     private readonly ILogger? _logger;
+    private readonly IHashKeyProvider? _hashKeys;
     private readonly PendingWrites _pendingWrites = new();
 
     private NpgsqlConnection? _connection;
@@ -64,10 +65,16 @@ public sealed partial class DocumentSession : IAsyncDisposable
     internal string ActorId { get; }
 
     internal DocumentSession(
-        NpgsqlDataSource dataSource, KernelModel model, ScopeContext scope, SessionOptions? options, ILogger? logger)
+        NpgsqlDataSource dataSource,
+        KernelModel model,
+        ScopeContext scope,
+        SessionOptions? options,
+        ILogger? logger,
+        IHashKeyProvider? hashKeys)
     {
         _dataSource = dataSource;
         _logger = logger;
+        _hashKeys = hashKeys;
         _model = model;
         Scope = scope;
         _options = options ?? new SessionOptions();
@@ -453,7 +460,7 @@ public sealed partial class DocumentSession : IAsyncDisposable
             EnsureSchemaNotNewer(metadata, id, oldSchemaVersion);
 
             var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
-            var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, after: null), metadata, id);
+            var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, after: null), metadata, id, _hashKeys, Scope);
             var deletedVersion = expectedVersion + 1;
 
             // The delete diff carries the old state — record its schema version, not the model's (ADR-005).
@@ -594,7 +601,7 @@ public sealed partial class DocumentSession : IAsyncDisposable
             throw await VersionConflictAsync(conn, tx, metadata.Name, id, expectedVersion: 0, ct);
         }
 
-        var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(before: null, newJson), metadata, id);
+        var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(before: null, newJson), metadata, id, _hashKeys, Scope);
         await InsertChangeRecordAsync(
             conn, tx, metadata, id, insertedVersion, ChangeOperation.Insert, diff, metadata.SchemaVersion, ct);
 
@@ -662,7 +669,7 @@ public sealed partial class DocumentSession : IAsyncDisposable
 
         var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
         var storedNewJson = (JsonObject)JsonNode.Parse(newJsonText)!;
-        var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, storedNewJson), metadata, id);
+        var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, storedNewJson), metadata, id, _hashKeys, Scope);
 
         await InsertChangeRecordAsync(
             conn, tx, metadata, id, newVersion, ChangeOperation.Update, diff,

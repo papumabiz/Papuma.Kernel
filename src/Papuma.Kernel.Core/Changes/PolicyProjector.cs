@@ -4,6 +4,7 @@
 using System.Text.Json.Nodes;
 
 using Papuma.Kernel.Model;
+using Papuma.Kernel.Tenancy;
 
 namespace Papuma.Kernel.Changes;
 
@@ -25,7 +26,13 @@ internal static class PolicyProjector
     /// </summary>
     /// <param name="document">The raw (upcast) document.</param>
     /// <param name="metadata">The document type metadata carrying the policies.</param>
-    public static JsonObject Apply(JsonObject document, DocumentTypeMetadata metadata)
+    /// <param name="hashKeys">The hash key provider, or <c>null</c> for the legacy v1 hash (ADR-025).</param>
+    /// <param name="scope">The scope of the read — it must be the scope the feed hash was written under.</param>
+    public static JsonObject Apply(
+        JsonObject document,
+        DocumentTypeMetadata metadata,
+        IHashKeyProvider? hashKeys,
+        ScopeContext scope)
     {
         var clone = (JsonObject)document.DeepClone();
         if (metadata.Policies.Count == 0)
@@ -33,11 +40,11 @@ internal static class PolicyProjector
             return clone;
         }
 
-        MaskObject(clone, prefix: string.Empty, metadata);
+        MaskObject(clone, prefix: string.Empty, metadata, new HashContext(hashKeys, scope, metadata.Name));
         return clone;
     }
 
-    private static void MaskObject(JsonObject obj, string prefix, DocumentTypeMetadata metadata)
+    private static void MaskObject(JsonObject obj, string prefix, DocumentTypeMetadata metadata, HashContext hash)
     {
         foreach (var key in obj.Select(p => p.Key).ToList())
         {
@@ -49,7 +56,7 @@ internal static class PolicyProjector
                     // (a policy on the array/object path itself is handled below).
                     if (obj[key] is JsonObject nested)
                     {
-                        MaskObject(nested, path, metadata);
+                        MaskObject(nested, path, metadata, hash);
                     }
 
                     break;
@@ -59,7 +66,7 @@ internal static class PolicyProjector
                     break;
 
                 case FieldPolicy.Hash:
-                    obj[key] = PolicyHash.Of(obj[key]); // same hash the feed would show
+                    obj[key] = hash.Hash(obj[key]); // same hash the feed would show
                     break;
 
                 case FieldPolicy.Redact:

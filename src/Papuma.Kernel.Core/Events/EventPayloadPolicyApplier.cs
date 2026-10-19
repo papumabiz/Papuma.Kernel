@@ -1,28 +1,33 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json.Nodes;
 
+using Papuma.Kernel.Changes;
 using Papuma.Kernel.Model;
+using Papuma.Kernel.Tenancy;
 
 namespace Papuma.Kernel.Events;
 
 /// <summary>
 /// Applies field policies (ADR-007/013) to an event payload before it is stored.
 /// Unlike diff entries, event payloads keep their natural shape: Redact/DoNotTrack
-/// remove the field, Hash replaces the value with a SHA-256 hex string.
+/// remove the field, Hash replaces the value with its hash string (ADR-025).
 /// </summary>
 internal static class EventPayloadPolicyApplier
 {
-    public static JsonObject Apply(JsonObject payload, EventTypeMetadata metadata)
+    public static JsonObject Apply(
+        JsonObject payload,
+        EventTypeMetadata metadata,
+        IHashKeyProvider? hashKeys,
+        ScopeContext scope)
     {
         if (metadata.Policies.Count == 0)
         {
             return payload;
         }
 
+        var hash = new HashContext(hashKeys, scope, metadata.Name);
         var result = payload.DeepClone().AsObject();
         foreach (var (path, policy) in metadata.Policies)
         {
@@ -42,8 +47,7 @@ internal static class EventPayloadPolicyApplier
                     break;
 
                 case FieldPolicy.Hash:
-                    var text = parent[field]?.ToJsonString() ?? "null";
-                    parent[field] = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+                    parent[field] = hash.Hash(parent[field]);
                     break;
 
                 // Reference is rejected at model build time for events (ADR-013).

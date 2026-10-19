@@ -106,7 +106,7 @@ public sealed partial class DocumentSession
             var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
             // SQL cannot raise for a missing parent: the old state is already at hand, so the rule is checked here.
             JsonPatchApplier.EnsureTargetsExist(oldJson, operations, metadata.Name, id);
-            var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, storedNewJson), metadata, id);
+            var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, storedNewJson), metadata, id, _hashKeys, Scope);
 
             await InsertChangeRecordAsync(
                 conn, tx, metadata, id, newVersion, ChangeOperation.Update, diff, metadata.SchemaVersion, ct);
@@ -287,7 +287,7 @@ public sealed partial class DocumentSession
                 var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
                 // SQL cannot raise for a missing parent: the old state is already at hand, so the rule is checked here.
                 JsonPatchApplier.EnsureTargetsExist(oldJson, operations, metadata.Name, id);
-                var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, storedNewJson), metadata, id);
+                var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, storedNewJson), metadata, id, _hashKeys, Scope);
                 changes.Add((id, newVersion, metadata.SchemaVersion, diff));
             }
 
@@ -333,7 +333,7 @@ public sealed partial class DocumentSession
                 EnsureSchemaNotNewer(metadata, id, oldSchemaVersion);
 
                 var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
-                var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, after: null), metadata, id);
+                var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, after: null), metadata, id, _hashKeys, Scope);
                 changes.Add((id, version + 1, oldSchemaVersion, diff));
             }
 

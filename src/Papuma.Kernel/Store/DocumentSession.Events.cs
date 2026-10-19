@@ -34,7 +34,7 @@ public sealed partial class DocumentSession
         var payload = JsonSerializer.SerializeToNode(@event, KernelJson.Options) as JsonObject
             ?? throw new ArgumentException(
                 $"Event of type {typeof(TEvent).Name} must serialize to a JSON object.", nameof(@event));
-        payload = EventPayloadPolicyApplier.Apply(payload, metadata);
+        payload = EventPayloadPolicyApplier.Apply(payload, metadata, _hashKeys, Scope);
 
         using var activity = StartWriteActivity("append", metadata.Name, documentId: null);
         try

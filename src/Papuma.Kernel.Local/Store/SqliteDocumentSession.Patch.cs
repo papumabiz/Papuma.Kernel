@@ -106,7 +106,7 @@ public sealed partial class SqliteDocumentSession
                 }
 
                 var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
-                var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, patchedJson), metadata, id);
+                var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, patchedJson), metadata, id, _hashKeys, Scope);
 
                 await InsertChangeRecordAsync(
                     conn, tx, metadata, id, version, ChangeOperation.Update, diff, metadata.SchemaVersion, ct);
@@ -277,7 +277,7 @@ public sealed partial class SqliteDocumentSession
                     () => updateCmd.ExecuteScalarAsync(ct), metadata.Name))!;
 
                 var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
-                var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, patchedJson), metadata, id);
+                var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, patchedJson), metadata, id, _hashKeys, Scope);
                 changes.Add((id, newVersion, metadata.SchemaVersion, diff));
             }
 
@@ -322,7 +322,7 @@ public sealed partial class SqliteDocumentSession
                 EnsureSchemaNotNewer(metadata, id, oldSchemaVersion);
 
                 var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
-                var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, after: null), metadata, id);
+                var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, after: null), metadata, id, _hashKeys, Scope);
                 changes.Add((id, version + 1, oldSchemaVersion, diff));
             }
 

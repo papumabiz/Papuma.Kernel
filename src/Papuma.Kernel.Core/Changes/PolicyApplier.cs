@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
 using Papuma.Kernel.Model;
+using Papuma.Kernel.Tenancy;
 
 namespace Papuma.Kernel.Changes;
 
@@ -17,13 +18,21 @@ internal static class PolicyApplier
     /// <param name="diff">The raw diff produced by <see cref="JsonDiffEngine"/>.</param>
     /// <param name="metadata">The document type metadata carrying the policies.</param>
     /// <param name="documentId">The document id (for reference entries).</param>
-    public static DocumentDiff Apply(DocumentDiff diff, DocumentTypeMetadata metadata, string documentId)
+    /// <param name="hashKeys">The hash key provider, or <c>null</c> for the legacy v1 hash (ADR-025).</param>
+    /// <param name="scope">The scope of the write — the key of a keyed hash is derived per tenant.</param>
+    public static DocumentDiff Apply(
+        DocumentDiff diff,
+        DocumentTypeMetadata metadata,
+        string documentId,
+        IHashKeyProvider? hashKeys,
+        ScopeContext scope)
     {
         if (metadata.Policies.Count == 0 || diff.IsEmpty)
         {
             return diff;
         }
 
+        var hash = new HashContext(hashKeys, scope, metadata.Name);
         var entries = new SortedDictionary<string, DiffEntry>(StringComparer.Ordinal);
         foreach (var (path, entry) in diff.Entries)
         {
@@ -42,7 +51,7 @@ internal static class PolicyApplier
                     break;
 
                 case FieldPolicy.Hash:
-                    entries[path] = DiffEntry.HashedEntry(HashOf(entry));
+                    entries[path] = DiffEntry.HashedEntry(HashOf(entry, hash));
                     break;
 
                 case FieldPolicy.DoNotTrack:
@@ -53,6 +62,6 @@ internal static class PolicyApplier
         return new DocumentDiff(entries);
     }
 
-    private static string? HashOf(DiffEntry entry) =>
-        entry.HasNew ? PolicyHash.Of(entry.New) : null; // field removed → nothing to hash
+    private static string? HashOf(DiffEntry entry, HashContext hash) =>
+        entry.HasNew ? hash.Hash(entry.New) : null; // field removed → nothing to hash
 }

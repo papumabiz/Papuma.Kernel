@@ -7,6 +7,12 @@ Proposed (2026-10-19) — supersedes the algorithm of the `Hash` policy in
 the policy catalog, its attribute and the diff entry shape stay. Both kernels, the change
 feed, the event log and masked reads. Ships in the next major version (see Consequences).
 
+Implementation so far: canonical JSON and the v2 hash (`CanonicalJson`, `HashV2`), the key
+provider (`IHashKeyProvider`, `MasterKeyHashKeyProvider`), the options, and the key context in all
+three policy appliers — **opt-in**: without a configured key the v1 hash is still written. Still
+to come: the key-check table, fail closed, the test key in `Papuma.Kernel.Testing`, and v1
+becoming read-only (points 4 to 6).
+
 ## Context
 
 `Hash` (`[TrackHash]`) records `{ "changed": true, "hash": "…" }` instead of a value: the

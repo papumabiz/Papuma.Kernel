@@ -2,7 +2,7 @@
   "spec": "papuma-changes",
   "version": "0.1",
   "kind": "policy",
-  "description": "Policy vectors: applying 'policies' to 'diff' for document 'documentType'/'documentId' must yield 'expected' (wire format). Policies not listed default to Track. Cases with status 'legacy-v1' pin behaviour that Phase 2 of the roadmap will change.",
+  "description": "Policy vectors: applying 'policies' to 'diff' for document 'documentType'/'documentId' must yield 'expected' (wire format). Policies not listed default to Track. Cases with status 'legacy-v1' pin behaviour that Phase 2 of the roadmap will change. A case with 'hashKey' (masterKeyHex, kid) and 'tenantId' runs with the keyed v2 hash provider (ADR-025); without it the legacy v1 hash is produced.",
   "cases": [
     {
       "name": "no-policies-leave-the-diff-untouched",
@@ -149,6 +149,76 @@
       "name": "hash-of-a-removed-field-has-no-hash",
       "documentType": "User",
       "documentId": "123",
+      "policies": { "pw": "Hash" },
+      "diff": { "pw": { "old": "a" } },
+      "expected": { "pw": { "changed": true } }
+    },
+    {
+      "name": "hash-v2-of-a-string-value",
+      "documentType": "User",
+      "documentId": "123",
+      "tenantId": "acme",
+      "hashKey": { "masterKeyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", "kid": "test" },
+      "policies": { "pw": "Hash" },
+      "diff": { "pw": { "old": "a", "new": "b" } },
+      "expected": {
+        "pw": {
+          "changed": true,
+          "hash": "v2:test:ad8524f83712ab5c9ea5154f89e0fd1f5067969a609f8f9cc0430ce6e05c532d"
+        }
+      }
+    },
+    {
+      "name": "hash-v2-hashes-numbers-by-value",
+      "documentType": "User",
+      "documentId": "123",
+      "tenantId": "acme",
+      "hashKey": { "masterKeyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", "kid": "test" },
+      "policies": { "pin": "Hash" },
+      "diff": { "pin": { "old": 1, "new": 42.0 } },
+      "expected": {
+        "pin": {
+          "changed": true,
+          "hash": "v2:test:892a8d034a76fe06701b13e50410d81ae47c69e1e9401d7d4a81e84e88b12583"
+        }
+      }
+    },
+    {
+      "name": "hash-v2-differs-per-tenant",
+      "documentType": "User",
+      "documentId": "123",
+      "tenantId": "globex",
+      "hashKey": { "masterKeyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", "kid": "test" },
+      "policies": { "pw": "Hash" },
+      "diff": { "pw": { "old": "a", "new": "b" } },
+      "expected": {
+        "pw": {
+          "changed": true,
+          "hash": "v2:test:fec23d6a3f337661b5d7a63b158943db5c0edf5e2c7d9470224101a61963be8a"
+        }
+      }
+    },
+    {
+      "name": "hash-v2-in-platform-scope",
+      "documentType": "User",
+      "documentId": "123",
+      "tenantId": "",
+      "hashKey": { "masterKeyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", "kid": "test" },
+      "policies": { "pw": "Hash" },
+      "diff": { "pw": { "old": "a", "new": "b" } },
+      "expected": {
+        "pw": {
+          "changed": true,
+          "hash": "v2:test:dbc7a6b5b1f5d311214408c0a6538abdf505d5eba9f27813e51bc614275dbad6"
+        }
+      }
+    },
+    {
+      "name": "hash-v2-of-a-removed-field-has-no-hash",
+      "documentType": "User",
+      "documentId": "123",
+      "tenantId": "acme",
+      "hashKey": { "masterKeyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", "kid": "test" },
       "policies": { "pw": "Hash" },
       "diff": { "pw": { "old": "a" } },
       "expected": { "pw": { "changed": true } }

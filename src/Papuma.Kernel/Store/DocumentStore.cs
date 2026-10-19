@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 
 using Npgsql;
 
+using Papuma.Kernel.Changes;
 using Papuma.Kernel.Model;
 using Papuma.Kernel.Tenancy;
 
@@ -19,6 +20,7 @@ public sealed class DocumentStore
 {
     private readonly NpgsqlDataSource _dataSource;
     private readonly ILogger? _logger;
+    private readonly IHashKeyProvider? _hashKeys;
 
     /// <summary>Gets the kernel model this store operates on.</summary>
     public KernelModel Model { get; }
@@ -44,12 +46,33 @@ public sealed class DocumentStore
     /// <param name="model">The startup-built kernel model.</param>
     /// <param name="logger">The logger sessions report through; <c>null</c> disables logging.</param>
     public DocumentStore(NpgsqlDataSource dataSource, KernelModel model, ILogger<DocumentStore>? logger)
+        : this(dataSource, model, logger, hashKeys: null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DocumentStore"/> class with a logger and the
+    /// key provider of the keyed <c>Hash</c> policy (ADR-025).
+    /// </summary>
+    /// <param name="dataSource">The PostgreSQL data source.</param>
+    /// <param name="model">The startup-built kernel model.</param>
+    /// <param name="logger">The logger sessions report through; <c>null</c> disables logging.</param>
+    /// <param name="hashKeys">
+    /// The hash key provider; <c>null</c> keeps the legacy v1 hash for <c>[TrackHash]</c> fields
+    /// (a transitional state).
+    /// </param>
+    public DocumentStore(
+        NpgsqlDataSource dataSource,
+        KernelModel model,
+        ILogger<DocumentStore>? logger,
+        IHashKeyProvider? hashKeys)
     {
         ArgumentNullException.ThrowIfNull(dataSource);
         ArgumentNullException.ThrowIfNull(model);
         _dataSource = dataSource;
         Model = model;
         _logger = logger;
+        _hashKeys = hashKeys;
     }
 
     /// <summary>
@@ -61,6 +84,6 @@ public sealed class DocumentStore
     public DocumentSession OpenSession(ScopeContext scope, SessionOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(scope);
-        return new DocumentSession(_dataSource, Model, scope, options, _logger);
+        return new DocumentSession(_dataSource, Model, scope, options, _logger, _hashKeys);
     }
 }

@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 
 using Papuma.Kernel.Changes;
 using Papuma.Kernel.Model;
+using Papuma.Kernel.Tenancy;
 
 namespace Papuma.Kernel.Core.Tests.Spec;
 
@@ -75,8 +76,19 @@ public sealed class SpecVectorTests
             validator: null,
             exposedToMcp: false);
 
+        // A case with a "hashKey" runs under the keyed v2 hash (ADR-025); without one, the legacy v1 hash.
+        IHashKeyProvider? hashKeys = null;
+        if (vector["hashKey"] is JsonObject hashKey)
+        {
+            hashKeys = new MasterKeyHashKeyProvider(
+                Convert.FromHexString((string)hashKey["masterKeyHex"]!), (string)hashKey["kid"]!);
+        }
+
+        var tenantId = (string?)vector["tenantId"];
+        var scope = string.IsNullOrEmpty(tenantId) ? ScopeContext.Platform() : ScopeContext.Tenant(tenantId);
+
         var diff = DocumentDiff.FromJson((JsonObject)vector["diff"]!);
-        var applied = PolicyApplier.Apply(diff, metadata, documentId);
+        var applied = PolicyApplier.Apply(diff, metadata, documentId, hashKeys, scope);
 
         AssertJsonEqual((JsonObject)vector["expected"]!, applied.ToJson());
     }

@@ -3,6 +3,7 @@
 
 using Microsoft.Extensions.Logging;
 
+using Papuma.Kernel.Changes;
 using Papuma.Kernel.Model;
 using Papuma.Kernel.Tenancy;
 
@@ -17,6 +18,7 @@ public sealed class SqliteDocumentStore
 {
     private readonly Action? _notifyWaiters;
     private readonly ILogger? _logger;
+    private readonly IHashKeyProvider? _hashKeys;
 
     /// <summary>Gets the SQLite connection string sessions open against.</summary>
     internal string ConnectionString { get; }
@@ -52,6 +54,28 @@ public sealed class SqliteDocumentStore
     /// <param name="logger">The logger sessions report through; <c>null</c> disables logging.</param>
     public SqliteDocumentStore(
         string connectionString, KernelModel model, Action? notifyWaiters, ILogger<SqliteDocumentStore>? logger)
+        : this(connectionString, model, notifyWaiters, logger, hashKeys: null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SqliteDocumentStore"/> class with a logger and
+    /// the key provider of the keyed <c>Hash</c> policy (ADR-025).
+    /// </summary>
+    /// <param name="connectionString">The SQLite connection string (e.g. <c>Data Source=app.db</c>).</param>
+    /// <param name="model">The startup-built kernel model.</param>
+    /// <param name="notifyWaiters">Optional in-process wakeup hook (see the first constructor).</param>
+    /// <param name="logger">The logger sessions report through; <c>null</c> disables logging.</param>
+    /// <param name="hashKeys">
+    /// The hash key provider; <c>null</c> keeps the legacy v1 hash for <c>[TrackHash]</c> fields
+    /// (a transitional state).
+    /// </param>
+    public SqliteDocumentStore(
+        string connectionString,
+        KernelModel model,
+        Action? notifyWaiters,
+        ILogger<SqliteDocumentStore>? logger,
+        IHashKeyProvider? hashKeys)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentNullException.ThrowIfNull(model);
@@ -60,6 +84,7 @@ public sealed class SqliteDocumentStore
         Model = model;
         _notifyWaiters = notifyWaiters;
         _logger = logger;
+        _hashKeys = hashKeys;
     }
 
     /// <summary>
@@ -71,6 +96,6 @@ public sealed class SqliteDocumentStore
     public SqliteDocumentSession OpenSession(ScopeContext scope, SessionOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(scope);
-        return new SqliteDocumentSession(ConnectionString, Model, scope, options, _notifyWaiters, _logger);
+        return new SqliteDocumentSession(ConnectionString, Model, scope, options, _notifyWaiters, _logger, _hashKeys);
     }
 }

@@ -2,8 +2,10 @@
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 
+using Papuma.Kernel.Changes;
 using Papuma.Kernel.Events;
 using Papuma.Kernel.Model;
 using Papuma.Kernel.Processing;
@@ -49,11 +51,19 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<SqliteChangeNotifier>();
 
+        if (options.HashMasterKey is not null)
+        {
+            // TryAdd: a provider registered by the application (e.g. KMS-backed) wins.
+            services.TryAddSingleton<IHashKeyProvider>(
+                _ => MasterKeyHashKeyProvider.FromBase64(options.HashMasterKey, options.HashKeyId));
+        }
+
         services.AddSingleton(sp => new SqliteDocumentStore(
             options.ResolveConnectionString(),
             sp.GetRequiredService<KernelModel>(),
             sp.GetRequiredService<SqliteChangeNotifier>().TrySignal,
-            sp.GetService<ILogger<SqliteDocumentStore>>()));
+            sp.GetService<ILogger<SqliteDocumentStore>>(),
+            sp.GetService<IHashKeyProvider>()));
 
         services.AddSingleton(sp => new SqliteChangeFeedProcessor(
             options.ResolveConnectionString(),

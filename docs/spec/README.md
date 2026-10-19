@@ -13,7 +13,7 @@ cursor of [feed-wire-format.md](../feed-wire-format.md) are one realisation of i
 |---|---|
 | [changes.md](changes.md) — diff, policies, change record | draft, normative for diff and policies |
 | [patch.md](patch.md) — patch operations (`set`, `remove`, `increment`) and the divergences it found between the two kernels (fixed) | draft |
-| [canonical-json.md](canonical-json.md) — the canonical form and the keyed v2 hash ([ADR-025](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/adr/adr-025-keyed-hash-policy.md)) | draft; implemented in Core, not yet wired into the `Hash` policy |
+| [canonical-json.md](canonical-json.md) — the canonical form and the keyed v2 hash ([ADR-025](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/adr/adr-025-keyed-hash-policy.md)) | draft; implemented in Core and wired into the `Hash` policy as an opt-in (a configured key), the legacy v1 hash otherwise |
 | [schemas/](schemas/) — JSON Schema for the diff and the change record | draft |
 | [vectors/](vectors/) — language-neutral test vectors | diff, policy, patch, canonical-JSON and hash vectors; end-to-end write-path vectors to follow |
 

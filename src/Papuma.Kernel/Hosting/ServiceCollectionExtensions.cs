@@ -2,10 +2,12 @@
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
 
+using Papuma.Kernel.Changes;
 using Papuma.Kernel.Events;
 using Papuma.Kernel.Model;
 using Papuma.Kernel.Processing;
@@ -57,10 +59,18 @@ public static class ServiceCollectionExtensions
             return builder.Build();
         });
 
+        if (options.HashMasterKey is not null)
+        {
+            // TryAdd: a provider registered by the application (e.g. KMS-backed) wins.
+            services.TryAddSingleton<IHashKeyProvider>(
+                _ => MasterKeyHashKeyProvider.FromBase64(options.HashMasterKey, options.HashKeyId));
+        }
+
         services.AddSingleton(sp => new DocumentStore(
             sp.GetRequiredService<NpgsqlDataSource>(),
             sp.GetRequiredService<KernelModel>(),
-            sp.GetService<ILogger<DocumentStore>>()));
+            sp.GetService<ILogger<DocumentStore>>(),
+            sp.GetService<IHashKeyProvider>()));
 
         services.AddSingleton(sp => new ChangeFeedProcessor(
             sp.GetRequiredService<NpgsqlDataSource>(),

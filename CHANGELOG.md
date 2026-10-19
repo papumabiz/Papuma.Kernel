@@ -13,6 +13,17 @@ Added:
   typed patch failures (see Fixed). They carry `DocumentType`, and `DocumentId`/`FieldPath` when the
   engine knows them.
 
+- **Keyed `Hash` policy, opt-in (ADR-025, first step).** `IHashKeyProvider`, the default
+  `MasterKeyHashKeyProvider` (HKDF-derived key per tenant and type), the options `HashMasterKey`
+  (base64, at least 32 bytes) and `HashKeyId` on `PapumaKernelOptions` and `PapumaKernelLocalOptions`
+  (validated at startup), and store constructors that take a provider. With a key configured,
+  `[TrackHash]` fields — in feed diffs, policy-projected reads and event payloads — carry
+  `v2:<kid>:<hex>`, an HMAC-SHA-256 over canonical JSON (`docs/spec/canonical-json.md`); a value
+  without a canonical form (a number longer than 1024 characters, an unpaired surrogate) fails the
+  write with the new `CanonicalJsonException`. **Without a key nothing changes yet:** the legacy
+  unsalted v1 hash is still written. A later release makes the key mandatory (fail closed) and
+  stops writing v1; plan to configure one now. A provider registered in the container before
+  `AddPapumaKernel` wins over the options.
 - **`LoadAllByKeyAsync`** on both sessions (ADR-026): all documents behind a declared key — single-field
   or composite, unique or lookup — in ascending ordinal `id` order, paged with a required `limit`
   (1 to `KeyMetadata.MaxLoadAllLimit`, 1000) and `afterId`. Scope-bound, transactional and clear-text like

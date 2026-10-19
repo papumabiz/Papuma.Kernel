@@ -8,14 +8,20 @@ using System.Text.Json.Nodes;
 namespace Papuma.Kernel.Changes;
 
 /// <summary>
-/// A value that has no canonical form: a number whose canonical text would be longer than
-/// <see cref="CanonicalJson.MaxNumberLength"/>, a malformed number, or a string with an
-/// unpaired surrogate.
+/// Thrown when a value has no canonical form and therefore cannot be hashed by the keyed
+/// <c>Hash</c> policy (ADR-025): a number whose canonical text would be longer than 1024
+/// characters, a malformed number, or a string with an unpaired surrogate. The write is rolled back.
 /// </summary>
-internal sealed class CanonicalJsonException(string code, string message) : Exception(message)
+public sealed class CanonicalJsonException : Exception
 {
     /// <summary>Gets the stable error code (<c>number-too-large</c>, <c>invalid-number</c>, <c>invalid-string</c>).</summary>
-    public string Code { get; } = code;
+    public string Code { get; }
+
+    internal CanonicalJsonException(string code, string message)
+        : base(message)
+    {
+        Code = code;
+    }
 }
 
 /// <summary>
