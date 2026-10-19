@@ -165,7 +165,7 @@ public sealed partial class DocumentSession
                     cmd.Parameters.AddWithValue("type", metadata.Name);
                     cmd.Parameters.Add(new NpgsqlParameter("path", NpgsqlDbType.Array | NpgsqlDbType.Text)
                     {
-                        Value = selectorPath.Split('.'),
+                        Value = DiffPath.Split(selectorPath),
                     });
                     cmd.Parameters.AddWithValue("value", selectorValue);
 

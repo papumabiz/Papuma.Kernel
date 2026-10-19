@@ -5,6 +5,8 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
+using Papuma.Kernel.Changes;
+
 namespace Papuma.Kernel.Store;
 
 /// <summary>
@@ -88,7 +90,7 @@ internal static class JsonPatchApplier
             // A JSON number only: strings, booleans, objects and arrays are never coerced.
             if (strictNumbers)
             {
-                throw new NonNumericIncrementException(documentType, documentId, string.Join('.', op.PathSegments));
+                throw new NonNumericIncrementException(documentType, documentId, DiffPath.Join(op.PathSegments));
             }
 
             current = 0m;
@@ -103,7 +105,7 @@ internal static class JsonPatchApplier
         string documentType,
         string? documentId) =>
         NavigateToParent(root, op.PathSegments)
-        ?? throw new PatchTargetMissingException(documentType, documentId, string.Join('.', op.PathSegments));
+        ?? throw new PatchTargetMissingException(documentType, documentId, DiffPath.Join(op.PathSegments));
 
     /// <summary>
     /// Walks to the parent object of the last path segment, or returns <c>null</c> as soon as

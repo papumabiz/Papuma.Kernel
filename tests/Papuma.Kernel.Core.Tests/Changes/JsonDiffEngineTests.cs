@@ -174,15 +174,44 @@ public sealed class JsonDiffEngineTests
     }
 
     [Fact]
-    public void Diff_RejectsKeysContainingDots_InsteadOfCorruptingPaths()
+    public void Diff_EscapesADotInAKey_SoADictionaryKeyIsOneSegment()
     {
-        // E.g. a serialized Dictionary<string, T> with dotted keys would produce
-        // ambiguous diff paths — must fail loudly.
         var before = Parse("""{"settings": {}}""");
         var after = Parse("""{"settings": {"feature.enabled": true}}""");
 
-        var ex = Assert.Throws<NotSupportedException>(() => JsonDiffEngine.Diff(before, after));
-        Assert.Contains("feature.enabled", ex.Message, StringComparison.Ordinal);
+        var diff = JsonDiffEngine.Diff(before, after);
+
+        var entry = Assert.Single(diff.Entries);
+        Assert.Equal("settings.feature\\.enabled", entry.Key);
+        Assert.True(JsonNode.DeepEquals(after, JsonDiffEngine.Apply(before, diff)));
+        Assert.True(JsonNode.DeepEquals(before, JsonDiffEngine.ApplyReverse(after, diff)));
+    }
+
+    [Theory]
+    [InlineData("""{"a": {}}""", """{"a": {"b.c": {"d": 1}}}""")]
+    [InlineData("""{"a": {"b\\c": 1}}""", """{"a": {"b\\c": 2}}""")]
+    [InlineData("""{"a": {"x\\": {"y": 1}}}""", """{"a": {"x\\": {"y": 2}}}""")]
+    [InlineData("""{"a.b": 1, "a": {"b": 2}}""", """{"a.b": 3, "a": {"b": 4}}""")]
+    [InlineData("""{}""", """{"k.1": {"k.2": {"k.3": true}}}""")]
+    public void Diff_RoundTrips_ForKeysWithDotsAndBackslashes(string beforeJson, string afterJson)
+    {
+        var before = Parse(beforeJson);
+        var after = Parse(afterJson);
+
+        var diff = JsonDiffEngine.Diff(before, after);
+
+        Assert.True(JsonNode.DeepEquals(after, JsonDiffEngine.Apply(before, diff)));
+        Assert.True(JsonNode.DeepEquals(before, JsonDiffEngine.ApplyReverse(after, diff)));
+        Assert.True(JsonNode.DeepEquals(diff.ToJson(), DocumentDiff.FromJson(diff.ToJson()).ToJson()));
+    }
+
+    [Fact]
+    public void Diff_RejectsAnEmptyKey_BecauseAPathCannotNameIt()
+    {
+        var before = Parse("""{"a": {}}""");
+        var after = Parse("""{"a": {"": 1}}""");
+
+        Assert.Throws<NotSupportedException>(() => JsonDiffEngine.Diff(before, after));
     }
 
     private static JsonObject Parse(string json) => (JsonObject)JsonNode.Parse(json)!;

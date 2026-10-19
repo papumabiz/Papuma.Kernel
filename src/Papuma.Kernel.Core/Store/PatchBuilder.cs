@@ -5,6 +5,7 @@ using System.Linq.Expressions;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
+using Papuma.Kernel.Changes;
 using Papuma.Kernel.Model;
 
 namespace Papuma.Kernel.Store;
@@ -32,7 +33,7 @@ public sealed class PatchBuilder<T> where T : class
     {
         ArgumentNullException.ThrowIfNull(property);
 
-        var path = JsonPathResolver.Resolve(property).Split('.');
+        var path = DiffPath.Split(JsonPathResolver.Resolve(property));
         var node = JsonSerializer.SerializeToNode(value, KernelJson.Options);
         Operations.Add(new PatchOperation(PatchOperationKind.Set, path, node, IncrementBy: 0));
         return this;
@@ -45,7 +46,7 @@ public sealed class PatchBuilder<T> where T : class
     {
         ArgumentNullException.ThrowIfNull(property);
 
-        var path = JsonPathResolver.Resolve(property).Split('.');
+        var path = DiffPath.Split(JsonPathResolver.Resolve(property));
         Operations.Add(new PatchOperation(PatchOperationKind.Remove, path, Value: null, IncrementBy: 0));
         return this;
     }
@@ -61,7 +62,7 @@ public sealed class PatchBuilder<T> where T : class
     {
         ArgumentNullException.ThrowIfNull(property);
 
-        var path = JsonPathResolver.Resolve(property).Split('.');
+        var path = DiffPath.Split(JsonPathResolver.Resolve(property));
         Operations.Add(new PatchOperation(PatchOperationKind.Increment, path, Value: null, IncrementBy: by));
         return this;
     }

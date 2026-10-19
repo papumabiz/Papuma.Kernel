@@ -157,7 +157,7 @@ public sealed partial class SqliteDocumentSession
                     cmd.Parameters.AddWithValue("scope", Scope.Scope.ToString());
                     cmd.Parameters.AddWithValue("tenantId", Scope.TenantId ?? string.Empty);
                     cmd.Parameters.AddWithValue("type", metadata.Name);
-                    cmd.Parameters.AddWithValue("path", "$." + selectorPath);
+                    cmd.Parameters.AddWithValue("path", ToJsonPath(selectorPath));
                     cmd.Parameters.AddWithValue("value", selectorValue);
 
                     await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -208,5 +208,28 @@ public sealed partial class SqliteDocumentSession
         {
             target[key] = value?.DeepClone();
         }
+    }
+
+    /// <summary>
+    /// Turns a selector path into a SQLite JSONPath with quoted labels (<c>$."a.b"."c"</c>), so a key
+    /// containing a dot is one label. Labels are bound as a parameter, not interpolated; a quote or
+    /// backslash inside a key has no portable JSONPath spelling and is refused.
+    /// </summary>
+    private static string ToJsonPath(string path)
+    {
+        var builder = new System.Text.StringBuilder("$");
+        foreach (var segment in DiffPath.Split(path))
+        {
+            if (segment.Contains('"') || segment.Contains('\\'))
+            {
+                throw new ArgumentException(
+                    $"The selector path '{path}' has a key with a quote or a backslash, which an SQLite JSONPath cannot name.",
+                    nameof(path));
+            }
+
+            builder.Append(".\"").Append(segment).Append('"');
+        }
+
+        return builder.ToString();
     }
 }

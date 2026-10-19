@@ -50,7 +50,7 @@ internal static class RedactionEngine
         var changed = false;
         foreach (var path in paths)
         {
-            var segments = path.Split('.');
+            var segments = DiffPath.Split(path);
             var current = payload;
             for (var i = 0; i < segments.Length - 1 && current is not null; i++)
             {

@@ -9,35 +9,32 @@ using Papuma.Kernel.Store;
 namespace Papuma.Kernel.Core.Tests.Model;
 
 /// <summary>
-/// Paths are dot-separated, so a JSON property name containing '.' is ambiguous. The diff
-/// engine rejects such keys on the first save; the model refuses them up front.
+/// A declared property whose JSON name contains a dot is one path segment: its path is escaped, so it
+/// cannot be mistaken for a nested property, and policies and patches address it correctly.
 /// </summary>
 public sealed class DottedPropertyNameTests
 {
-    private sealed record Dotted(string Id, [property: JsonPropertyName("a.b")] string Weird);
-
-    private sealed record Plain(string Id, string Name);
+    private sealed record Dotted(
+        string Id,
+        [property: JsonPropertyName("a.b"), SensitiveData] string Weird,
+        string Plain);
 
     [Fact]
-    public void Build_RejectsAPropertyThatSerializesWithADot()
+    public void Build_AcceptsAPropertyThatSerializesWithADot_AndEscapesItsPolicyPath()
     {
-        var ex = Assert.Throws<NotSupportedException>(
-            () => new KernelModelBuilder().Document<Dotted>().Build());
+        var metadata = new KernelModelBuilder().Document<Dotted>().Build().GetRequired<Dotted>();
 
-        Assert.Contains("a.b", ex.Message, StringComparison.Ordinal);
+        Assert.Equal(FieldPolicy.Redact, metadata.Policies["a\\.b"]);
+        Assert.False(metadata.Policies.ContainsKey("a.b"));
+        Assert.Equal(FieldPolicy.Track, metadata.ResolvePolicy("plain"));
     }
 
     [Fact]
-    public void PatchBuilder_RejectsAPropertyThatSerializesWithADot()
+    public void PatchBuilder_AddressesTheDottedPropertyAsOneSegment()
     {
-        Assert.Throws<NotSupportedException>(() => new PatchBuilder<Dotted>().Set(x => x.Weird, "x"));
-    }
+        var builder = new PatchBuilder<Dotted>().Set(x => x.Weird, "x");
 
-    [Fact]
-    public void Build_AcceptsOrdinaryProperties()
-    {
-        var model = new KernelModelBuilder().Document<Plain>().Build();
-
-        Assert.NotNull(model.GetRequired<Plain>());
+        var operation = Assert.Single(builder.Operations);
+        Assert.Equal(["a.b"], operation.PathSegments);
     }
 }

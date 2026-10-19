@@ -51,7 +51,9 @@ Same consumption rules as the change feed; only the row shape differs.
 
 ## 3. The diff format (`papuma.change.diff`)
 
-A JSON object keyed by dot-separated field path. Each entry's shape encodes both
+A JSON object keyed by dot-separated field path. A `.` or `\` inside a key is escaped as `\.` and
+`\\` (a dictionary key `feature.enabled` under `settings` is `settings.feature\.enabled`); paths without
+such keys are unchanged, and a consumer may treat the keys as opaque strings. Each entry's shape encodes both
 the change and the field's privacy policy (ADR-004/007):
 
 ```jsonc

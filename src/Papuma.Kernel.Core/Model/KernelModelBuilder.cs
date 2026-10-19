@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 
+using Papuma.Kernel.Changes;
 using Papuma.Kernel.Validation;
 
 namespace Papuma.Kernel.Model;
@@ -502,7 +503,7 @@ public sealed class KernelModelBuilder
             }
 
             var jsonName = JsonPathResolver.JsonNameOf(property);
-            var path = prefix.Length == 0 ? jsonName : $"{prefix}.{jsonName}";
+            var path = DiffPath.Append(prefix, jsonName);
 
             var policy = PolicyFromAttributes(property);
             if (policy is not null)

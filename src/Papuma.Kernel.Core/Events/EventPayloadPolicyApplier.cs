@@ -31,7 +31,7 @@ internal static class EventPayloadPolicyApplier
         var result = payload.DeepClone().AsObject();
         foreach (var (path, policy) in metadata.Policies)
         {
-            var segments = path.Split('.');
+            var segments = DiffPath.Split(path);
             var parent = NavigateToParent(result, segments);
             var field = segments[^1];
             if (parent is null || !parent.ContainsKey(field))

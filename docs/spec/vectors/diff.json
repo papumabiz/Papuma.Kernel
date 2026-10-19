@@ -168,9 +168,155 @@
       "diff": { "v": { "old": 12345678901234567890, "new": 12345678901234567891 } }
     },
     {
-      "name": "dotted-key-is-rejected",
-      "before": { "settings": {} },
-      "after": { "settings": { "feature.enabled": true } },
+      "name": "key-with-a-dot-is-one-segment",
+      "before": {
+        "settings": {}
+      },
+      "after": {
+        "settings": {
+          "feature.enabled": true
+        }
+      },
+      "diff": {
+        "settings.feature\\.enabled": {
+          "new": true
+        }
+      }
+    },
+    {
+      "name": "top-level-key-with-a-dot",
+      "before": {},
+      "after": {
+        "a.b": 1
+      },
+      "diff": {
+        "a\\.b": {
+          "new": 1
+        }
+      }
+    },
+    {
+      "name": "key-with-a-backslash",
+      "before": {
+        "x": {}
+      },
+      "after": {
+        "x": {
+          "a\\b": 1
+        }
+      },
+      "diff": {
+        "x.a\\\\b": {
+          "new": 1
+        }
+      }
+    },
+    {
+      "name": "key-ending-in-a-backslash-before-a-separator",
+      "before": {
+        "x": {
+          "a\\": {
+            "b": 1
+          }
+        }
+      },
+      "after": {
+        "x": {
+          "a\\": {
+            "b": 2
+          }
+        }
+      },
+      "diff": {
+        "x.a\\\\.b": {
+          "old": 1,
+          "new": 2
+        }
+      }
+    },
+    {
+      "name": "change-below-a-dotted-key",
+      "before": {
+        "x": {
+          "a.b": {
+            "c": 1
+          }
+        }
+      },
+      "after": {
+        "x": {
+          "a.b": {
+            "c": 2
+          }
+        }
+      },
+      "diff": {
+        "x.a\\.b.c": {
+          "old": 1,
+          "new": 2
+        }
+      }
+    },
+    {
+      "name": "a-dotted-key-and-a-nested-object-are-different-paths",
+      "before": {
+        "a": {
+          "b": 1
+        }
+      },
+      "after": {
+        "a.b": 1
+      },
+      "diff": {
+        "a": {
+          "old": {
+            "b": 1
+          }
+        },
+        "a\\.b": {
+          "new": 1
+        }
+      }
+    },
+    {
+      "name": "escaped-paths-sort-as-plain-strings",
+      "before": {
+        "a": {}
+      },
+      "after": {
+        "a": {
+          "b": 1
+        },
+        "a.b": 2,
+        "a-b": 3
+      },
+      "diff": {
+        "a-b": {
+          "new": 3
+        },
+        "a.b": {
+          "new": 1
+        },
+        "a\\.b": {
+          "new": 2
+        }
+      },
+      "orderedPaths": [
+        "a-b",
+        "a.b",
+        "a\\.b"
+      ]
+    },
+    {
+      "name": "empty-key-is-rejected",
+      "before": {
+        "a": {}
+      },
+      "after": {
+        "a": {
+          "": 1
+        }
+      },
       "error": "unsupported-key"
     }
   ]

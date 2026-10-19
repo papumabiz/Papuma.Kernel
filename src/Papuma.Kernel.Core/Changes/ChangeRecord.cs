@@ -37,14 +37,14 @@ public sealed record ChangeRecord(
     /// <summary>
     /// Returns whether the given dot-separated path changed in this record.
     /// </summary>
-    /// <param name="path">The dot-separated JSON path (e.g. <c>address.city</c>).</param>
+    /// <param name="path">The dot-separated JSON path (e.g. <c>address.city</c>); a <c>.</c> or <c>\</c> inside a key is written <c>\.</c> / <c>\\</c>.</param>
     public bool FieldChanged(string path) => Diff.Entries.ContainsKey(path);
 
     /// <summary>
     /// Returns whether this record is a field transition from one tracked value to
     /// another (e.g. <c>status: Pending → Paid</c>) — sugar for event translators (ADR-011).
     /// </summary>
-    /// <param name="path">The dot-separated JSON path.</param>
+    /// <param name="path">The dot-separated JSON path (keys with <c>.</c> or <c>\</c> escaped).</param>
     /// <param name="from">The expected old value (compared as JSON).</param>
     /// <param name="to">The expected new value (compared as JSON).</param>
     public bool IsFieldTransition(string path, JsonNode? from, JsonNode? to)

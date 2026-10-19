@@ -64,16 +64,16 @@ public static class JsonDiffEngine
 
         foreach (var key in keys)
         {
-            if (key.Contains('.'))
+            if (key.Length == 0)
             {
-                // Dot-separated paths would become ambiguous (e.g. serialized
-                // Dictionary<string, T> keys). Fail loudly instead of corrupting the diff.
+                // A path has no way to name an empty key; fail loudly instead of emitting an ambiguous path.
                 throw new NotSupportedException(
-                    $"Object key '{key}' contains '.' and cannot be represented as a diff path. " +
-                    "Keys containing dots (e.g. dictionary keys) are not supported in diffed documents.");
+                    "An object key is empty and cannot be represented as a diff path. Empty keys are not supported in diffed documents.");
             }
 
-            var path = prefix.Length == 0 ? key : $"{prefix}.{key}";
+            // A '.' or '\' inside a key is escaped (DiffPath), so a dictionary key such as
+            // "feature.enabled" is one segment and the path stays unambiguous.
+            var path = DiffPath.Append(prefix, key);
             var hasOld = before?.ContainsKey(key) ?? false;
             var hasNew = after?.ContainsKey(key) ?? false;
             var oldValue = hasOld ? before![key] : null;
@@ -119,7 +119,7 @@ public static class JsonDiffEngine
 
             var present = useNew ? entry.HasNew : entry.HasOld;
             var value = useNew ? entry.New : entry.Old;
-            var segments = path.Split('.');
+            var segments = DiffPath.Split(path);
             var parent = NavigateToParent(result, segments);
 
             if (present)

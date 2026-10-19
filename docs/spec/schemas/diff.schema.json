@@ -5,8 +5,8 @@
   "description": "A policy-applied, field-level diff keyed by dot-separated JSON path. See docs/spec/changes.md.",
   "type": "object",
   "propertyNames": {
-    "description": "Dot-separated path; no empty segments. Object keys that themselves contain '.' cannot be represented and are rejected when the diff is computed.",
-    "pattern": "^[^.]+(\\.[^.]+)*$"
+    "description": "Object keys joined by '.', with a '.' or a '\\' inside a key escaped as '\\.' and '\\\\'. No empty segments (an empty object key is rejected when the diff is computed).",
+    "pattern": "^(?:[^.\\\\]|\\\\[.\\\\])+(?:\\.(?:[^.\\\\]|\\\\[.\\\\])+)*$"
   },
   "additionalProperties": { "$ref": "#/$defs/entry" },
   "$defs": {

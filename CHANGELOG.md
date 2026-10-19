@@ -86,10 +86,15 @@ Fixed:
   silently replaced the value with the increment; PostgreSQL failed with a raw `PostgresException`
   (and coerced numeric strings such as `"5"`). Both now throw the new
   `NonNumericIncrementException` and roll the patch back. Absent and JSON `null` still count as 0.
-- **A JSON property name containing `.` fails at model build.** Paths in diffs, policies, keys and
-  patches are dot-separated, so `[JsonPropertyName("a.b")]` was ambiguous; it used to be accepted
-  and failed on the first save (the diff engine rejects such keys). It now throws `NotSupportedException`
-  when the model is built or the path is resolved.
+- **Object keys containing `.` or `\` no longer make a document unsaveable.** A `Dictionary<string, T>`
+  field with a key such as `feature.enabled` or `home.title` made `Save` throw, because diff paths are
+  dot-separated — a failure that depended on the *data*, not the model, so it only showed up when a user
+  entered such a key. A `.` or `\` inside a key is now escaped (`\.` and `\\`): the key is one path segment
+  (`settings.feature\.enabled`) in the diff, in policies (a policy on `settings` covers it), in masked reads and
+  in GDPR selectors. Paths without such keys are byte-for-byte unchanged, so stored data and consumers that treat
+  paths as opaque strings are unaffected. A declared property whose JSON name contains a dot (`[JsonPropertyName("a.b")]`)
+  is accepted too; on SQLite a *key* property must still have a plain identifier name. Only an **empty** key is
+  rejected (`NotSupportedException`): a path cannot name it.
 - **`Set`/`Increment` below a missing or non-object parent now fail on both engines** with the new
   `PatchTargetMissingException` and roll the patch back. PostgreSQL used to do nothing (the version
   still advanced with an empty diff, hiding path typos); SQLite created the parent objects or replaced

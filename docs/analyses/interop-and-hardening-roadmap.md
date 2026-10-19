@@ -135,6 +135,9 @@ spec.
 
 ## Phase 4 — Path representation (F5) — audit done 2026-10-19
 
+Done 2026-10-19 as option B of `wire-format-gaps-before-live.md`: a `.` or `\` inside a key is escaped (`\.`, `\\`), so
+dictionary keys with dots work. The paragraph below describes the state before that change.
+
 The diff engine already fails loudly on dotted document keys. The audit found that every
 other dotted path comes from one place, `JsonPathResolver.JsonNameOf` (a
 `[JsonPropertyName("a.b")]` property), and that such a property could be declared and

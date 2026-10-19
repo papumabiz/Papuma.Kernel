@@ -3,6 +3,8 @@
 
 using System.Text.Json.Nodes;
 
+using Papuma.Kernel.Changes;
+
 namespace Papuma.Kernel.Model;
 
 /// <summary>
@@ -121,13 +123,12 @@ public sealed class DocumentTypeMetadata
                 return policy;
             }
 
-            var lastDot = current.LastIndexOf('.');
-            if (lastDot < 0)
+            if (!DiffPath.TryGetParent(current, out var parent))
             {
                 return FieldPolicy.Track;
             }
 
-            current = current[..lastDot];
+            current = parent;
         }
     }
 }

@@ -45,8 +45,9 @@ Candidates for the diff format:
      (`roles[2]`) — that avoids the ambiguity of shifted indices and keeps
      Apply/Reverse trivially correct. Element granularity is a later optimization.
    - **Nested objects** are diffed recursively (`address.city`); paths are
-     dot-separated. Keys that themselves contain '.' are not supported
-     (unreachable with serialized POCOs).
+     dot-separated. (Clarified 2026-10-19: a `.` or `\` inside a key is escaped as `\.` and `\\`, so
+     dictionary keys such as `feature.enabled` work; see the specification, changes.md §2. The
+     original "not supported" was wrong for `Dictionary<string, T>` fields.)
 3. **Historical states** are produced by applying diffs backwards from the current
    document (or forwards from the insert). That is an audit/replay tool, not a hot
    path.

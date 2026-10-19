@@ -27,8 +27,12 @@ equivalent to the empty object: every top-level field is reported as added
 
 `Diff(before, after)` produces a map from **path** to **entry**.
 
-1. **Paths** are dot-separated object keys: `address.city`. Array indices are never
-   part of a path.
+1. **Paths** are object keys joined by `.`: `address.city`. Array indices are never
+   part of a path. A `.` or a `\` **inside** a key is escaped with a backslash — `\.` and
+   `\\` — so a dictionary key such as `feature.enabled` is one segment:
+   `settings.feature\.enabled`. A path without a dot or backslash in any key is therefore
+   exactly what it would be without escaping, and a consumer that treats paths as opaque
+   strings needs no change. Escaped paths sort as plain strings, not segment by segment.
 2. If a key's value is an object on **both** sides, the diff recurses into it.
 3. Any other difference is **one** entry at that path carrying the complete old and
    new value. This covers arrays (atomic), scalars, and any change of JSON type —
@@ -44,9 +48,11 @@ equivalent to the empty object: every top-level field is reported as added
    compare numbers as binary floating point. (Vectors: `numbers-*`.) A change
    between two equal numbers produces no entry; the text form of the value that
    is stored is the writer's.
-5. An object key containing `.` cannot be represented as a path. An implementation
-   MUST reject the document change with an error rather than emit an ambiguous
-   path. (Vector: `dotted-key-is-rejected`.)
+5. An **empty** object key cannot be named by a path. An implementation MUST reject the
+   document change with an error rather than emit an ambiguous path. (Vector:
+   `empty-key-is-rejected`; the escaping vectors are `key-with-a-dot-is-one-segment`,
+   `key-with-a-backslash`, `key-ending-in-a-backslash-before-a-separator`,
+   `a-dotted-key-and-a-nested-object-are-different-paths`, `escaped-paths-sort-as-plain-strings`.)
 6. Producers SHOULD emit entries ordered by comparing paths as sequences of
    UTF-16 code units (.NET `StringComparer.Ordinal`). Beware: comparing UTF-8
    bytes (the natural order in Rust or Go) differs for characters outside the

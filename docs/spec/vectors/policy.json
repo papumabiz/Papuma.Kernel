@@ -41,6 +41,79 @@
       }
     },
     {
+      "name": "ancestor-policy-covers-a-key-with-a-dot",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": {
+        "settings": "Redact"
+      },
+      "diff": {
+        "settings.feature\\.enabled": {
+          "new": true
+        },
+        "other": {
+          "new": 1
+        }
+      },
+      "expected": {
+        "settings.feature\\.enabled": {
+          "changed": true
+        },
+        "other": {
+          "new": 1
+        }
+      }
+    },
+    {
+      "name": "policy-on-an-escaped-path-does-not-cover-the-nested-path",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": {
+        "a\\.b": "Redact"
+      },
+      "diff": {
+        "a.b": {
+          "new": 1
+        },
+        "a\\.b": {
+          "new": 2
+        }
+      },
+      "expected": {
+        "a.b": {
+          "new": 1
+        },
+        "a\\.b": {
+          "changed": true
+        }
+      }
+    },
+    {
+      "name": "nearest-declared-path-wins-with-a-dotted-key",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": {
+        "m": "Redact",
+        "m.x\\.y": "Track"
+      },
+      "diff": {
+        "m.x\\.y": {
+          "new": 1
+        },
+        "m.z": {
+          "new": 2
+        }
+      },
+      "expected": {
+        "m.x\\.y": {
+          "new": 1
+        },
+        "m.z": {
+          "changed": true
+        }
+      }
+    },
+    {
       "name": "reference-points-at-type-id-and-path",
       "documentType": "User",
       "documentId": "123",

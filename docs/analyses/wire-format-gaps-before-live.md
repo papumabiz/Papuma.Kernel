@@ -1,6 +1,8 @@
 # Analysis: two wire-format gaps worth closing before anything is live
 
-Status: **analysis / for decision** (2026-10-19). Nothing here is implemented. Follows the finding
+Status: **analysis** (2026-10-19). **Update:** point 1 was decided as option B (escaped keys) and implemented the same
+day; point 2's uniqueness check is implemented, explicit names are not. The text below is the analysis as it stood
+when the decision was taken. Follows the finding
 in the [interop and hardening roadmap](interop-and-hardening-roadmap.md) (F5 and F7) and the
 observation that the kernel is not yet used in production anywhere, only by applications still in
 development — which makes a change to the stored and wire form cheap *now* and expensive later,

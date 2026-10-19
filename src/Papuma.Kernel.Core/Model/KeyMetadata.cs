@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
+using Papuma.Kernel.Changes;
+
 namespace Papuma.Kernel.Model;
 
 /// <summary>
@@ -27,11 +29,11 @@ public sealed record KeyMetadata(string Path, bool Unique, string IndexName)
 
     /// <summary>Gets each component path split into segments for <c>#&gt;&gt;</c> expressions.</summary>
     public IReadOnlyList<string[]> ComponentSegments { get; } =
-        [.. Path.Split(ComponentSeparator).Select(p => p.Split('.'))];
+        [.. Path.Split(ComponentSeparator).Select(DiffPath.Split)];
 
     /// <summary>
     /// Gets the path split into segments for <c>#&gt;&gt;</c> expressions. Single-field keys
     /// only; empty for a composite key — use <see cref="ComponentSegments"/> there.
     /// </summary>
-    public string[] PathSegments { get; } = Path.Contains(ComponentSeparator) ? [] : Path.Split('.');
+    public string[] PathSegments { get; } = Path.Contains(ComponentSeparator) ? [] : DiffPath.Split(Path);
 }

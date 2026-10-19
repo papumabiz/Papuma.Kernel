@@ -185,7 +185,7 @@ public static class GdprExport
             cmd.Parameters.AddWithValue("type", selector.EventType);
             cmd.Parameters.Add(new NpgsqlParameter("path", NpgsqlDbType.Array | NpgsqlDbType.Text)
             {
-                Value = selector.PayloadPath.Split('.'),
+                Value = DiffPath.Split(selector.PayloadPath),
             });
             cmd.Parameters.AddWithValue("value", selector.Value);
 

@@ -7,12 +7,13 @@ namespace Papuma.Kernel.Changes;
 
 /// <summary>
 /// A reversible field-level diff between two document states (ADR-004),
-/// keyed by dot-separated JSON paths (e.g. <c>address.city</c>).
+/// keyed by dot-separated JSON paths (e.g. <c>address.city</c>); a <c>.</c> or <c>\</c> inside a key is escaped
+/// as <c>\.</c> and <c>\\</c> (<c>settings.feature\.enabled</c>).
 /// </summary>
 /// <remarks>
 /// Arrays are treated as atomic leaf values: any difference produces one entry for the
-/// array path with the full old and new array. Object keys containing '.' are not
-/// supported as diff paths.
+/// array path with the full old and new array. An empty object key cannot be named by a
+/// path and is rejected.
 /// </remarks>
 public sealed class DocumentDiff
 {

@@ -4,6 +4,7 @@
 using System.Collections;
 using System.Reflection;
 
+using Papuma.Kernel.Changes;
 using Papuma.Kernel.Model;
 
 namespace Papuma.Kernel.Gdpr;
@@ -81,7 +82,7 @@ public static class DataInventory
             }
 
             var jsonName = JsonPathResolver.JsonNameOf(property);
-            var path = prefix.Length == 0 ? jsonName : $"{prefix}.{jsonName}";
+            var path = DiffPath.Append(prefix, jsonName);
 
             if (IsNestedPocoType(property.PropertyType))
             {
@@ -111,13 +112,12 @@ public static class DataInventory
                 return policy;
             }
 
-            var lastDot = current.LastIndexOf('.');
-            if (lastDot < 0)
+            if (!DiffPath.TryGetParent(current, out var parent))
             {
                 return FieldPolicy.Track;
             }
 
-            current = current[..lastDot];
+            current = parent;
         }
     }
 

@@ -48,7 +48,7 @@ internal static class PolicyProjector
     {
         foreach (var key in obj.Select(p => p.Key).ToList())
         {
-            var path = prefix.Length == 0 ? key : $"{prefix}.{key}";
+            var path = DiffPath.Append(prefix, key);
             switch (metadata.ResolvePolicy(path))
             {
                 case FieldPolicy.Track:
