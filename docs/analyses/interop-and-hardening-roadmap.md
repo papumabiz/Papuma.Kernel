@@ -98,7 +98,11 @@ All three items landed together with the vectors (see CHANGELOG, ADR-012 clarifi
 Can run in parallel with Phase 1; its canonical-serialization rule lives in the
 spec.
 
-- ADR: choose the scheme. Likely `HMAC-SHA-256` over canonical JSON with a
+- **ADR-025 (proposed 2026-10-19)** fixes the scheme: HMAC-SHA-256 over canonical JSON, a
+  per-tenant key derived by HKDF from an application master key, `v2:<kid>:<hex>` output, a
+  key-check value in the database, fail closed without a key, `v1` read-only. Next: the
+  canonical-JSON spec chapter and vectors, then the implementation.
+- (Original sketch, superseded by the ADR:) choose the scheme. Likely `HMAC-SHA-256` over canonical JSON with a
   tenant-scoped key from configuration (a salt alone defeats precomputed tables
   but not a keyed attacker model; decide explicitly).
 - Versioned output (e.g. `v2:` prefix) so existing `v1` hashes stay readable;

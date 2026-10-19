@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted (2026-06-11)
+Accepted (2026-06-11); the algorithm behind the `Hash` policy is superseded by
+[ADR-025](adr-025-keyed-hash-policy.md) (keyed and canonical), the rest stands.
 
 ## Context
 
