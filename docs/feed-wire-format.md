@@ -60,7 +60,7 @@ the change and the field's privacy policy (ADR-004/007):
   "email":         { "new": "x@y.de" },                 // tracked: field added (no "old")
   "nickname":      { "old": "H" },                       // tracked: field removed (no "new")
   "iban":          { "changed": true },                  // Redact policy — value withheld
-  "passwordHash":  { "changed": true, "hash": "9f86d…" },// Hash policy — SHA-256 of the value
+  "passwordHash":  { "changed": true, "hash": "v2:k1:9f86d…" },// Hash policy — keyed hash (ADR-025); history may hold a bare 64-hex v1 hash
   "ssn":           { "ref": "User/123/ssn" }             // Reference policy — pointer, no value
 }
 ```

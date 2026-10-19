@@ -200,7 +200,7 @@ public sealed class KernelModelBuilder
             /// <summary>Removes the field from the stored payload.</summary>
             public EventTypeBuilder<T> Redact() => Set(FieldPolicy.Redact);
 
-            /// <summary>Replaces the field value with a SHA-256 hex hash.</summary>
+            /// <summary>Replaces the field value with its keyed hash (ADR-025); needs a hash key.</summary>
             public EventTypeBuilder<T> StoreAsHash() => Set(FieldPolicy.Hash);
 
             /// <summary>Removes the field from the stored payload.</summary>
@@ -438,7 +438,7 @@ public sealed class KernelModelBuilder
             /// <summary>Records a reference to the value's location instead of the value.</summary>
             public DocumentTypeBuilder<T> StoreAsReference() => Set(FieldPolicy.Reference);
 
-            /// <summary>Records a change marker plus a SHA-256 hash of the new value.</summary>
+            /// <summary>Records a change marker plus a keyed hash of the new value (ADR-025); needs a hash key.</summary>
             public DocumentTypeBuilder<T> StoreAsHash() => Set(FieldPolicy.Hash);
 
             /// <summary>Excludes the field from diffs entirely.</summary>

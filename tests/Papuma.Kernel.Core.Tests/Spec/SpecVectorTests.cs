@@ -88,6 +88,14 @@ public sealed class SpecVectorTests
         var scope = string.IsNullOrEmpty(tenantId) ? ScopeContext.Platform() : ScopeContext.Tenant(tenantId);
 
         var diff = DocumentDiff.FromJson((JsonObject)vector["diff"]!);
+
+        if (vector["error"] is JsonNode error)
+        {
+            Assert.Equal("no-hash-key", (string?)error);
+            Assert.Throws<InvalidOperationException>(() => PolicyApplier.Apply(diff, metadata, documentId, hashKeys, scope));
+            return;
+        }
+
         var applied = PolicyApplier.Apply(diff, metadata, documentId, hashKeys, scope);
 
         AssertJsonEqual((JsonObject)vector["expected"]!, applied.ToJson());

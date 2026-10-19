@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+Breaking:
+
+- **The `Hash` policy is keyed (ADR-025): a model with `[TrackHash]` / `StoreAsHash()` needs a hash
+  key, or the kernel refuses to start.** The old hash was an unsalted SHA-256 of the serializer's JSON
+  text — neither canonical nor safe for low-entropy values such as phone numbers. It is now
+  `v2:<kid>:<hex>`, an HMAC-SHA-256 over canonical JSON under a key derived per tenant and type.
+  `DocumentStore` / `SqliteDocumentStore` throw `InvalidOperationException` (naming the fields) when the
+  model declares a Hash policy and no `IHashKeyProvider` is given, and the hosted startup does the same
+  before touching the database. v1 hashes already in the feed stay as they are — **read-only**, never
+  written again, and they never match a v2 hash of the same value.
+
+  *Upgrade:* (1) generate a key once — `openssl rand -base64 32` — and keep it in your secret store;
+  (2) set `HashMasterKey` and `HashKeyId` on `PapumaKernelOptions` / `PapumaKernelLocalOptions` of
+  **every** process that writes (or register your own `IHashKeyProvider`); (3) run the schema step once
+  so `papuma.hash_key_check` exists, and let the application role `SELECT`/`INSERT` on it; (4) in tests,
+  use `Papuma.Kernel.Testing.TestHashKeys` (`PapumaTestDatabase.CreateStoreAsync` already does). A
+  consumer that compared hashes across records must now compare only hashes of the same form. To rotate,
+  configure a new `HashKeyId` with the new key; a wrong key under an existing id fails at startup with
+  `HashKeyMismatchException`.
+
 Changed:
 
 - **Samples:** the NATS bridge moved out of `shop-minimal-api` into its own worker sample
@@ -13,7 +33,7 @@ Added:
   typed patch failures (see Fixed). They carry `DocumentType`, and `DocumentId`/`FieldPath` when the
   engine knows them.
 
-- **Hash key check (ADR-025, point 5).** A new table `papuma.hash_key_check` (`hash_key_check` on
+- **Hash key check (ADR-025).** A new table `papuma.hash_key_check` (`hash_key_check` on
   SQLite) stores one check value per hash key id — an HMAC of a fixed message, never the key. With a
   key configured, the hosted startup records it on the first start and verifies it on every later
   one (`SchemaManager.EnsureHashKeyAsync` / `SqliteSchemaManager.EnsureHashKeyAsync`, also callable
@@ -22,17 +42,17 @@ Added:
   Changing the key means configuring a new `HashKeyId`. The check runs even when `EnsureSchema` is
   off, so run `EnsureSchema` once with this version first (the application role needs `SELECT` and
   `INSERT` on the new table).
-- **Keyed `Hash` policy, opt-in (ADR-025, first step).** `IHashKeyProvider`, the default
+- **`Papuma.Kernel.Testing.TestHashKeys`**: a published test hash key (`Provider`, `MasterKeyBase64`,
+  `KeyId`); `PapumaTestDatabase.CreateStoreAsync` uses it. Never a real key.
+- **Keyed `Hash` policy (ADR-025).** `IHashKeyProvider`, the default
   `MasterKeyHashKeyProvider` (HKDF-derived key per tenant and type), the options `HashMasterKey`
   (base64, at least 32 bytes) and `HashKeyId` on `PapumaKernelOptions` and `PapumaKernelLocalOptions`
   (validated at startup), and store constructors that take a provider. With a key configured,
   `[TrackHash]` fields — in feed diffs, policy-projected reads and event payloads — carry
   `v2:<kid>:<hex>`, an HMAC-SHA-256 over canonical JSON (`docs/spec/canonical-json.md`); a value
   without a canonical form (a number longer than 1024 characters, an unpaired surrogate) fails the
-  write with the new `CanonicalJsonException`. **Without a key nothing changes yet:** the legacy
-  unsalted v1 hash is still written. A later release makes the key mandatory (fail closed) and
-  stops writing v1; plan to configure one now. A provider registered in the container before
-  `AddPapumaKernel` wins over the options.
+  write with the new `CanonicalJsonException`. A provider registered in the container before
+  `AddPapumaKernel` wins over the options. (The key is mandatory for models with a Hash policy, see Breaking.)
 - **`LoadAllByKeyAsync`** on both sessions (ADR-026): all documents behind a declared key — single-field
   or composite, unique or lookup — in ascending ordinal `id` order, paged with a required `limit`
   (1 to `KeyMetadata.MaxLoadAllLimit`, 1000) and `afterId`. Scope-bound, transactional and clear-text like

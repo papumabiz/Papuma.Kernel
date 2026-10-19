@@ -29,6 +29,9 @@ internal sealed class SqliteKernelSchemaInitializer(
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        // Fail closed before any work: a Hash policy without a key must stop the host (ADR-025).
+        model.EnsureHashKeysConfigured(hashKeys);
+
         if (!options.EnsureSchema && hashKeys is null)
         {
             return;

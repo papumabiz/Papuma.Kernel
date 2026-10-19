@@ -31,6 +31,9 @@ internal sealed class KernelSchemaInitializer(
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        // Fail closed before any work: a Hash policy without a key must stop the host (ADR-025).
+        model.EnsureHashKeysConfigured(hashKeys);
+
         if (options.EnsureSchema)
         {
             await SchemaManager.EnsureSchemaAsync(dataSource, model, cancellationToken);

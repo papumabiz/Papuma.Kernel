@@ -60,7 +60,7 @@ public sealed class SqliteFixture : IAsyncLifetime
             await SqliteSchemaManager.EnsureSchemaAsync(connection, model);
         }
 
-        return new SqliteDocumentStore(ConnectionString, model, notifyWaiters);
+        return new SqliteDocumentStore(ConnectionString, model, notifyWaiters, logger: null, TestHashKeys.Provider);
     }
 }
 

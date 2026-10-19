@@ -39,6 +39,42 @@ public sealed class KernelModel
     public IReadOnlyCollection<EventTypeMetadata> EventTypes => (IReadOnlyCollection<EventTypeMetadata>)_eventsByType.Values;
 
     /// <summary>
+    /// Fails when this model declares a <see cref="FieldPolicy.Hash"/> policy but no hash key
+    /// provider is configured (ADR-025): the kernel has no unkeyed hash, so it refuses to start
+    /// rather than write a hash it cannot compute — or worse, a weak one.
+    /// </summary>
+    /// <param name="hashKeys">The configured provider, or <c>null</c>.</param>
+    /// <exception cref="InvalidOperationException">A Hash policy is declared and <paramref name="hashKeys"/> is <c>null</c>.</exception>
+    internal void EnsureHashKeysConfigured(Changes.IHashKeyProvider? hashKeys)
+    {
+        if (hashKeys is not null)
+        {
+            return;
+        }
+
+        var offenders = new List<string>();
+        foreach (var type in _byType.Values)
+        {
+            offenders.AddRange(type.Policies.Where(p => p.Value == FieldPolicy.Hash).Select(p => $"{type.Name}.{p.Key} (document)"));
+        }
+
+        foreach (var type in _eventsByType.Values)
+        {
+            offenders.AddRange(type.Policies.Where(p => p.Value == FieldPolicy.Hash).Select(p => $"{type.Name}.{p.Key} (event)"));
+        }
+
+        if (offenders.Count > 0)
+        {
+            offenders.Sort(StringComparer.Ordinal);
+            throw new InvalidOperationException(
+                "The model declares Hash policies (" + string.Join(", ", offenders) + ") but no hash key is configured. " +
+                "The Hash policy is keyed (ADR-025): set PapumaKernelOptions.HashMasterKey (base64, at least 32 random bytes, " +
+                "e.g. `openssl rand -base64 32`) and HashKeyId, or register an IHashKeyProvider. " +
+                "In tests use Papuma.Kernel.Testing.TestHashKeys.");
+        }
+    }
+
+    /// <summary>
     /// Returns the metadata for an event CLR type.
     /// </summary>
     /// <typeparam name="T">The event CLR type.</typeparam>

@@ -2,16 +2,17 @@
 
 ## Status
 
-Proposed (2026-10-19) — supersedes the algorithm of the `Hash` policy in
+Accepted (2026-10-19) — supersedes the algorithm of the `Hash` policy in
 [ADR-007](adr-007-privacy-policies.md) (an unsalted SHA-256 of the value's JSON text);
 the policy catalog, its attribute and the diff entry shape stay. Both kernels, the change
 feed, the event log and masked reads. Ships in the next major version (see Consequences).
 
-Implementation so far: canonical JSON and the v2 hash (`CanonicalJson`, `HashV2`), the key
-provider (`IHashKeyProvider`, `MasterKeyHashKeyProvider`), the options, the key context in all
-three policy appliers, and the key-check table with the startup verification (point 5) —
-**opt-in**: without a configured key the v1 hash is still written. Still to come: fail closed,
-the test key in `Papuma.Kernel.Testing`, and v1 becoming read-only (points 4 and 6).
+Implemented: canonical JSON and the v2 hash (`CanonicalJson`, `HashV2`), the key provider
+(`IHashKeyProvider`, `MasterKeyHashKeyProvider`), the options, the key context in all three policy
+appliers, the key-check table with the startup verification (point 5), fail closed for a model with a
+`Hash` policy and no key (point 4, stores and hosted startup), the test key
+(`Papuma.Kernel.Testing.TestHashKeys`), and v1 as a read-only form (point 6): the kernel no longer
+has a code path that writes an unkeyed hash.
 
 ## Context
 

@@ -8,6 +8,7 @@ using Papuma.Kernel.Gdpr;
 using Papuma.Kernel.Model;
 using Papuma.Kernel.Store;
 using Papuma.Kernel.Tenancy;
+using Papuma.Kernel.Testing;
 using Papuma.Kernel.Tests.Infrastructure;
 
 namespace Papuma.Kernel.Tests.Gdpr;
@@ -48,7 +49,7 @@ public sealed class GdprToolingTests : IAsyncLifetime
             .Build();
 
         await SchemaManager.EnsureSchemaAsync(_fixture.DataSource, model);
-        _store = new DocumentStore(_fixture.DataSource, model);
+        _store = new DocumentStore(_fixture.DataSource, model, logger: null, TestHashKeys.Provider);
         _model = model;
     }
 

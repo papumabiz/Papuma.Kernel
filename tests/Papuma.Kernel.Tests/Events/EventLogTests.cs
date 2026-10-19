@@ -7,6 +7,7 @@ using Papuma.Kernel.Events;
 using Papuma.Kernel.Model;
 using Papuma.Kernel.Store;
 using Papuma.Kernel.Tenancy;
+using Papuma.Kernel.Testing;
 using Papuma.Kernel.Tests.Infrastructure;
 
 namespace Papuma.Kernel.Tests.Events;
@@ -49,7 +50,7 @@ public sealed class EventLogTests : IAsyncLifetime
             .Build();
 
         await SchemaManager.EnsureSchemaAsync(_fixture.DataSource, _model);
-        _store = new DocumentStore(_fixture.DataSource, _model);
+        _store = new DocumentStore(_fixture.DataSource, _model, logger: null, TestHashKeys.Provider);
     }
 
     public Task DisposeAsync() => Task.CompletedTask;

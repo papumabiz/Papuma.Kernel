@@ -18,7 +18,7 @@ private sealed record User(
     string Name,                                      // deliberately Track? → check the inventory!
     [property: UniqueKey] string Email,
     [property: SensitiveData] string? Iban,           // diff: only "changed"
-    [property: TrackHash] string? PasswordHash);      // diff: marker + SHA-256
+    [property: TrackHash] string? PasswordHash);      // diff: marker + keyed hash (ADR-025)
 ```
 
 ## Data inventory (Art.-30 support)

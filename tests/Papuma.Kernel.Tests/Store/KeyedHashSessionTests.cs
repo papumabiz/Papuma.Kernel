@@ -4,6 +4,8 @@
 using System.Text.Json.Nodes;
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 using Npgsql;
 
@@ -30,6 +32,8 @@ public sealed class KeyedHashSessionTests(PostgresFixture fixture) : IAsyncLifet
     private KernelModel _model = null!;
 
     private sealed record Account(string Id, string Name, [property: TrackHash] string Secret);
+
+    private sealed record Plain(string Id, string Name);
 
     public async Task InitializeAsync()
     {
@@ -80,17 +84,38 @@ public sealed class KeyedHashSessionTests(PostgresFixture fixture) : IAsyncLifet
     }
 
     [Fact]
-    public async Task WithoutAProvider_TheLegacyV1HashIsUnchanged()
+    public void WithoutAProvider_TheStoreRefusesToBeBuilt_ForAModelWithAHashPolicy()
     {
-        var store = new DocumentStore(fixture.DataSource, _model);
-        var id = NewId();
-        await using var session = store.OpenSession(NewTenant());
-        await session.SaveAsync(new Account(id, "H", "pw-1"), 0);
+        var ex = Assert.Throws<InvalidOperationException>(() => new DocumentStore(fixture.DataSource, _model));
 
-        var feed = (await session.GetHistoryAsync<Account>(id))[0].Diff.Entries["secret"];
+        Assert.Contains("Account.secret (document)", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("HashMasterKey", ex.Message, StringComparison.Ordinal);
+    }
 
-        Assert.Equal(PolicyHash.Of(JsonValue.Create("pw-1")), feed.Hash);
-        Assert.DoesNotContain(':', feed.Hash!);
+    [Fact]
+    public void WithoutAProvider_AModelWithoutAHashPolicy_StillWorks()
+    {
+        var store = new DocumentStore(fixture.DataSource, new KernelModelBuilder().Document<Plain>().Build());
+
+        Assert.NotNull(store);
+    }
+
+    [Fact]
+    public async Task TheHostedStartup_WithoutAKey_FailsClosed_ForAModelWithAHashPolicy()
+    {
+        var builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder();
+        builder.Logging.ClearProviders();
+        builder.Services.AddPapumaKernel(o =>
+        {
+            o.DataSource = fixture.DataSource;
+            o.Model(m => m.Document<Account>());
+            o.RunFeedWorkers = false;
+        });
+        using var host = builder.Build();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => host.StartAsync());
+
+        Assert.Contains("Account.secret (document)", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -53,6 +53,18 @@ builder.Services
     .AddEventHandler<LoginAuditHandler>();   // ADR-013: event consumption
 ```
 
+A model with a `[TrackHash]` field also needs a **hash key** — the Hash policy is keyed
+(ADR-025) and the kernel refuses to start without one:
+
+```csharp
+o.HashMasterKey = builder.Configuration["Papuma:HashMasterKey"];   // base64, >= 32 random bytes — from a secret store
+o.HashKeyId = "k1";                                                 // new id + new key = rotation
+```
+
+Generate it once with `openssl rand -base64 32`, give **every process that writes** the same key and
+id, and keep it out of the repository. A wrong key under an existing id stops the instance at startup
+(`HashKeyMismatchException`).
+
 The bootstrap registers `DocumentStore` + `KernelModel`, creates the schema
 idempotently at startup (tables, RLS, key indexes) and hosts the feed workers
 (NOTIFY-driven, polling as the truth) as well as the retention worker. Your own
@@ -215,7 +227,7 @@ public sealed class DatabaseFixture : IAsyncLifetime
     public async Task DisposeAsync() => await Database.DisposeAsync();
 }
 
-// in a test class
+// in a test class — the store already carries the published test hash key (TestHashKeys)
 var store = await fixture.Database.CreateStoreAsync(model);          // schema + grants, runs as the app role
 await using var session = store.OpenSession(ScopeContext.Tenant(Guid.NewGuid()));
 // … write …

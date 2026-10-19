@@ -90,18 +90,19 @@ declared, otherwise of its nearest declared ancestor (a policy on `address` cove
 **Non-tracked entries are not values.** They carry no data to reconstruct state
 from. A foreign consumer MUST treat them as "this field changed", nothing more.
 
-### Hash policy (v1) is not yet normative
+### The Hash policy is keyed; v1 is read-only
 
-[ADR-025](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/adr/adr-025-keyed-hash-policy.md)
-replaces the hash with a keyed, canonical one, specified in [canonical-json.md](canonical-json.md)
-(`v2:<kid>:<hex>`). Until the kernels are switched over, the **v1** hash is what they write: the
-lowercase hex SHA-256 of the UTF-8 bytes of the new value's JSON text as produced by .NET's
-`System.Text.Json` (`"b"` for a string, `42` for a number, `null` for JSON null). That is **not
-canonical** — object key order, escaping and number formatting are serializer-specific — and it
-is **unsalted**, so low-entropy values can be recovered by dictionary attack. The `legacy-v1`
-policy vectors pin it for scalars only, where the JSON text is unambiguous. After the switch-over
-v1 values are **read-only**: they stay in existing records, are never produced again, and a
-consumer treats a hash as an opaque string and compares only hashes of the same form.
+The hash is `v2:<kid>:<hex>`: an HMAC-SHA-256 over the canonical form of the new value, under a key
+derived per tenant and type ([canonical-json.md](canonical-json.md),
+[ADR-025](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/adr/adr-025-keyed-hash-policy.md)).
+An implementation MUST NOT write a hash without a key: a `Hash` policy that applies when no key is
+configured is an error (policy vector `hash-without-a-key-fails`).
+
+Records written before the keyed hash carry **v1** values — a bare 64-digit lowercase hex string, the
+SHA-256 of the value's serializer-specific JSON text. That form was neither canonical nor salted, is
+**read-only**, and is never produced again. History is not rewritten. A consumer treats a hash as an
+opaque string and compares only hashes of the same form: a v1 and a v2 hash of the same value never
+match, nor do two key ids.
 
 ## 4. Change record
 

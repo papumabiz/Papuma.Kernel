@@ -56,6 +56,8 @@ derived automatically. NOT event sourcing, NOT an ORM, NO query DSL.
    `Platform`). Never mix data across scopes; workers use the 'All'-scope
    mechanism. Own tables in the same database (projection targets) get RLS via
    `papuma.scope_visible`/`papuma.scope_writable` — never copy the setting names.
+10a. `[TrackHash]` / `StoreAsHash()` need a hash key (`HashMasterKey` base64 ≥ 32 bytes + `HashKeyId`, the
+    same on every writing process); the kernel refuses to start without one. Tests: `TestHashKeys`.
 10. Never write directly into `papuma.*` tables or alter their schema.
     One Papuma installation per **database** (fixed `papuma` schema, one NOTIFY channel): never
     point two applications at the same database — give each its own; own tables go in a schema

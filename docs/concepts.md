@@ -395,8 +395,8 @@ themselves:
 
 - **Redact / DoNotTrack** → the field is *removed* before storing (deserialization
   yields the default — consumers never see protected values)
-- **Hash** → the value is replaced by the SHA-256 hex string (comparable without
-  content)
+- **Hash** → the value is replaced by its keyed hash (HMAC-SHA-256, ADR-025; comparable
+  without content)
 - **Reference** → **rejected at model build.** In a diff, a reference points at
   the value inside the document ("the truth lives elsewhere"). But an event *is*
   itself the record — there is no place the reference could point to. Better a

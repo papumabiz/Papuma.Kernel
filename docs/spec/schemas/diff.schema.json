@@ -45,7 +45,11 @@
       "required": ["changed"],
       "properties": {
         "changed": { "const": true },
-        "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        "hash": {
+          "description": "v2 (written by the kernel): 'v2:<kid>:<64 hex>'. A 64-hex string is a v1 hash, read-only: still found in history, never written again (ADR-025). Treat as opaque; compare only hashes of the same form.",
+          "type": "string",
+          "pattern": "^(v2:[A-Za-z0-9_-]{1,32}:)?[0-9a-f]{64}$"
+        }
       },
       "additionalProperties": false
     }

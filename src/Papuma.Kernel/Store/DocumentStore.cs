@@ -69,6 +69,7 @@ public sealed class DocumentStore
     {
         ArgumentNullException.ThrowIfNull(dataSource);
         ArgumentNullException.ThrowIfNull(model);
+        model.EnsureHashKeysConfigured(hashKeys);
         _dataSource = dataSource;
         Model = model;
         _logger = logger;

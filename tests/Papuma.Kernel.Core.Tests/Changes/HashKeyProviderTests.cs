@@ -23,6 +23,10 @@ public sealed class HashKeyProviderTests
 
     private sealed record LoggedIn(string UserId, string Token);
 
+    private sealed record Plain(string Id, string Name);
+
+    private sealed record Ping(string Id);
+
     private static MasterKeyHashKeyProvider Provider(string keyId = "k1") => new(MasterKey, keyId);
 
     private static ScopeContext Acme => ScopeContext.Tenant("acme");
@@ -103,15 +107,41 @@ public sealed class HashKeyProviderTests
     }
 
     [Fact]
-    public void PolicyApplier_WithoutAProvider_StillWritesTheLegacyV1Hash()
+    public void PolicyApplier_WithoutAProvider_FailsClosed_InsteadOfWritingAnUnkeyedHash()
     {
         var diff = JsonDiffEngine.Diff(
             (JsonObject)JsonNode.Parse("""{"secret":"a"}""")!,
             (JsonObject)JsonNode.Parse("""{"secret":"b"}""")!);
 
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => PolicyApplier.Apply(diff, AccountMetadata(), "1", hashKeys: null, Acme));
+
+        Assert.Contains("IHashKeyProvider", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PolicyApplier_WithoutAProvider_IsFineWhenNoHashedFieldChanged()
+    {
+        var diff = JsonDiffEngine.Diff(
+            (JsonObject)JsonNode.Parse("""{"secret":"a","name":"x"}""")!,
+            (JsonObject)JsonNode.Parse("""{"secret":"a","name":"y"}""")!);
+
         var applied = PolicyApplier.Apply(diff, AccountMetadata(), "1", hashKeys: null, Acme);
 
-        Assert.Equal(PolicyHash.Of(JsonValue.Create("b")), applied.Entries["secret"].Hash);
+        Assert.Equal(DiffEntryKind.Tracked, applied.Entries["name"].Kind);
+        Assert.DoesNotContain("secret", applied.Paths);
+    }
+
+    [Fact]
+    public void AHashStoredByV1_IsStillReadable_AsAnOpaqueString()
+    {
+        const string v1 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        var wire = (JsonObject)JsonNode.Parse("{\"secret\":{\"changed\":true,\"hash\":\"" + v1 + "\"}}")!;
+
+        var diff = DocumentDiff.FromJson(wire);
+
+        Assert.Equal(v1, diff.Entries["secret"].Hash);
+        Assert.True(JsonNode.DeepEquals(wire, diff.ToJson()));
     }
 
     [Fact]
@@ -189,14 +219,47 @@ public sealed class HashKeyProviderTests
     }
 
     [Fact]
-    public void EventPayload_HashPolicy_WithoutAProvider_KeepsTheLegacyV1Hash()
+    public void EventPayload_HashPolicy_WithoutAProvider_FailsClosed()
     {
         var model = new KernelModelBuilder().Event<LoggedIn>(e => e.Property(x => x.Token).StoreAsHash()).Build();
         var payload = (JsonObject)JsonNode.Parse("""{"userId":"u1","token":"t-1"}""")!;
 
-        var stored = EventPayloadPolicyApplier.Apply(payload, model.GetRequiredEvent<LoggedIn>(), hashKeys: null, Acme);
+        Assert.Throws<InvalidOperationException>(
+            () => EventPayloadPolicyApplier.Apply(payload, model.GetRequiredEvent<LoggedIn>(), hashKeys: null, Acme));
+    }
 
-        Assert.Equal(PolicyHash.Of(JsonValue.Create("t-1")), (string?)stored["token"]);
+    // ── Fail closed: the model check ───────────────────────────────────────────
+
+    [Fact]
+    public void ModelWithAHashPolicy_WithoutAProvider_IsRefused_NamingTheFields()
+    {
+        var model = new KernelModelBuilder()
+            .Document<Account>()
+            .Event<LoggedIn>(e => e.Property(x => x.Token).StoreAsHash())
+            .Build();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => model.EnsureHashKeysConfigured(null));
+
+        Assert.Contains("Account.secret (document)", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("LoggedIn.token (event)", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("HashMasterKey", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("TestHashKeys", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ModelWithAHashPolicy_WithAProvider_IsAccepted()
+    {
+        var model = new KernelModelBuilder().Document<Account>().Build();
+
+        model.EnsureHashKeysConfigured(Provider());
+    }
+
+    [Fact]
+    public void ModelWithoutAHashPolicy_NeedsNoProvider()
+    {
+        var model = new KernelModelBuilder().Document<Plain>().Event<Ping>().Build();
+
+        model.EnsureHashKeysConfigured(null);
     }
 
     private static DocumentTypeMetadata AccountMetadata() =>

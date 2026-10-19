@@ -2,7 +2,7 @@
   "spec": "papuma-changes",
   "version": "0.1",
   "kind": "policy",
-  "description": "Policy vectors: applying 'policies' to 'diff' for document 'documentType'/'documentId' must yield 'expected' (wire format). Policies not listed default to Track. Cases with status 'legacy-v1' pin behaviour that Phase 2 of the roadmap will change. A case with 'hashKey' (masterKeyHex, kid) and 'tenantId' runs with the keyed v2 hash provider (ADR-025); without it the legacy v1 hash is produced.",
+  "description": "Policy vectors: applying 'policies' to 'diff' for document 'documentType'/'documentId' must yield 'expected' (wire format). Policies not listed default to Track. A case with 'hashKey' (masterKeyHex, kid) and 'tenantId' runs with the keyed v2 hash provider (ADR-025). A Hash policy that applies without a key must fail ('error': 'no-hash-key'): there is no unkeyed hash.",
   "cases": [
     {
       "name": "no-policies-leave-the-diff-untouched",
@@ -104,54 +104,20 @@
       "expected": { "address.city": { "ref": "User/123/address.city" } }
     },
     {
-      "name": "hash-of-a-string-value",
-      "status": "legacy-v1",
-      "documentType": "User",
-      "documentId": "123",
-      "policies": { "pw": "Hash" },
-      "diff": { "pw": { "old": "a", "new": "b" } },
-      "expected": {
-        "pw": {
-          "changed": true,
-          "hash": "c100f95c1913f9c72fc1f4ef0847e1e723ffe0bde0b36e5f36c13f81fe8c26ed"
-        }
-      }
-    },
-    {
-      "name": "hash-of-a-number-value",
-      "status": "legacy-v1",
-      "documentType": "User",
-      "documentId": "123",
-      "policies": { "pin": "Hash" },
-      "diff": { "pin": { "old": 1, "new": 42 } },
-      "expected": {
-        "pin": {
-          "changed": true,
-          "hash": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049"
-        }
-      }
-    },
-    {
-      "name": "hash-of-an-explicit-null",
-      "status": "legacy-v1",
-      "documentType": "User",
-      "documentId": "123",
-      "policies": { "pw": "Hash" },
-      "diff": { "pw": { "old": "a", "new": null } },
-      "expected": {
-        "pw": {
-          "changed": true,
-          "hash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
-        }
-      }
-    },
-    {
       "name": "hash-of-a-removed-field-has-no-hash",
       "documentType": "User",
       "documentId": "123",
       "policies": { "pw": "Hash" },
       "diff": { "pw": { "old": "a" } },
       "expected": { "pw": { "changed": true } }
+    },
+    {
+      "name": "hash-without-a-key-fails",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": { "pw": "Hash" },
+      "diff": { "pw": { "old": "a", "new": "b" } },
+      "error": "no-hash-key"
     },
     {
       "name": "hash-v2-of-a-string-value",

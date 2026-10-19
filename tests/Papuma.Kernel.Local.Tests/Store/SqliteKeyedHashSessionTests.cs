@@ -3,7 +3,12 @@
 
 using System.Text.Json.Nodes;
 
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+
 using Papuma.Kernel.Changes;
+using Papuma.Kernel.Hosting;
 using Papuma.Kernel.Local.Tests.Infrastructure;
 using Papuma.Kernel.Model;
 using Papuma.Kernel.Store;
@@ -59,15 +64,30 @@ public sealed class SqliteKeyedHashSessionTests(SqliteFixture fixture) : IAsyncL
     }
 
     [Fact]
-    public async Task WithoutAProvider_TheLegacyV1HashIsUnchanged()
+    public void WithoutAProvider_TheStoreRefusesToBeBuilt_ForAModelWithAHashPolicy()
     {
-        var id = NewId();
-        await using var session = Store(hashKeys: null).OpenSession(NewTenant());
-        await session.SaveAsync(new Account(id, "H", "pw-1"), 0);
+        var ex = Assert.Throws<InvalidOperationException>(() => Store(hashKeys: null));
 
-        var feed = (await session.GetHistoryAsync<Account>(id))[0].Diff.Entries["secret"];
+        Assert.Contains("Account.secret (document)", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("HashMasterKey", ex.Message, StringComparison.Ordinal);
+    }
 
-        Assert.Equal(PolicyHash.Of(JsonValue.Create("pw-1")), feed.Hash);
+    [Fact]
+    public async Task TheHostedStartup_WithoutAKey_FailsClosed_ForAModelWithAHashPolicy()
+    {
+        var builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder();
+        builder.Logging.ClearProviders();
+        builder.Services.AddPapumaKernelLocal(o =>
+        {
+            o.ConnectionString = fixture.ConnectionString;
+            o.Model(m => m.Document<Account>());
+            o.RunFeedWorkers = false;
+        });
+        using var host = builder.Build();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => host.StartAsync());
+
+        Assert.Contains("Account.secret (document)", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

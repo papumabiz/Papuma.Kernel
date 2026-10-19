@@ -19,7 +19,7 @@ public enum DiffEntryKind
     /// <summary>A reference to the value's location recorded instead of the value.</summary>
     Reference = 2,
 
-    /// <summary>Change marker plus SHA-256 hash of the new value recorded.</summary>
+    /// <summary>Change marker plus the keyed hash of the new value recorded (ADR-025).</summary>
     Hashed = 3,
 }
 
@@ -54,7 +54,7 @@ public sealed class DiffEntry
     /// <summary>Gets the value reference (<see cref="DiffEntryKind.Reference"/> entries only).</summary>
     public string? Reference { get; }
 
-    /// <summary>Gets the SHA-256 hex hash of the new value (<see cref="DiffEntryKind.Hashed"/> entries; null when the field was removed).</summary>
+    /// <summary>Gets the hash of the new value (<see cref="DiffEntryKind.Hashed"/> entries; null when the field was removed): <c>v2:&lt;kid&gt;:&lt;hex&gt;</c>, or a 64-digit v1 hex string in history written before ADR-025. Opaque.</summary>
     public string? Hash { get; }
 
     private DiffEntry(

@@ -17,7 +17,7 @@ public enum FieldPolicy
     /// <summary>A reference to the value's location is recorded; the value stays in the document.</summary>
     Reference = 2,
 
-    /// <summary>A change marker plus a SHA-256 hash of the new value is recorded.</summary>
+    /// <summary>A change marker plus a keyed hash of the new value is recorded (ADR-025); needs a hash key.</summary>
     Hash = 3,
 
     /// <summary>The field never appears in diffs at all.</summary>

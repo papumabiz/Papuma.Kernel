@@ -10,6 +10,7 @@ using Papuma.Kernel.Processing;
 using Papuma.Kernel.Events;
 using Papuma.Kernel.Store;
 using Papuma.Kernel.Tenancy;
+using Papuma.Kernel.Testing;
 using Papuma.Kernel.Tests.Infrastructure;
 
 namespace Papuma.Kernel.Tests.Store;
@@ -53,7 +54,7 @@ public sealed class MaskedReadTests : IAsyncLifetime
             .Build();
 
         await SchemaManager.EnsureSchemaAsync(_fixture.DataSource, model);
-        _store = new DocumentStore(_fixture.DataSource, model);
+        _store = new DocumentStore(_fixture.DataSource, model, logger: null, TestHashKeys.Provider);
         _model = model;
     }
 
@@ -88,7 +89,13 @@ public sealed class MaskedReadTests : IAsyncLifetime
         Assert.Equal("[protected]", (string?)doc["address"]!["street"]); // nested Redact → marker
 
         // Hash → the SAME hash the feed would show (the ADR-016 invariant).
-        var feedHash = PolicyHash.Of(JsonValue.Create("secret-hash-input"));
+        var feedHash = HashV2.Hash(
+            HashV2.DeriveTenantKey(
+                Convert.FromHexString("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"),
+                scope.TenantId!,
+                nameof(MaskedUser)),
+            TestHashKeys.KeyId,
+            JsonValue.Create("secret-hash-input"));
         Assert.Equal(feedHash, (string?)doc["passwordHash"]);
     }
 

@@ -19,8 +19,9 @@ public sealed class SensitiveDataAttribute : Attribute;
 public sealed class TrackReferenceAttribute : Attribute;
 
 /// <summary>
-/// Marks a property whose diffs record a change marker plus a SHA-256 hash of the new
-/// value (<see cref="FieldPolicy.Hash"/>) — comparable without exposing content.
+/// Marks a property whose diffs record a change marker plus a keyed hash of the new
+/// value (<see cref="FieldPolicy.Hash"/>, ADR-025) — comparable without exposing content. The kernel
+/// refuses to start for a model with such a property unless a hash key is configured.
 /// </summary>
 [AttributeUsage(AttributeTargets.Property)]
 public sealed class TrackHashAttribute : Attribute;

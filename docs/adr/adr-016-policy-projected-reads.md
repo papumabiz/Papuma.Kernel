@@ -41,7 +41,7 @@ Concretely, per field policy:
 |---|---|---|
 | `Track` | values verbatim | value verbatim |
 | `Redact` (`[SensitiveData]`) | `{"changed": true}` | field masked / omitted |
-| `Hash` (`[TrackHash]`) | marker + SHA-256 | value replaced by its SHA-256 |
+| `Hash` (`[TrackHash]`) | marker + keyed hash (ADR-025) | value replaced by the same keyed hash |
 | `Reference` (`[TrackReference]`) | `{"ref": …}` | field masked / omitted |
 | `DoNotTrack` | absent | field omitted |
 

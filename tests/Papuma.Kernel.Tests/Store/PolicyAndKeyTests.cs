@@ -7,6 +7,7 @@ using Papuma.Kernel.Changes;
 using Papuma.Kernel.Model;
 using Papuma.Kernel.Store;
 using Papuma.Kernel.Tenancy;
+using Papuma.Kernel.Testing;
 using Papuma.Kernel.Tests.Infrastructure;
 
 namespace Papuma.Kernel.Tests.Store;
@@ -46,7 +47,7 @@ public sealed class PolicyAndKeyTests : IAsyncLifetime
             .Build();
 
         await SchemaManager.EnsureSchemaAsync(_fixture.DataSource, model);
-        _store = new DocumentStore(_fixture.DataSource, model);
+        _store = new DocumentStore(_fixture.DataSource, model, logger: null, TestHashKeys.Provider);
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
@@ -71,10 +72,10 @@ public sealed class PolicyAndKeyTests : IAsyncLifetime
         Assert.Equal(DiffEntryKind.Redacted, result.Diff.Entries["email"].Kind);
         Assert.Null(result.Diff.Entries["email"].New);
 
-        // [TrackHash] → Hashed with SHA-256 hex
+        // [TrackHash] → Hashed with the keyed v2 hash (ADR-025)
         var password = result.Diff.Entries["passwordHash"];
         Assert.Equal(DiffEntryKind.Hashed, password.Kind);
-        Assert.Equal(64, password.Hash!.Length);
+        Assert.Matches(@"^v2:test:[0-9a-f]{64}$", password.Hash);
 
         // Fluent StoreAsReference → Reference "Type/id/path"
         Assert.Equal(DiffEntryKind.Reference, result.Diff.Entries["phone"].Kind);

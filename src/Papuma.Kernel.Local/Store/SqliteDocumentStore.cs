@@ -79,6 +79,7 @@ public sealed class SqliteDocumentStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentNullException.ThrowIfNull(model);
+        model.EnsureHashKeysConfigured(hashKeys);
 
         ConnectionString = connectionString;
         Model = model;

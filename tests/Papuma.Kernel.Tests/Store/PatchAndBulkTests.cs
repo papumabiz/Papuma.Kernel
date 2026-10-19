@@ -5,6 +5,7 @@ using Papuma.Kernel.Changes;
 using Papuma.Kernel.Model;
 using Papuma.Kernel.Store;
 using Papuma.Kernel.Tenancy;
+using Papuma.Kernel.Testing;
 using Papuma.Kernel.Tests.Infrastructure;
 
 namespace Papuma.Kernel.Tests.Store;
@@ -54,7 +55,7 @@ public sealed class PatchAndBulkTests : IAsyncLifetime
             .Build();
 
         await SchemaManager.EnsureSchemaAsync(_fixture.DataSource, model);
-        _store = new DocumentStore(_fixture.DataSource, model);
+        _store = new DocumentStore(_fixture.DataSource, model, logger: null, TestHashKeys.Provider);
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
@@ -189,7 +190,7 @@ public sealed class PatchAndBulkTests : IAsyncLifetime
         var entry = result.Diff.Entries["passwordHash"];
         Assert.Equal(DiffEntryKind.Hashed, entry.Kind);
         Assert.Null(entry.New);
-        Assert.Equal(64, entry.Hash!.Length);
+        Assert.Matches(@"^v2:test:[0-9a-f]{64}$", entry.Hash);
     }
 
     [Fact]

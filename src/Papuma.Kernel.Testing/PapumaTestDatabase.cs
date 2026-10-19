@@ -174,7 +174,7 @@ public sealed partial class PapumaTestDatabase : IAsyncDisposable
     public async Task<DocumentStore> CreateStoreAsync(KernelModel model, CancellationToken ct = default)
     {
         await EnsureSchemaAsync(model, ct);
-        return new DocumentStore(AppDataSource, model);
+        return new DocumentStore(AppDataSource, model, logger: null, TestHashKeys.Provider);
     }
 
     /// <inheritdoc />

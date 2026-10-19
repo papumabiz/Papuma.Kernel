@@ -116,5 +116,5 @@ review the diff by hand, and bump the vectors' `version`.
 
 - The `kid` and key-provider contract, the key-check table and fail-closed start are specified
   by ADR-025; their behaviour is covered by the kernels' own tests, not by vectors.
-- The v1 hash (unsalted SHA-256 of the serializer's JSON text) is not canonical and stays
-  readable only; see [changes.md](changes.md#hash-policy-v1-is-not-yet-normative).
+- The v1 hash (unsalted SHA-256 of the serializer's JSON text) was not canonical; it is
+  read-only and never written again, see [changes.md](changes.md#the-hash-policy-is-keyed-v1-is-read-only).
