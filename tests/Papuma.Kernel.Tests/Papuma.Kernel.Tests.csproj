@@ -25,6 +25,7 @@
     <Compile Include="..\Papuma.Kernel.Core.Tests\Spec\PatchVectors.cs" Link="Spec\PatchVectors.cs" />
     <Compile Include="..\Papuma.Kernel.Core.Tests\Robustness\JsonGenerator.cs" Link="Robustness\JsonGenerator.cs" />
     <Compile Include="..\Papuma.Kernel.Core.Tests\Robustness\SessionModelRunner.cs" Link="Robustness\SessionModelRunner.cs" />
+    <Compile Include="..\Papuma.Kernel.Core.Tests\Robustness\ConcurrencyRunner.cs" Link="Robustness\ConcurrencyRunner.cs" />
   </ItemGroup>
 
   <ItemGroup>

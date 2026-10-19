@@ -310,6 +310,16 @@ in plain text in the feed). A rollback across a delete/recreate chain of a
 document with sensitive fields therefore fails as well — correctly, because the
 kernel simply does not know the old secrets.
 
+Two more edges of the same rule, both pinned by the randomized session tests:
+
+- **`DoNotTrack` fields are never restored.** A field that is not in the feed cannot
+  be reconstructed from it, so a rollback leaves such a field at its *current* value
+  (it is not reset and not cleared). Rollback restores what the feed records — nothing else.
+- **Rollback is itself an update** ([ADR-008](adr/adr-008-rollback-is-update.md)): it
+  adds a new version and its diff goes through the same policies. Whether a target
+  version is reachable depends on the entries *between* it and the current version,
+  not on the target alone.
+
 ---
 
 ## 9. Insert after delete: why versions keep counting

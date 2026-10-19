@@ -29,6 +29,8 @@ Changed:
 
 Added:
 
+- Test coverage: concurrent writers (optimistic versions and unconditional increments on one document) lose no update and leave no gap in the version numbers, on both engines. `concepts.md` now states that rollback never restores `DoNotTrack` fields.
+
 - **`NonNumericIncrementException`** and **`PatchTargetMissingException`** (`Papuma.Kernel.Core`):
   typed patch failures (see Fixed). They carry `DocumentType`, and `DocumentId`/`FieldPath` when the
   engine knows them.
