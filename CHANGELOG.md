@@ -13,6 +13,12 @@ Added:
 
 Fixed:
 
+- **SQLite key lookups use the declared key index.** `LoadByKeyAsync`, `PatchWhereAsync`,
+  `DeleteWhereAsync` and the MCP masked read by key bound the document type as a parameter,
+  which SQLite cannot match against the *partial* key index (`WHERE document_type = '…'`); the
+  planner fell back to the primary-key range plus a filter, so the cost grew with the type's size
+  in the tenant instead of the number of matches. The type is now a validated literal. Results
+  were always correct; PostgreSQL was not affected.
 - **A lost `LISTEN` connection no longer makes the feed loops spin.** After a failover,
   a server restart or a killed backend, the idle wait threw immediately and the loop
   re-ran at full speed (hundreds of warnings per second, the database polled flat out).

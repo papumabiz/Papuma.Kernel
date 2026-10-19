@@ -237,7 +237,7 @@ public sealed partial class SqliteDocumentSession
                 selectCmd.Transaction = tx;
                 selectCmd.CommandText = $"""
                     SELECT id, data, schema_version FROM document
-                    WHERE scope = @scope AND tenant_id = @tenantId AND document_type = @type
+                    WHERE scope = @scope AND tenant_id = @tenantId AND document_type = {ValidatedTypeLiteral(metadata.Name)}
                       {predicate}
                     """;
                 AddScopeParameters(selectCmd, metadata.Name);
@@ -300,7 +300,7 @@ public sealed partial class SqliteDocumentSession
             cmd.Transaction = tx;
             cmd.CommandText = $"""
                 DELETE FROM document
-                WHERE scope = @scope AND tenant_id = @tenantId AND document_type = @type
+                WHERE scope = @scope AND tenant_id = @tenantId AND document_type = {ValidatedTypeLiteral(metadata.Name)}
                   {predicate}
                 RETURNING id, data, version, schema_version
                 """;

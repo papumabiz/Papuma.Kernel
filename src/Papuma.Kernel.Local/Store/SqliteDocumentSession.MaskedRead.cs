@@ -65,12 +65,13 @@ public sealed partial class SqliteDocumentSession
         // SqliteDocumentSession.ValidatedKeyJsonPath's remarks (a bound @path parameter
         // defeats the declared-key expression index). Value stays text-compared here
         // (MCP entry point, string-in by contract) — matches the Postgres kernel's own
-        // #>> semantics for this specific method, which is always text too.
+        // #>> semantics for this specific method, which is always text too. The type is a
+        // validated literal as well: key indexes are partial, a bound @type is not matched.
         cmd.CommandText = $"""
             SELECT data, version, schema_version
             FROM document
             WHERE scope = @scope AND tenant_id = @tenantId
-              AND document_type = @type
+              AND document_type = {ValidatedTypeLiteral(metadata.Name)}
               AND json_extract(data, '{ValidatedKeyJsonPath(key)}') = @value
             LIMIT 2
             """;
