@@ -17,6 +17,97 @@ namespace Papuma.Kernel.Core.Tests.Robustness;
 /// </summary>
 internal sealed class ConcurrencyRunner
 {
+    /// <summary>
+    /// Workers race to delete the same version of one document, round after round. Exactly one wins each
+    /// round, the others see a conflict or "not found", and recreating keeps the version counting up.
+    /// </summary>
+    public async Task RunContendedDeleteAsync(IStoreAdapter store, int workers = 6, int rounds = 8)
+    {
+        const string id = "doomed";
+        var scope = ScopeContext.Tenant($"cd{Guid.NewGuid():N}");
+        long version = 0;
+
+        for (var round = 0; round < rounds; round++)
+        {
+            await WriteAsync(store, scope, s => s.SaveAsync(new FreeDoc(id, new JsonObject()), expectedVersion: 0));
+            await WriteAsync(store, scope, s => s.PatchAsync(id, new PatchSpec(PatchKind.IncrementCounter, null, 1), expectedVersion: null));
+            version += 2;
+            var target = version;
+
+            // Every other worker holds a stale version and must never win, whatever the interleaving.
+            var outcomes = await RaceAsync(store, scope, workers, (s, n) => s.DeleteAsync(id, n % 2 == 0 ? target : target - 1));
+            AssertOneWinner(outcomes, $"delete of v{target}");
+            version++;
+
+            await using var check = store.Open(scope);
+            Assert.Null(await check.LoadAsync(id));
+            var last = (await check.HistoryAsync(id)).OrderBy(h => h.Version).Last();
+            Assert.Equal((version, ChangeOperation.Delete), (last.Version, last.Operation));
+        }
+    }
+
+    /// <summary>
+    /// Workers race to roll the same document back from the same version. Exactly one wins, and the
+    /// document ends up at the restored content in the next version.
+    /// </summary>
+    public async Task RunContendedRollbackAsync(IStoreAdapter store, int workers = 6, int rounds = 8)
+    {
+        const string id = "undo";
+        var scope = ScopeContext.Tenant($"cr{Guid.NewGuid():N}");
+        await WriteAsync(store, scope, s => s.SaveAsync(new FreeDoc(id, new JsonObject(), Counter: 0), expectedVersion: 0));
+        long version = 1;
+
+        for (var round = 0; round < rounds; round++)
+        {
+            await WriteAsync(store, scope, s => s.PatchAsync(id, new PatchSpec(PatchKind.IncrementCounter, null, 5), expectedVersion: null));
+            version++;
+            var from = version;
+
+            var outcomes = await RaceAsync(store, scope, workers, (s, _) => s.RollbackAsync(id, toVersion: 1, expectedVersion: from));
+            AssertOneWinner(outcomes, $"rollback from v{from}");
+            version++;
+
+            await using var check = store.Open(scope);
+            var loaded = await check.LoadAsync(id) ?? throw new Xunit.Sdk.XunitException("document vanished");
+            Assert.Equal(version, loaded.Version);
+            Assert.Equal(0, loaded.Document.Counter);
+        }
+    }
+
+    private static async Task WriteAsync(IStoreAdapter store, ScopeContext scope, Func<ISessionAdapter, Task<SaveResult>> action)
+    {
+        await using var session = store.Open(scope);
+        await action(session);
+        await session.CommitAsync();
+    }
+
+    // Starts every worker behind one gate so the writes overlap as much as the engine allows.
+    private static async Task<List<Exception?>> RaceAsync(IStoreAdapter store, ScopeContext scope, int workers, Func<ISessionAdapter, int, Task<SaveResult>> action)
+    {
+        var gate = new TaskCompletionSource();
+        var tasks = Enumerable.Range(0, workers).Select(n => Task.Run(async () =>
+        {
+            await gate.Task;
+            await using var session = store.Open(scope);
+            try
+            {
+                await action(session, n);
+                await session.CommitAsync();
+                return (Exception?)null;
+            }
+            catch (Exception ex) when (ex is ConcurrencyException or DocumentNotFoundException)
+            {
+                return ex;
+            }
+        })).ToList();
+
+        gate.SetResult();
+        return [.. await Task.WhenAll(tasks)];
+    }
+
+    private static void AssertOneWinner(List<Exception?> outcomes, string what) =>
+        Assert.True(outcomes.Count(e => e is null) == 1, $"{what}: {outcomes.Count(e => e is null)} winners of {outcomes.Count}");
+
     public async Task RunAsync(IStoreAdapter store, int workers = 6, int writesPerWorker = 12)
     {
         const string id = "hot";

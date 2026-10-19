@@ -25,4 +25,22 @@ public sealed class ConcurrentSessionTests(PostgresFixture fixture)
             await new ConcurrencyRunner().RunAsync(store);
         }
     }
+
+    [Fact]
+    public async Task ConcurrentDeletes_HaveExactlyOneWinnerPerRound()
+    {
+        var model = new KernelModelBuilder().Document<FreeDoc>().Build();
+        await SchemaManager.EnsureSchemaAsync(fixture.DataSource, model);
+        var store = new PostgresStoreAdapter(new DocumentStore(fixture.DataSource, model, logger: null, TestHashKeys.Provider));
+        await new ConcurrencyRunner().RunContendedDeleteAsync(store);
+    }
+
+    [Fact]
+    public async Task ConcurrentRollbacks_HaveExactlyOneWinnerPerRound()
+    {
+        var model = new KernelModelBuilder().Document<FreeDoc>().Build();
+        await SchemaManager.EnsureSchemaAsync(fixture.DataSource, model);
+        var store = new PostgresStoreAdapter(new DocumentStore(fixture.DataSource, model, logger: null, TestHashKeys.Provider));
+        await new ConcurrencyRunner().RunContendedRollbackAsync(store);
+    }
 }

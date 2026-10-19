@@ -22,4 +22,20 @@ public sealed class SqliteConcurrentSessionTests(SqliteFixture fixture)
             await new ConcurrencyRunner().RunAsync(store);
         }
     }
+
+    [Fact]
+    public async Task ConcurrentDeletes_HaveExactlyOneWinnerPerRound()
+    {
+        var model = new KernelModelBuilder().Document<FreeDoc>().Build();
+        var store = new SqliteStoreAdapter(await fixture.CreateStoreAsync(model));
+        await new ConcurrencyRunner().RunContendedDeleteAsync(store);
+    }
+
+    [Fact]
+    public async Task ConcurrentRollbacks_HaveExactlyOneWinnerPerRound()
+    {
+        var model = new KernelModelBuilder().Document<FreeDoc>().Build();
+        var store = new SqliteStoreAdapter(await fixture.CreateStoreAsync(model));
+        await new ConcurrencyRunner().RunContendedRollbackAsync(store);
+    }
 }
