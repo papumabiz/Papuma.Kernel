@@ -94,13 +94,20 @@ internal static class JsonPathResolver
     }
 
     /// <summary>
-    /// Returns whether a property is excluded from serialization via
-    /// <see cref="System.Text.Json.Serialization.JsonIgnoreAttribute"/>. Such properties
-    /// have no JSON path, so declaring a policy or key on them would be a no-op — the
-    /// metamodel scan skips them so the inventory lists no phantom paths (review L7).
+    /// Returns whether a property is <b>never</b> serialized: <see cref="System.Text.Json.Serialization.JsonIgnoreAttribute"/>
+    /// without a condition, or with <see cref="System.Text.Json.Serialization.JsonIgnoreCondition.Always"/>. Such a
+    /// property has no JSON path, so declaring a policy or key on it would be a no-op — the metamodel scan skips it so
+    /// the inventory lists no phantom paths (review L7).
     /// </summary>
+    /// <remarks>
+    /// A <i>conditional</i> ignore (<c>WhenWritingNull</c>, <c>WhenWritingDefault</c>) is not "never": the property
+    /// appears in the document whenever it has a value, so its policy must apply. Treating every
+    /// <c>[JsonIgnore]</c> alike silently switched off <c>[SensitiveData]</c> and <c>[TrackHash]</c> for a property
+    /// that also said <c>WhenWritingNull</c> — its value went into the feed in clear text.
+    /// </remarks>
     public static bool IsIgnored(PropertyInfo property) =>
-        property.GetCustomAttribute<System.Text.Json.Serialization.JsonIgnoreAttribute>() is not null;
+        property.GetCustomAttribute<System.Text.Json.Serialization.JsonIgnoreAttribute>() is { } ignore
+        && ignore.Condition == System.Text.Json.Serialization.JsonIgnoreCondition.Always;
 
     /// <summary>
     /// Returns the serialized JSON name of a property (naming policy applied,

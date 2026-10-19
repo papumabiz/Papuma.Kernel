@@ -91,6 +91,13 @@ Fixed:
   which fails below an array ("path element is not an integer") and, for a key that merely looks like an index
   (`"0"`), would delete an array element. Found by the new randomized differential test of the two patch
   implementations; now guarded, with vectors.
+- **A property with `[JsonIgnore(Condition = WhenWritingNull)]` (or `WhenWritingDefault`) kept no privacy policy.** The
+  metamodel scan treated every `[JsonIgnore]` as "never serialized" and skipped the property, so
+  `[SensitiveData]`, `[TrackHash]`, `[TrackReference]` and `[DoNotTrack]` on it were silently ignored: once it had a
+  value, that value went into the change feed in clear text. Only a property that is *never* serialized
+  (`[JsonIgnore]` or `Condition = Always`) is skipped now; a conditionally ignored one keeps its policy, in the feed,
+  in masked reads and in the data inventory. Found by the new randomized session test. If you combine a policy
+  attribute with a conditional ignore, review what your feed already contains (`RedactHistoryAsync` rewrites it).
 - **Patch operations apply in order on both engines (PostgreSQL lost updates).** Within one
   `PatchAsync`/`PatchManyAsync`/`PatchWhereAsync`, `Increment` read the *stored* value instead of
   the result of the preceding operations: two increments on one field applied only the last, and

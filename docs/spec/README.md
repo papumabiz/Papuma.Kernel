@@ -70,6 +70,13 @@ of this specification should have the same:
   same random documents and operation lists must succeed or fail together and leave the same document. It found a
   real divergence the hand-written vectors missed (a removal below an array).
 
+- **Random operation sequences against real sessions** (`SessionModelTests`, `SqliteSessionModelTests`; one shared
+  `SessionModelRunner`): save, patch, delete, roll back and load, grouped into sessions that commit or are abandoned,
+  with right and wrong expected versions, run against a real engine and an in-memory reference model at once. State,
+  version numbers, concurrency and not-found errors, abandoned sessions and the complete change history — including
+  field policies — must match the model, and a history of values must replay to every state it passed through. The
+  first run found a policy bypass (`[JsonIgnore(Condition = WhenWritingNull)]` switched the property's policy off).
+
 Structural limit: the engines refuse a document nested deeper than 128 levels with a clean error.
 
 ## Changing the vectors

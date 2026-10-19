@@ -17,6 +17,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The JSON generator and the session model runner are shared with Papuma.Kernel.Core.Tests, which owns them. -->
+    <Compile Include="..\Papuma.Kernel.Core.Tests\Robustness\JsonGenerator.cs" Link="Robustness\JsonGenerator.cs" />
+    <Compile Include="..\Papuma.Kernel.Core.Tests\Robustness\SessionModelRunner.cs" Link="Robustness\SessionModelRunner.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Explicit, not transitive: Papuma.Kernel.Local references Core with
          PrivateAssets="all", which cuts transitive compile-time visibility. -->
     <ProjectReference Include="..\..\src\Papuma.Kernel.Core\Papuma.Kernel.Core.csproj" />
