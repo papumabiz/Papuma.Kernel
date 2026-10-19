@@ -34,6 +34,12 @@ internal static class PolicyProjector
         IHashKeyProvider? hashKeys,
         ScopeContext scope)
     {
+        if (JsonLimits.ExceedsMaxDepth(document))
+        {
+            throw new NotSupportedException(
+                $"A document is nested deeper than {JsonLimits.MaxDepth} levels and cannot be projected.");
+        }
+
         var clone = (JsonObject)document.DeepClone();
         if (metadata.Policies.Count == 0)
         {

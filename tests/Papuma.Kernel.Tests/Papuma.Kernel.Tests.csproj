@@ -21,8 +21,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The patch vector loader is shared with Papuma.Kernel.Core.Tests, which owns it. -->
+    <!-- The patch vector loader and the JSON generator are shared with Papuma.Kernel.Core.Tests, which owns them. -->
     <Compile Include="..\Papuma.Kernel.Core.Tests\Spec\PatchVectors.cs" Link="Spec\PatchVectors.cs" />
+    <Compile Include="..\Papuma.Kernel.Core.Tests\Robustness\JsonGenerator.cs" Link="Robustness\JsonGenerator.cs" />
   </ItemGroup>
 
   <ItemGroup>

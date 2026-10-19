@@ -22,6 +22,7 @@ public static class JsonDiffEngine
     /// </summary>
     public static DocumentDiff Diff(JsonObject? before, JsonObject? after)
     {
+        EnsureDepth(before, after);
         var entries = new SortedDictionary<string, DiffEntry>(StringComparer.Ordinal);
         DiffObject(before, after, prefix: string.Empty, entries);
         return new DocumentDiff(entries);
@@ -38,6 +39,18 @@ public static class JsonDiffEngine
     /// </summary>
     public static JsonObject ApplyReverse(JsonObject? after, DocumentDiff diff) =>
         ApplyCore(after, diff, useNew: false);
+
+    private static void EnsureDepth(params JsonObject?[] documents)
+    {
+        foreach (var document in documents)
+        {
+            if (JsonLimits.ExceedsMaxDepth(document))
+            {
+                throw new NotSupportedException(
+                    $"A document is nested deeper than {JsonLimits.MaxDepth} levels and cannot be diffed.");
+            }
+        }
+    }
 
     private static void DiffObject(
         JsonObject? before,
@@ -104,6 +117,7 @@ public static class JsonDiffEngine
     private static JsonObject ApplyCore(JsonObject? source, DocumentDiff diff, bool useNew)
     {
         ArgumentNullException.ThrowIfNull(diff);
+        EnsureDepth(source);
 
         var result = source?.DeepClone().AsObject() ?? new JsonObject();
         foreach (var (path, entry) in diff.Entries)

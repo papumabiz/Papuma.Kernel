@@ -34,11 +34,21 @@ accumulate. (Both engines conform; see §3 for why this is pinned.)
   kernels) and the whole patch is rolled back. A patch never creates or replaces a
   parent; to build a nested value, `set` the parent first (a later operation sees it).
   `remove` is different: removing something that is not there, or below a missing
-  parent, is a no-op, so a retried removal stays idempotent.
+  parent or below an array, is a no-op, so a retried removal stays idempotent. (An array is not
+  addressed by property name: a key that merely *looks* like an index, such as `"0"`, does not reach
+  into it, for `set`, `increment` or `remove`.)
 - `increment` on a value that is neither absent, `null`, nor a number **fails**
   (`not-numeric`; `NonNumericIncrementException` in the .NET kernels) and the whole
   patch is rolled back. It MUST NOT overwrite or coerce the value — a numeric string
   such as `"5"` is not a number.
+
+### When several operations would fail
+
+A patch that fails changes nothing, whichever operation fails. If more than one operation would fail
+(say a missing parent *and* a non-numeric increment), **which error is reported is unspecified**: the
+in-process definition stops at the first failing operation, PostgreSQL's SQL raises its own errors before
+the missing-parent check runs. Both fail, with a typed exception, and roll back. The differential test
+asserts that success, failure and the resulting document agree — not the error kind.
 
 ## 3. History: divergences found and fixed
 

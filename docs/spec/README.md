@@ -55,6 +55,23 @@ SQLite kernel share, in milliseconds and without a database. The patch vectors a
 against the real PostgreSQL expression. End-to-end vectors through a full session on each
 engine are a later slice.
 
+## Beyond the vectors
+
+Vectors pin what we thought of. Two further kinds of test check what we did not, and any implementation
+of this specification should have the same:
+
+- **Properties over generated documents** (`EngineRobustnessTests`, seeded and reproducible by seed): for thousands
+  of random documents whose keys contain dots, backslashes and unicode, whose numbers are spelled many ways, and
+  which are mutated at random — applying a diff forward and backward restores the documents, the wire form
+  round-trips, paths are well formed and ordered, equal documents give an empty diff, canonical JSON is stable under
+  key order, number spelling and re-parsing, **the diff and the canonical form agree on whether two numbers are
+  equal**, and no policy lets a protected value through.
+- **A differential test of the two patch implementations** (`PatchDifferentialTests`, against a real PostgreSQL): the
+  same random documents and operation lists must succeed or fail together and leave the same document. It found a
+  real divergence the hand-written vectors missed (a removal below an array).
+
+Structural limit: the engines refuse a document nested deeper than 128 levels with a clean error.
+
 ## Changing the vectors
 
 Vectors are **hand-reviewed**, not generated on every run: a failing vector is

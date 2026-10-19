@@ -420,7 +420,16 @@ public sealed partial class DocumentSession
                     break;
 
                 case PatchOperationKind.Remove:
-                    expression.Insert(0, '(').Append($" #- @{pathParam})");
+                    // Removing below a missing or non-object parent is a no-op (docs/spec/patch.md). `#-`
+                    // alone is not: below an array it raises "path element is not an integer", and for an
+                    // integer-like key it would delete an array element. So the removal only runs when no
+                    // proper prefix of the path is an array; a missing or scalar prefix is already a no-op.
+                    var removeGuards = string.Concat(Enumerable.Range(1, op.PathSegments.Length - 1).Select(
+                        k => $" AND jsonb_typeof(d #> (@{pathParam})[1:{k}]) IS DISTINCT FROM 'array'"));
+                    var removeSource = expression.ToString();
+                    expression.Clear().Append(
+                        $"(SELECT CASE WHEN TRUE{removeGuards} THEN d #- @{pathParam} ELSE d END " +
+                        $"FROM (SELECT {removeSource} AS d) AS s)");
                     break;
 
                 case PatchOperationKind.Increment:

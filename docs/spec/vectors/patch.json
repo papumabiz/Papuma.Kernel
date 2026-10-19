@@ -83,6 +83,100 @@
       "error": "parent-missing"
     },
     {
+      "name": "remove-below-an-array-is-a-noop",
+      "before": {
+        "a": [
+          1,
+          2
+        ]
+      },
+      "ops": [
+        {
+          "op": "remove",
+          "path": [
+            "a",
+            "b"
+          ]
+        }
+      ],
+      "after": {
+        "a": [
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "remove-with-an-integer-like-key-below-an-array-is-a-noop",
+      "before": {
+        "a": [
+          1,
+          2
+        ]
+      },
+      "ops": [
+        {
+          "op": "remove",
+          "path": [
+            "a",
+            "0"
+          ]
+        }
+      ],
+      "after": {
+        "a": [
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "remove-further-below-a-nested-array-is-a-noop",
+      "before": {
+        "a": {
+          "b": [
+            1
+          ]
+        }
+      },
+      "ops": [
+        {
+          "op": "remove",
+          "path": [
+            "a",
+            "b",
+            "c"
+          ]
+        }
+      ],
+      "after": {
+        "a": {
+          "b": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "set-with-an-integer-like-key-below-an-array-fails",
+      "before": {
+        "a": [
+          1
+        ]
+      },
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "a",
+            "0"
+          ],
+          "value": "x"
+        }
+      ],
+      "error": "parent-missing"
+    },
+    {
       "name": "remove-deletes-a-field",
       "before": { "name": "Harry", "nick": "H" },
       "ops": [{ "op": "remove", "path": ["nick"] }],

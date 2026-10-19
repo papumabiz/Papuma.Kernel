@@ -43,6 +43,12 @@ internal static class CanonicalJson
     /// <summary>Returns the canonical text of <paramref name="node"/> (<c>null</c> is JSON null).</summary>
     public static string Serialize(JsonNode? node)
     {
+        if (JsonLimits.ExceedsMaxDepth(node))
+        {
+            throw new CanonicalJsonException(
+                "too-deep", $"The value is nested deeper than {JsonLimits.MaxDepth} levels.");
+        }
+
         var builder = new StringBuilder();
         Append(builder, node);
         return builder.ToString();

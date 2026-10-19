@@ -76,6 +76,10 @@ Added:
 
 Fixed:
 
+- **The diff, canonical and projection engines refuse a document nested deeper than 128 levels** with a clean
+  exception (`NotSupportedException`; `CanonicalJsonException` code `too-deep`) instead of recursing into it. The
+  serializer already stops POCO documents at 64 levels, so this only matters for a hand-built `JsonNode` graph, where a
+  recursive walk would end in an uncatchable stack overflow.
 - **Two document (or event) types with the same logical name are rejected when the model is built.**
   The name — the simple class name — is stored in every row as `document_type` / `event_type`, so two
   classes called `Item` in different namespaces used to build without complaint and then silently
@@ -83,6 +87,10 @@ Fixed:
   lower-cased: two names that differ only in case would get the same index name and the second
   `CREATE INDEX IF NOT EXISTS` would be skipped, leaving a unique key unenforced. A document and an event
   may still share a name. If your model registers two same-named classes, rename one.
+- **`Remove` below an array is a no-op on PostgreSQL, as specified.** The PostgreSQL expression used `#-` directly,
+  which fails below an array ("path element is not an integer") and, for a key that merely looks like an index
+  (`"0"`), would delete an array element. Found by the new randomized differential test of the two patch
+  implementations; now guarded, with vectors.
 - **Patch operations apply in order on both engines (PostgreSQL lost updates).** Within one
   `PatchAsync`/`PatchManyAsync`/`PatchWhereAsync`, `Increment` read the *stored* value instead of
   the result of the preceding operations: two increments on one field applied only the last, and
