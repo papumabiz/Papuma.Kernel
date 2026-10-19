@@ -25,10 +25,13 @@ public sealed class SqliteCompositeKeyTests : IAsyncLifetime
 
     private sealed record CompositeTicket(string Id, string ProjectId, int? Number, string Title);
 
+    private sealed record SingleTicket(string Id, string Reference);
+
     public async Task InitializeAsync()
     {
         var model = new KernelModelBuilder()
             .Document<CompositeTicket>(d => d.UniqueKey(x => new { x.ProjectId, x.Number }))
+            .Document<SingleTicket>(d => d.UniqueKey(x => x.Reference))
             .Build();
         _store = await _fixture.CreateStoreAsync(model);
     }
@@ -73,17 +76,36 @@ public sealed class SqliteCompositeKeyTests : IAsyncLifetime
     [Fact]
     public async Task LookupQueryShape_UsesTheCompositeIndex()
     {
+        var plan = await ExplainAsync(
+            "CompositeTicket", [["projectId"], ["number"]], ("value0", "p1"), ("value1", 42.0));
+
+        Assert.Contains(plan, line => line.Contains("ux_papuma_doc_compositeticket_projectid__number", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task LookupQueryShape_UsesTheSingleKeyIndex()
+    {
+        var plan = await ExplainAsync("SingleTicket", [["reference"]], ("value0", "r1"));
+
+        Assert.Contains(plan, line => line.Contains("papuma_doc_singleticket_reference", StringComparison.Ordinal));
+    }
+
+    /// <summary>EXPLAINs the exact text <c>LoadByKeyCoreAsync</c> executes, not a rebuilt copy.</summary>
+    private async Task<List<string>> ExplainAsync(
+        string documentType, IReadOnlyList<string[]> segments, params (string Name, object Value)[] values)
+    {
         await using var connection = await SqliteConnectionFactory.OpenAsync(_fixture.ConnectionString);
         await using var cmd = connection.CreateCommand();
-        // The shape LoadByKeyCoreAsync generates: literal paths, textually identical to the index.
-        cmd.CommandText = """
-            EXPLAIN QUERY PLAN
-            SELECT id FROM document
-            WHERE scope = 'Tenant' AND tenant_id = 't' AND document_type = 'CompositeTicket'
-              AND json_extract(data, '$.projectId') = @value0 AND json_extract(data, '$.number') = @value1
-            """;
-        cmd.Parameters.AddWithValue("value0", "p1");
-        cmd.Parameters.AddWithValue("value1", 42.0);
+        cmd.CommandText = "EXPLAIN QUERY PLAN " + SqliteDocumentSession.BuildLoadByKeySql(documentType, segments);
+        cmd.Parameters.AddWithValue("scope", "Tenant");
+        cmd.Parameters.AddWithValue("tenantId", "t");
+        // @type is deliberately left unbound: key indexes are partial (WHERE document_type = '…'),
+        // and only a literal in the SQL text lets the planner match them statically. A bound
+        // value would let SQLite re-prepare with the value peeked and hide a regression.
+        foreach (var (name, value) in values)
+        {
+            cmd.Parameters.AddWithValue(name, value);
+        }
 
         var plan = new List<string>();
         await using var reader = await cmd.ExecuteReaderAsync();
@@ -92,6 +114,6 @@ public sealed class SqliteCompositeKeyTests : IAsyncLifetime
             plan.Add(reader.GetString(3));
         }
 
-        Assert.Contains(plan, line => line.Contains("ux_papuma_doc_compositeticket_projectid__number", StringComparison.Ordinal));
+        return plan;
     }
 }

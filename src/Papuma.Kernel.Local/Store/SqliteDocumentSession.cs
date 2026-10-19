@@ -338,25 +338,12 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        // The JSON paths are interpolated as literals (validated), not bound as
-        // parameters: SQLite's query planner only matches an expression index when the
-        // indexed expression is textually identical to the query's — a bound @path
-        // parameter is a different expression node and silently defeats the declared-key
-        // index (SqliteSpikeTests.JsonExtractIndex_NotUsed_WhenPathIsABoundParameter).
-        var predicates = new StringBuilder();
         for (var i = 0; i < values.Count; i++)
         {
-            predicates.Append($" AND json_extract(data, '{ValidatedKeyJsonPath(keyMetadata.ComponentSegments[i])}') = @value{i}");
             cmd.Parameters.AddWithValue($"value{i}", ToKeyComparisonValue(values[i]));
         }
 
-        cmd.CommandText = $"""
-            SELECT id, data, version, schema_version
-            FROM document
-            WHERE scope = @scope AND tenant_id = @tenantId
-              AND document_type = @type{predicates}
-            LIMIT 2
-            """;
+        cmd.CommandText = BuildLoadByKeySql(metadata.Name, keyMetadata.ComponentSegments);
         AddScopeParameters(cmd, metadata.Name);
 
         var results = new List<DocumentResult<T>>();
@@ -1210,6 +1197,43 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
     /// developer-declared property names, not user input, but interpolation still demands
     /// the same identifier-pattern check before it happens).
     /// </summary>
+    /// <summary>
+    /// Builds the single/composite key lookup statement (parameters: <c>@scope</c>,
+    /// <c>@tenantId</c>, <c>@value0..n</c>). Internal so the EXPLAIN test runs this exact text.
+    /// </summary>
+    /// <remarks>
+    /// The JSON paths are interpolated as literals (validated), not bound as parameters:
+    /// SQLite only matches an expression index when the indexed expression is textually
+    /// identical to the query's — a bound @path defeats the declared-key index
+    /// (SqliteSpikeTests.JsonExtractIndex_NotUsed_WhenPathIsABoundParameter). The document
+    /// type is a literal for the same reason: key indexes are partial
+    /// (<c>WHERE document_type = '…'</c>) and the planner cannot match a partial index
+    /// against a bound parameter, falling back to the primary-key range plus a filter.
+    /// </remarks>
+    internal static string BuildLoadByKeySql(string documentType, IReadOnlyList<string[]> componentSegments)
+    {
+        var predicates = new StringBuilder();
+        for (var i = 0; i < componentSegments.Count; i++)
+        {
+            predicates.Append($" AND json_extract(data, '{ValidatedKeyJsonPath(componentSegments[i])}') = @value{i}");
+        }
+
+        return $"""
+            SELECT id, data, version, schema_version
+            FROM document
+            WHERE scope = @scope AND tenant_id = @tenantId
+              AND document_type = {ValidatedTypeLiteral(documentType)}{predicates}
+            LIMIT 2
+            """;
+    }
+
+    /// <summary>A validated, quoted document-type literal (see <see cref="BuildLoadByKeySql"/>).</summary>
+    internal static string ValidatedTypeLiteral(string documentType)
+    {
+        InputValidator.ValidateDocumentType(documentType);
+        return $"'{documentType}'";
+    }
+
     private static string ValidatedKeyJsonPath(KeyMetadata key) => ValidatedKeyJsonPath(key.PathSegments);
 
     private static string ValidatedKeyJsonPath(string[] segments)
