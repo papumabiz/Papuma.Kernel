@@ -13,6 +13,11 @@ Added:
   typed patch failures (see Fixed). They carry `DocumentType`, and `DocumentId`/`FieldPath` when the
   engine knows them.
 
+- **`LoadAllByKeyAsync`** on both sessions (ADR-026): all documents behind a declared key — single-field
+  or composite, unique or lookup — in ascending ordinal `id` order, paged with a required `limit`
+  (1 to `KeyMetadata.MaxLoadAllLimit`, 1000) and `afterId`. Scope-bound, transactional and clear-text like
+  `LoadByKeyAsync`; backed by the declared key's index on both engines (pinned by `EXPLAIN` tests). Closes
+  the gap that a `LookupKey` had an index and no read that returned its matches.
 - **Storage-neutral specification** in `docs/spec/` (diff, policies, patch) with language-neutral
   conformance vectors that run against PostgreSQL and SQLite. Repository only for now.
 - **`RunFeedWorkers`** on `PapumaKernelOptions` and `PapumaKernelLocalOptions` (default

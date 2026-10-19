@@ -451,7 +451,7 @@ non-superuser role via `Papuma.Kernel.Testing` (ADR-021), so they exercise it.
 | [003](adr/adr-003-write-path-concurrency.md) | Atomic write path with optimistic concurrency and RETURNING OLD/NEW | Accepted |
 | [004](adr/adr-004-changerecord-diff-only.md) | ChangeRecord stores a reversible diff, no snapshots | Accepted |
 | [005](adr/adr-005-schema-evolution.md) | Schema evolution via schema_version and upcasters | Accepted |
-| [006](adr/adr-006-keys-and-constraints.md) | Keys and constraints via metamodel and expression indexes | Accepted; amended by ADR-020 |
+| [006](adr/adr-006-keys-and-constraints.md) | Keys and constraints via metamodel and expression indexes | Accepted; amended by ADR-020, extended by ADR-026 |
 | [007](adr/adr-007-privacy-policies.md) | Privacy policies: attributes as defaults, fluent as override | Accepted; `Hash` algorithm superseded by ADR-025 |
 | [008](adr/adr-008-rollback-is-update.md) | Rollback is an update with metadata | Accepted |
 | [009](adr/adr-009-projections-as-dumb-handlers.md) | Projections as dumb change handlers | Accepted; ordering amended by ADR-022, extended by ADR-024 |
@@ -471,6 +471,7 @@ non-superuser role via `Papuma.Kernel.Testing` (ADR-021), so they exercise it.
 | [023](adr/adr-023-no-event-sourcing-mode.md) | No event-sourcing mode; stream-shaped aggregates as an application pattern | Accepted |
 | [024](adr/adr-024-projections-and-effect-handlers.md) | Projections are declared (`IProjection`: versioned rebuild, reset hook); effects can start at the head | Accepted |
 | [025](adr/adr-025-keyed-hash-policy.md) | The Hash policy is keyed and canonical (HMAC-SHA-256, a derived key per tenant, key-check value, fail closed) | Proposed |
+| [026](adr/adr-026-load-all-by-key.md) | `LoadAllByKeyAsync`: read all documents behind a declared key — bounded, ordinal id order, paged, index-backed | Accepted |
 
 ## 13. Recipes (tutorial precursors)
 

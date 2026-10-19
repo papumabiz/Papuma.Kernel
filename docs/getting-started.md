@@ -67,6 +67,11 @@ project), declare a **composite key** — `.UniqueKey(x => new { x.ProjectId, x.
 Like single-field keys, it is enforced only for documents that carry every
 component.
 
+A **lookup** key (not unique) matches many documents; read them with
+`LoadAllByKeyAsync<Message>(x => x.ThreadId, threadId, limit: 500)` — paged by `id`
+(`afterId` continues), ordinal order, the same transactional, scope-bound clear-text read as
+`LoadByKeyAsync` (ADR-026).
+
 ## 3. Writing — the session as unit of work
 
 ```csharp

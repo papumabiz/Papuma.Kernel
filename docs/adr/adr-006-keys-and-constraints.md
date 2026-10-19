@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted (2026-06-11) — amended by [ADR-020](adr-020-composite-keys.md) (composite keys)
+Accepted (2026-06-11) — amended by [ADR-020](adr-020-composite-keys.md) (composite keys),
+extended by [ADR-026](adr-026-load-all-by-key.md) (a read for all documents behind a key)
 
 ## Context
 

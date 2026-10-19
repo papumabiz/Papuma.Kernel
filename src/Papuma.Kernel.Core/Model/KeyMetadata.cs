@@ -16,6 +16,9 @@ public sealed record KeyMetadata(string Path, bool Unique, string IndexName)
     /// <summary>The separator between component paths of a composite key in <see cref="Path"/>.</summary>
     public const char ComponentSeparator = ',';
 
+    /// <summary>The largest page <c>LoadAllByKeyAsync</c> returns; there is no unbounded key read.</summary>
+    public const int MaxLoadAllLimit = 1000;
+
     /// <summary>Gets the component paths in declaration order — one entry for a single-field key.</summary>
     public IReadOnlyList<string> Paths { get; } = Path.Split(ComponentSeparator);
 

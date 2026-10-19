@@ -617,7 +617,8 @@ feed, without lag, index-backed via the declared key.
 the truth and the derived feed is policy-minimized and replayable, reach for the
 tools in this order and step down only when the one above genuinely does not fit:
 
-1. **A single document, current → `LoadAsync` / `LoadByKeyAsync`.** Reads the truth
+1. **A single document, current → `LoadAsync` / `LoadByKeyAsync`** — or the documents
+   behind one declared key, paged: `LoadAllByKeyAsync` (ADR-026). Reads the truth
    *now*, index-backed via a declared key, no feed, no lag. The normal case (a
    login check, business logic).
 2. **Anything derived — joins across documents, aggregations, alternative
