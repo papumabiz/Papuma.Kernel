@@ -50,6 +50,7 @@ This document is the entry map. The truth lives in the reference chain:
 | **Conditional patches do not exist** and will not be added. Whoever needs conditions: load + save with `expectedVersion`. | ADR-012 |
 | **Never write directly into `papuma.*` tables.** Reading via a view is a deliberate exception (the 4 conditions from concepts §16) — the default derived read is a projection. | ADR-002 |
 | Mass updates via `PatchWhereAsync`/`PatchManyAsync`/`DeleteWhereAsync` — not N sessions in a loop. | ADR-014 |
+| **One Papuma per database.** The `papuma` schema, the NOTIFY channel and the checkpoints are fixed per database; two applications in one database would share and corrupt each other's feeds. Several apps on one server = one database each; your own tables in a schema of their own. | architecture §4 |
 
 ## API quick map
 

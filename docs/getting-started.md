@@ -72,6 +72,13 @@ A **lookup** key (not unique) matches many documents; read them with
 (`afterId` continues), ordinal order, the same transactional, scope-bound clear-text read as
 `LoadByKeyAsync` (ADR-026).
 
+> **One Papuma per database.** The kernel owns the `papuma` schema of the database it connects
+> to — the name is fixed, as are the `papuma_changes` NOTIFY channel and the checkpoint rows —
+> so two applications in one database would share tables, handler names and tenants and wake
+> each other's feed workers. Give each application its **own database**; one PostgreSQL server
+> can host as many as you like. Your own tables (projection targets, read models) belong in the
+> same database but in a schema of their own ([recipe](recipes/same-database-read-models.md)).
+
 ## 3. Writing — the session as unit of work
 
 ```csharp

@@ -73,6 +73,10 @@ Fixed:
 
 Docs:
 
+- **One Papuma per database** is now stated where it matters (getting-started §2, architecture §4, the
+  playbook's hard rules and the agent snippet): the `papuma` schema, the `papuma_changes` NOTIFY channel
+  and the checkpoints are fixed per database, so each application gets its own database (one server can
+  host many); own tables go in a schema of their own.
 - **Recipe `backup-restore`**: what to back up, `pg_dump`/`pg_basebackup`, the restore
   checklist (cluster-bound transaction ids, external targets, erased data coming back),
   and replication — physical streaming replication yes, logical no, never read from a

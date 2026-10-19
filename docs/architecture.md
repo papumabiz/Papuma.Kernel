@@ -151,6 +151,14 @@ CREATE INDEX ix_papuma_change_txid ON papuma.change (txid);  -- slice reads, ADR
 Both tables carry row-level-security policies (including the `'All'` scope for
 workers and `FORCE ROW LEVEL SECURITY`); the binding DDL lives in `SchemaDdl.cs`.
 
+**One installation per database.** The schema is always called `papuma`, and the NOTIFY channel
+(`papuma_changes`), the checkpoints and the scope settings (`app.current_scope`,
+`app.current_tenant`) are per database as well, so one database holds exactly one Papuma
+installation and therefore one application's documents. Several applications on one
+PostgreSQL server get a database each; making the schema name and the channel configurable
+would be a possible extension, not something the kernel does today. (SQLite: one database
+file per store, one process.)
+
 Unique keys and lookup columns per document type are created as partial
 expression indexes from the metamodel (`SchemaManager.BuildKeyIndexDdl`) — one
 expression per key field, so a composite key (ADR-020) is one multi-column index:

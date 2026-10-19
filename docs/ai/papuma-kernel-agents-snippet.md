@@ -57,6 +57,9 @@ derived automatically. NOT event sourcing, NOT an ORM, NO query DSL.
    mechanism. Own tables in the same database (projection targets) get RLS via
    `papuma.scope_visible`/`papuma.scope_writable` — never copy the setting names.
 10. Never write directly into `papuma.*` tables or alter their schema.
+    One Papuma installation per **database** (fixed `papuma` schema, one NOTIFY channel): never
+    point two applications at the same database — give each its own; own tables go in a schema
+    of their own.
 11. Integration tests: `Papuma.Kernel.Testing` — stores and processors on
     `AppDataSource` (non-superuser, RLS applies), `processor.DrainAsync()` to run
     handlers; a fresh tenant per test.
