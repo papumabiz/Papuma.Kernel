@@ -174,8 +174,8 @@ after a leak is the response.
   application ([gdpr.md](../gdpr.md)), not something the kernel promises.
 - **Neutral:** Cost is one HKDF per (tenant, type) — cacheable — and one HMAC per hashed
   field per write; negligible next to the write.
-- **Neutral:** Removing the weak `v1` hashes from history is a separate, explicit act, proposed in
-  [ADR-027](adr-027-strip-legacy-hashes.md): it reduces them to `{ "changed": true }` without needing
+- **Neutral:** Removing the weak `v1` hashes from history is a separate, explicit act, designed and
+  deferred in [ADR-027](adr-027-strip-legacy-hashes.md) (no production database holds v1 history yet): it reduces them to `{ "changed": true }` without needing
   the values.
 
 ## Alternatives considered

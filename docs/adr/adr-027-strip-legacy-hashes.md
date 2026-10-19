@@ -2,9 +2,9 @@
 
 ## Status
 
-Proposed (2026-10-19) — extends [ADR-015](adr-015-gdpr-tooling.md) (history redaction) for one
-specific, known-weak kind of data left behind by [ADR-025](adr-025-keyed-hash-policy.md). Both
-kernels, the change feed and the event log. Not implemented.
+Deferred (2026-10-19) — designed, not built, and not needed yet: see "When to build it". Extends
+[ADR-015](adr-015-gdpr-tooling.md) (history redaction) for one specific, known-weak kind of data left
+behind by [ADR-025](adr-025-keyed-hash-policy.md). Both kernels, the change feed and the event log.
 
 ## Context
 
@@ -25,7 +25,16 @@ selector (`userId = X`), not "every event of this type".
 
 The need is a **one-time, deliberate sweep** after the upgrade, not a routine operation.
 
-## Decision
+## When to build it
+
+Not now. When ADR-025 landed, the kernel was in use only by applications still in development, so
+every v1 hash lives in a development database, which is reset or rebuilt rather than cleaned — cheaper
+and safer than any kernel tool. The trigger to build this ADR is objective: **a production database
+that holds v1 hashes of personal data** (a `[TrackHash]` field with low-entropy values written before
+the keyed hash) and cannot simply be recreated. Until then the section below is the prepared answer,
+not a plan. If no such database ever exists, this ADR stays as the record of why there is no cleanup.
+
+## Decision (as designed, for when the trigger occurs)
 
 ### 1. Two explicit operations, not an automatic migration
 
