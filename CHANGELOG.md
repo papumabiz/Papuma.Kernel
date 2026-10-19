@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+Changed:
+
+- **Samples:** the NATS bridge moved out of `shop-minimal-api` into its own worker sample
+  `shop-nats-bridge` (same database, separate process). The shop no longer depends on `NATS.Net`.
+
 Added:
 
 - **`RunFeedWorkers`** on `PapumaKernelOptions` and `PapumaKernelLocalOptions` (default

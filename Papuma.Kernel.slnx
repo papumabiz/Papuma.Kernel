@@ -9,12 +9,14 @@
     <Project Path="src/Papuma.Kernel.Testing/Papuma.Kernel.Testing.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Papuma.Kernel.Core.Tests/Papuma.Kernel.Core.Tests.csproj" />
     <Project Path="tests/Papuma.Kernel.Tests/Papuma.Kernel.Tests.csproj" />
     <Project Path="tests/Papuma.Kernel.Local.Tests/Papuma.Kernel.Local.Tests.csproj" />
     <Project Path="tests/Papuma.Kernel.FSharp.Tests/Papuma.Kernel.FSharp.Tests.fsproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/shop-minimal-api/ShopMinimalApi.csproj" />
+    <Project Path="samples/shop-nats-bridge/ShopNatsBridge.csproj" />
     <Project Path="samples/event-modeled-slices/EventModeledSlices.csproj" />
     <Project Path="samples/event-modeled-slices/tests/EventModeledSlices.Tests.csproj" />
     <Project Path="samples/fsharp-local-todo/fsharp-local-todo.fsproj" />

@@ -1,8 +1,10 @@
 # Recipe: The NATS bridge — publishing the feeds to JetStream
 
-Status: verified against running code (2026-06-12) — the bridge lives in the
-sample ([NatsBridge.cs](https://github.com/papumabiz/Papuma.Kernel/blob/master/samples/shop-minimal-api/Handlers/NatsBridge.cs),
-NATS.Net 2.8.1) and was proven end-to-end including the dedup behavior below.
+Status: verified against running code (2026-06-12, re-verified after the move into
+its own process) — the bridge lives in its own sample
+([shop-nats-bridge](https://github.com/papumabiz/Papuma.Kernel/tree/master/samples/shop-nats-bridge),
+NATS.Net 2.8.1), a worker process next to the shop that shares its database, and
+was proven end-to-end including the dedup behavior below.
 Background: [concepts §22](../concepts.md) ("the feed is the outbox").
 
 ## The shape: two dumb handlers, nothing else
@@ -36,7 +38,7 @@ public sealed class NatsChangePublisher(INatsJSContext jetStream) : IChangeHandl
 }
 ```
 
-Wiring (sample: optional via `Nats:Url`):
+Wiring (sample: a dedicated worker, `Nats:Url` required):
 
 ```csharp
 builder.Services.AddSingleton(_ => new NatsConnection(new NatsOpts { Url = natsUrl }));
@@ -100,7 +102,8 @@ nats consumer add PAPUMA shop-sync --filter "papuma.change.demo.>" \
 
 ```bash
 docker run -d --name nats -p 4222:4222 -p 8222:8222 nats:latest -js -m 8222
-Nats__Url=nats://127.0.0.1:4222 dotnet run --project samples/shop-minimal-api
+dotnet run --project samples/shop-minimal-api      # the shop (needs PostgreSQL, see its README)
+Nats__Url=nats://127.0.0.1:4222 dotnet run --project samples/shop-nats-bridge   # second terminal
 # place orders, then inspect: curl -s localhost:8222/jsz?streams=true | jq
 ```
 

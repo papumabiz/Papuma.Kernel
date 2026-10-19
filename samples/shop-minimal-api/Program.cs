@@ -4,10 +4,6 @@
 // The Papuma.Kernel sample shop — every kernel concept as running code.
 // Walkthrough in README.md; the workflow story in docs/recipes/workflow-saga.md.
 
-using NATS.Client.Core;
-using NATS.Client.JetStream;
-using NATS.Net;
-
 using Papuma.Kernel.AspNetCore.Dashboard;
 using Papuma.Kernel.AspNetCore.Processing;
 using Papuma.Kernel.AspNetCore.Tenancy;
@@ -39,7 +35,7 @@ if (managementPort is int mgmtListenPort)
 }
 
 // ── Kernel bootstrap: model, schema, feed workers (getting-started §2) ─────────
-var kernel = builder.Services
+builder.Services
     .AddPapumaKernel(o =>
     {
         o.ConnectionString = builder.Configuration.GetConnectionString("papuma")
@@ -61,20 +57,6 @@ var kernel = builder.Services
     })
     .AddChangeHandler<OrderWorkflowHandler>()   // the saga (concepts §18)
     .AddChangeHandler<OrderUiNotifier>();       // the realtime push recipe
-
-// ── Optional NATS bridge (recipe: nats-bridge, concepts §22) ────────────────────
-// Set Nats:Url (e.g. nats://localhost:4222) to publish the feeds to JetStream;
-// without it the sample runs unchanged. The bridge is just two more dumb handlers.
-if (builder.Configuration["Nats:Url"] is { Length: > 0 } natsUrl)
-{
-    builder.Services.AddSingleton(_ => new NatsConnection(new NatsOpts { Url = natsUrl }));
-    builder.Services.AddSingleton<INatsJSContext>(sp =>
-        sp.GetRequiredService<NatsConnection>().CreateJetStreamContext());
-    builder.Services.AddHostedService<NatsStreamInitializer>();
-    kernel
-        .AddChangeHandler<NatsChangePublisher>()
-        .AddEventHandler<NatsEventPublisher>();
-}
 
 builder.Services.AddPapumaScope<DemoScopeResolver>();
 builder.Services.AddHostedService<ApprovalEscalationService>(); // the timer primitive
