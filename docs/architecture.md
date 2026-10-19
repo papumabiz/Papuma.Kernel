@@ -480,6 +480,7 @@ non-superuser role via `Papuma.Kernel.Testing` (ADR-021), so they exercise it.
 | [024](adr/adr-024-projections-and-effect-handlers.md) | Projections are declared (`IProjection`: versioned rebuild, reset hook); effects can start at the head | Accepted |
 | [025](adr/adr-025-keyed-hash-policy.md) | The Hash policy is keyed and canonical (HMAC-SHA-256, a derived key per tenant, key-check value, fail closed) | Proposed |
 | [026](adr/adr-026-load-all-by-key.md) | `LoadAllByKeyAsync`: read all documents behind a declared key — bounded, ordinal id order, paged, index-backed | Accepted |
+| [027](adr/adr-027-strip-legacy-hashes.md) | Removing legacy v1 hashes from history: an explicit, resumable sweep (documents and events) | Proposed |
 
 ## 13. Recipes (tutorial precursors)
 
