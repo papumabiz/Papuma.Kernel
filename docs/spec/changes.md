@@ -13,7 +13,11 @@ that carries the result. Background and rationale: [ADR-002](../adr/adr-002-docu
 A document is a JSON **object**. Its identity is `(scope, tenantId, documentType, documentId)`.
 `documentType` is a logical name declared in the metamodel — an implementation MUST
 NOT derive it from a language-specific type name that the other implementations
-cannot reproduce. Each write increments `version` by exactly one, starting at 1.
+cannot reproduce.
+Logical names MUST be unique among the document types of one model, and among its event types,
+compared case-insensitively (key index names are derived from the lower-cased name); a model that
+registers two types with the same name MUST be rejected when it is built. The .NET kernel currently
+derives the name from the simple class name and enforces this uniqueness. Each write increments `version` by exactly one, starting at 1.
 
 For diffing, an *absent* document (before an insert, after a delete) is
 equivalent to the empty object: every top-level field is reported as added

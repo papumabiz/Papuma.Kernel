@@ -91,7 +91,37 @@ public sealed class KernelModelBuilder
             eventsByType[clrType] = builder.Build();
         }
 
+        EnsureUniqueNames("Document", byType.Select(p => (p.Key, p.Value.Name)));
+        EnsureUniqueNames("Event", eventsByType.Select(p => (p.Key, p.Value.Name)));
+
         return new KernelModel(byType, eventsByType);
+    }
+
+    /// <summary>
+    /// Fails when two registered types share a logical name. The name is the <c>document_type</c> /
+    /// <c>event_type</c> of every stored row, so two CLR types with the same simple name (in different
+    /// namespaces, or nested in different classes) would silently share rows, ids and keys. Names are
+    /// compared <b>case-insensitively</b>: the key index names are lower-cased, so two names that differ
+    /// only in case would get the same index name and the second index would never be created.
+    /// </summary>
+    private static void EnsureUniqueNames(string kind, IEnumerable<(Type ClrType, string Name)> types)
+    {
+        var seen = new Dictionary<string, (Type ClrType, string Name)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (clrType, name) in types)
+        {
+            if (seen.TryGetValue(name, out var other))
+            {
+                var detail = string.Equals(other.Name, name, StringComparison.Ordinal)
+                    ? $"both map to the logical name '{name}'"
+                    : $"map to the logical names '{other.Name}' and '{name}', which differ only in case";
+                throw new InvalidOperationException(
+                    $"{kind} types {other.ClrType.FullName} and {clrType.FullName} {detail}. " +
+                    "The name is stored in every row (and key index names are lower-cased), so two types may not share it. " +
+                    "Rename one of the classes.");
+            }
+
+            seen[name] = (clrType, name);
+        }
     }
 
     private interface IDocumentTypeBuilder
