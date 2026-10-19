@@ -92,14 +92,16 @@ from. A foreign consumer MUST treat them as "this field changed", nothing more.
 
 ### Hash policy (v1) is not yet normative
 
-Today the `hash` is the lowercase hex SHA-256 of the UTF-8 bytes of the new value's
-JSON text as produced by .NET's `System.Text.Json` (`"b"` for a string, `42` for a
-number, `null` for JSON null). That is **not canonical** — object key order,
-escaping and number formatting are serializer-specific — and it is **unsalted**,
-so low-entropy values can be recovered by dictionary attack. It is pinned by the
-`legacy-v1` vectors only for scalars, where the JSON text is unambiguous. A keyed,
-canonical successor is planned (roadmap phase 2); until then an implementation
-SHOULD NOT hash object or array values.
+[ADR-025](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/adr/adr-025-keyed-hash-policy.md)
+replaces the hash with a keyed, canonical one, specified in [canonical-json.md](canonical-json.md)
+(`v2:<kid>:<hex>`). Until the kernels are switched over, the **v1** hash is what they write: the
+lowercase hex SHA-256 of the UTF-8 bytes of the new value's JSON text as produced by .NET's
+`System.Text.Json` (`"b"` for a string, `42` for a number, `null` for JSON null). That is **not
+canonical** — object key order, escaping and number formatting are serializer-specific — and it
+is **unsalted**, so low-entropy values can be recovered by dictionary attack. The `legacy-v1`
+policy vectors pin it for scalars only, where the JSON text is unambiguous. After the switch-over
+v1 values are **read-only**: they stay in existing records, are never produced again, and a
+consumer treats a hash as an opaque string and compares only hashes of the same form.
 
 ## 4. Change record
 
@@ -142,11 +144,12 @@ Kept here so they are not lost; each is also in the roadmap.
 
 ## 7. Open points (not normative yet)
 
-- Canonical JSON (key order, string escaping, number form) — needed by the keyed hash.
-- Number range limits: equality is by value (§2.4), but no maximum magnitude or
-  digit count is specified (`1e400` is accepted today). Whether and where to cap
-  them is open.
-- The patch operation catalog (set, increment, …) and its exact semantics.
+- Number range outside the hash: equality is by value (§2.4), and the canonical form used by
+  the hash caps a number's canonical text at 1024 characters ([canonical-json.md](canonical-json.md#12-numbers)),
+  but documents themselves accept `1e400` and larger. Whether to cap them there is open.
 - Ordering and delivery as a stand-alone chapter, including what a local, single
   writer store may promise beyond what a concurrent one can.
 - The event log record and its payload policies.
+
+(Resolved since the first draft: the patch operation catalog is in [patch.md](patch.md), canonical
+JSON and the keyed hash in [canonical-json.md](canonical-json.md).)

@@ -1,0 +1,223 @@
+{
+  "spec": "papuma-changes",
+  "version": "0.1",
+  "kind": "canonical",
+  "description": "Canonical JSON (docs/spec/canonical-json.md): canonical(parse(inputJson)) must equal 'canonical', or fail with 'error'. inputJson is raw JSON text because number text matters.",
+  "cases": [
+    {
+      "name": "null",
+      "inputJson": "null",
+      "canonical": "null"
+    },
+    {
+      "name": "true",
+      "inputJson": "true",
+      "canonical": "true"
+    },
+    {
+      "name": "false",
+      "inputJson": "false",
+      "canonical": "false"
+    },
+    {
+      "name": "empty-string",
+      "inputJson": "\"\"",
+      "canonical": "\"\""
+    },
+    {
+      "name": "string-quote-and-backslash",
+      "inputJson": "\"a\\\"b\\\\c\"",
+      "canonical": "\"a\\\"b\\\\c\""
+    },
+    {
+      "name": "string-short-escapes",
+      "inputJson": "\"\\b\\t\\n\\f\\r\"",
+      "canonical": "\"\\b\\t\\n\\f\\r\""
+    },
+    {
+      "name": "string-other-control-characters-use-lowercase-hex",
+      "inputJson": "\"\\u0001\\u001f\\u007f\"",
+      "canonical": "\"\\u0001\\u001f\""
+    },
+    {
+      "name": "string-slash-is-not-escaped",
+      "inputJson": "\"a\\/b\"",
+      "canonical": "\"a/b\""
+    },
+    {
+      "name": "string-non-ascii-is-literal",
+      "inputJson": "\"Köln\"",
+      "canonical": "\"Köln\""
+    },
+    {
+      "name": "string-non-bmp-is-literal",
+      "inputJson": "\"😀\"",
+      "canonical": "\"😀\""
+    },
+    {
+      "name": "string-line-separator-is-literal",
+      "inputJson": "\" \"",
+      "canonical": "\" \""
+    },
+    {
+      "name": "number-zero",
+      "inputJson": "0",
+      "canonical": "0"
+    },
+    {
+      "name": "number-negative-zero",
+      "inputJson": "-0",
+      "canonical": "0"
+    },
+    {
+      "name": "number-zero-with-fraction",
+      "inputJson": "-0.0",
+      "canonical": "0"
+    },
+    {
+      "name": "number-zero-with-exponent",
+      "inputJson": "0e5",
+      "canonical": "0"
+    },
+    {
+      "name": "number-integer",
+      "inputJson": "42",
+      "canonical": "42"
+    },
+    {
+      "name": "number-integer-with-fraction-zero",
+      "inputJson": "1.0",
+      "canonical": "1"
+    },
+    {
+      "name": "number-exponent-zero",
+      "inputJson": "1e0",
+      "canonical": "1"
+    },
+    {
+      "name": "number-exponent-grows-integer",
+      "inputJson": "1E2",
+      "canonical": "100"
+    },
+    {
+      "name": "number-trailing-zero",
+      "inputJson": "0.10",
+      "canonical": "0.1"
+    },
+    {
+      "name": "number-negative-decimal",
+      "inputJson": "-1.5",
+      "canonical": "-1.5"
+    },
+    {
+      "name": "number-exponent-shifts-into-fraction",
+      "inputJson": "1.5e-3",
+      "canonical": "0.0015"
+    },
+    {
+      "name": "number-exponent-shifts-out-of-fraction",
+      "inputJson": "1.23e2",
+      "canonical": "123"
+    },
+    {
+      "name": "number-fraction-shifted-by-exponent",
+      "inputJson": "123e-2",
+      "canonical": "1.23"
+    },
+    {
+      "name": "number-small",
+      "inputJson": "0.000001",
+      "canonical": "0.000001"
+    },
+    {
+      "name": "number-large-exponent-is-expanded",
+      "inputJson": "1e21",
+      "canonical": "1000000000000000000000"
+    },
+    {
+      "name": "number-at-the-length-limit",
+      "inputJson": "1e1023",
+      "canonical": "1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "name": "number-fraction-at-the-length-limit",
+      "inputJson": "1e-1022",
+      "canonical": "0.00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001"
+    },
+    {
+      "name": "number-beyond-int64",
+      "inputJson": "12345678901234567890",
+      "canonical": "12345678901234567890"
+    },
+    {
+      "name": "number-beyond-double-precision",
+      "inputJson": "0.10000000000000001",
+      "canonical": "0.10000000000000001"
+    },
+    {
+      "name": "array-empty",
+      "inputJson": "[]",
+      "canonical": "[]"
+    },
+    {
+      "name": "object-empty",
+      "inputJson": "{}",
+      "canonical": "{}"
+    },
+    {
+      "name": "array-keeps-order",
+      "inputJson": "[3,1,2]",
+      "canonical": "[3,1,2]"
+    },
+    {
+      "name": "object-keys-are-sorted",
+      "inputJson": "{\"b\":1,\"a\":2,\"B\":3}",
+      "canonical": "{\"B\":3,\"a\":2,\"b\":1}"
+    },
+    {
+      "name": "object-keys-sort-by-utf16-code-units",
+      "inputJson": "{\"\\uffff\":1,\"\\ud83d\\ude00\":2}",
+      "canonical": "{\"😀\":2,\"￿\":1}"
+    },
+    {
+      "name": "nested",
+      "inputJson": "{\"b\":[1,{\"y\":2,\"x\":1.0}],\"a\":null}",
+      "canonical": "{\"a\":null,\"b\":[1,{\"x\":1,\"y\":2}]}"
+    },
+    {
+      "name": "whitespace-is-dropped",
+      "inputJson": " { \"a\" : [ 1 , 2 ] } ",
+      "canonical": "{\"a\":[1,2]}"
+    },
+    {
+      "name": "number-too-large",
+      "inputJson": "1e5000",
+      "error": "number-too-large"
+    },
+    {
+      "name": "number-too-large-negative-exponent",
+      "inputJson": "1e-5000",
+      "error": "number-too-large"
+    },
+    {
+      "name": "number-exponent-without-bound",
+      "inputJson": "1e99999999999999999999",
+      "error": "number-too-large"
+    },
+    {
+      "name": "number-limit-is-exceeded-by-one-character",
+      "inputJson": "1e1024",
+      "error": "number-too-large"
+    },
+    {
+      "name": "number-limit-counts-the-sign",
+      "inputJson": "-1e1023",
+      "error": "number-too-large"
+    },
+    {
+      "name": "number-limit-counts-leading-zeros-of-a-fraction",
+      "inputJson": "1e-1023",
+      "error": "number-too-large"
+    }
+  ]
+}

@@ -1,0 +1,122 @@
+{
+  "spec": "papuma-changes",
+  "version": "0.1",
+  "kind": "hash",
+  "description": "Hash policy v2 (ADR-025, docs/spec/canonical-json.md): key derivation, hash values and the key-check value, for the fixed test master key.",
+  "masterKeyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "kid": "test",
+  "hkdfSalt": "papuma-hash-v2",
+  "keys": [
+    {
+      "tenantId": "acme",
+      "typeName": "User",
+      "tenantKeyHex": "7e1a31a27798cbe2dd7ae272900be85e7d1da1227019b2b82964ec4601b769f5"
+    },
+    {
+      "tenantId": "",
+      "typeName": "User",
+      "tenantKeyHex": "482c23fefa277c3c9581764b69c7977e02062f1c1a19feafa01d13397e53fbeb"
+    },
+    {
+      "tenantId": "acme",
+      "typeName": "Order",
+      "tenantKeyHex": "495c656c0b88965a3495456cc14fddd4c9b30150ebd0db3bd1479143f0a04a8f"
+    },
+    {
+      "tenantId": "globex",
+      "typeName": "User",
+      "tenantKeyHex": "ae253c6f3ed8e0aca0e647ad8ea2d3d562749f5a93b0e18cdd23d7abfb427368"
+    },
+    {
+      "tenantId": "",
+      "typeName": "papuma:key-check",
+      "tenantKeyHex": "14dffd31e70159fc525a68b0c19d1e965f45df80a38f39ee87c7f2361b4b1ed5"
+    }
+  ],
+  "hashes": [
+    {
+      "name": "string",
+      "tenantId": "acme",
+      "typeName": "User",
+      "valueJson": "\"b\"",
+      "canonical": "\"b\"",
+      "hash": "v2:test:ad8524f83712ab5c9ea5154f89e0fd1f5067969a609f8f9cc0430ce6e05c532d"
+    },
+    {
+      "name": "number-by-value-integer-form",
+      "tenantId": "acme",
+      "typeName": "User",
+      "valueJson": "42",
+      "canonical": "42",
+      "hash": "v2:test:892a8d034a76fe06701b13e50410d81ae47c69e1e9401d7d4a81e84e88b12583"
+    },
+    {
+      "name": "number-by-value-decimal-form",
+      "tenantId": "acme",
+      "typeName": "User",
+      "valueJson": "42.0",
+      "canonical": "42",
+      "hash": "v2:test:892a8d034a76fe06701b13e50410d81ae47c69e1e9401d7d4a81e84e88b12583"
+    },
+    {
+      "name": "number-by-value-exponent-form",
+      "tenantId": "acme",
+      "typeName": "User",
+      "valueJson": "4.2e1",
+      "canonical": "42",
+      "hash": "v2:test:892a8d034a76fe06701b13e50410d81ae47c69e1e9401d7d4a81e84e88b12583"
+    },
+    {
+      "name": "null",
+      "tenantId": "acme",
+      "typeName": "User",
+      "valueJson": "null",
+      "canonical": "null",
+      "hash": "v2:test:c28a854a655d8a5e415287b9b4735e5a1376f1e2188ef929ab8761319dc899eb"
+    },
+    {
+      "name": "object-key-order-is-irrelevant-a",
+      "tenantId": "acme",
+      "typeName": "User",
+      "valueJson": "{\"x\":1,\"y\":2}",
+      "canonical": "{\"x\":1,\"y\":2}",
+      "hash": "v2:test:c3d92c732974125d06a62279efb9d6a8801d84e6580bb55298b65de8b00f16dc"
+    },
+    {
+      "name": "object-key-order-is-irrelevant-b",
+      "tenantId": "acme",
+      "typeName": "User",
+      "valueJson": "{\"y\":2,\"x\":1}",
+      "canonical": "{\"x\":1,\"y\":2}",
+      "hash": "v2:test:c3d92c732974125d06a62279efb9d6a8801d84e6580bb55298b65de8b00f16dc"
+    },
+    {
+      "name": "another-tenant",
+      "tenantId": "globex",
+      "typeName": "User",
+      "valueJson": "\"b\"",
+      "canonical": "\"b\"",
+      "hash": "v2:test:fec23d6a3f337661b5d7a63b158943db5c0edf5e2c7d9470224101a61963be8a"
+    },
+    {
+      "name": "another-type",
+      "tenantId": "acme",
+      "typeName": "Order",
+      "valueJson": "\"b\"",
+      "canonical": "\"b\"",
+      "hash": "v2:test:4eceefa91f50daae379e792176cc377706f278fef07c7e4ed97f7b34e8af3b8b"
+    },
+    {
+      "name": "platform-scope",
+      "tenantId": "",
+      "typeName": "User",
+      "valueJson": "\"b\"",
+      "canonical": "\"b\"",
+      "hash": "v2:test:dbc7a6b5b1f5d311214408c0a6538abdf505d5eba9f27813e51bc614275dbad6"
+    }
+  ],
+  "keyCheck": {
+    "kid": "test",
+    "checkValue": "660ce59ef9e2b24acfb8dbd3641aebc94f04082d0ad96516b55def6b6efb3203"
+  }
+}
