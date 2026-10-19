@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="10.0.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!-- Core only, deliberately: no database, no container, no session. These tests prove the
+       storage-neutral logic (diff, policies, patch semantics) shared by every kernel needs
+       nothing but this assembly, and give the conformance vectors a millisecond runner. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Papuma.Kernel.Core\Papuma.Kernel.Core.csproj" />
+  </ItemGroup>
+
+</Project>

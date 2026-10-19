@@ -87,3 +87,15 @@ writers that do not even touch the same fields.
   savepoint rollback — the atomic conditional decrement without retry loops
   (concepts §17). That is not a catalog extension but a composition of existing
   primitives.
+- **Clarification (2026-10-19):** the semantics of a patch are now fixed by the
+  shared conformance vectors (`docs/spec/patch.md`), not by either engine's
+  implementation. (1) Operations apply **in order**, each seeing the previous result;
+  PostgreSQL used to read the stored value for `Increment`, which lost an update when a
+  patch touched one field twice. (2) `Increment` works on absent, JSON `null` or a JSON
+  number only; anything else throws `NonNumericIncrementException` instead of being
+  overwritten (SQLite) or coerced (PostgreSQL, numeric strings). (3) `Set` and
+  `Increment` never create or replace a parent: below a missing or non-object parent
+  they throw `PatchTargetMissingException` and roll back, on both engines (this replaces
+  the earlier "parent objects must already exist" with a silent no-op on PostgreSQL).
+  `Remove` stays a no-op. PostgreSQL enforces (3) in-process against the `old.data` its
+  statement already returns — still one roundtrip, no prior load.

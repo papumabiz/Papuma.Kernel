@@ -108,12 +108,17 @@ internal static class JsonPathResolver
     {
         var explicitName = property
             .GetCustomAttribute<System.Text.Json.Serialization.JsonPropertyNameAttribute>()?.Name;
-        if (explicitName is not null)
-        {
-            return explicitName;
-        }
+        var name = explicitName
+            ?? KernelJson.Options.PropertyNamingPolicy?.ConvertName(property.Name)
+            ?? property.Name;
 
-        return KernelJson.Options.PropertyNamingPolicy?.ConvertName(property.Name) ?? property.Name;
+        // Diff, policy, key and patch paths are dot-separated, so a dot inside a name would be
+        // ambiguous; the diff engine rejects such keys on the first save — fail at model build.
+        return name.Contains('.', StringComparison.Ordinal)
+            ? throw new NotSupportedException(
+                $"Property {property.DeclaringType?.Name}.{property.Name} serializes as '{name}', which contains '.'. " +
+                "Paths are dot-separated, so names containing dots are not supported; rename the JSON property.")
+            : name;
     }
 
     // Strips the boxing a lambda to object introduces: C# emits Convert, F# emits a call to

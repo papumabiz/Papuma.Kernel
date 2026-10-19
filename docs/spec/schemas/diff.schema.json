@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/papumabiz/Papuma.Kernel/docs/spec/schemas/diff.schema.json",
+  "title": "Papuma document diff (wire format)",
+  "description": "A policy-applied, field-level diff keyed by dot-separated JSON path. See docs/spec/changes.md.",
+  "type": "object",
+  "propertyNames": {
+    "description": "Dot-separated path; no empty segments. Object keys that themselves contain '.' cannot be represented and are rejected when the diff is computed.",
+    "pattern": "^[^.]+(\\.[^.]+)*$"
+  },
+  "additionalProperties": { "$ref": "#/$defs/entry" },
+  "$defs": {
+    "entry": {
+      "oneOf": [
+        { "$ref": "#/$defs/tracked" },
+        { "$ref": "#/$defs/redacted" },
+        { "$ref": "#/$defs/reference" },
+        { "$ref": "#/$defs/hashed" }
+      ]
+    },
+    "tracked": {
+      "description": "Values recorded verbatim. Key presence encodes field existence; the value may be JSON null.",
+      "type": "object",
+      "anyOf": [{ "required": ["old"] }, { "required": ["new"] }],
+      "properties": { "old": true, "new": true },
+      "additionalProperties": false
+    },
+    "redacted": {
+      "description": "Redact policy: the field changed, values withheld.",
+      "type": "object",
+      "required": ["changed"],
+      "properties": { "changed": { "const": true } },
+      "additionalProperties": false
+    },
+    "reference": {
+      "description": "Reference policy: pointer to the value's location, no value.",
+      "type": "object",
+      "required": ["ref"],
+      "properties": { "ref": { "type": "string", "minLength": 1 } },
+      "additionalProperties": false
+    },
+    "hashed": {
+      "description": "Hash policy: change marker plus a hash of the new value; 'hash' is absent when the field was removed.",
+      "type": "object",
+      "required": ["changed"],
+      "properties": {
+        "changed": { "const": true },
+        "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

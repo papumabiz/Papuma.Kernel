@@ -1,0 +1,251 @@
+{
+  "spec": "papuma-changes",
+  "version": "0.1",
+  "kind": "patch",
+  "description": "Patch vectors: applying 'ops' in order to 'before' must yield 'after', or fail with 'error'. Paths are arrays of object keys. See docs/spec/patch.md.",
+  "cases": [
+    {
+      "name": "set-replaces-existing-scalar",
+      "before": { "name": "Harry", "city": "Bonn" },
+      "ops": [{ "op": "set", "path": ["name"], "value": "Harald" }],
+      "after": { "name": "Harald", "city": "Bonn" }
+    },
+    {
+      "name": "set-adds-a-missing-leaf",
+      "before": { "name": "Harry" },
+      "ops": [{ "op": "set", "path": ["email"], "value": "x@y.z" }],
+      "after": { "name": "Harry", "email": "x@y.z" }
+    },
+    {
+      "name": "set-null-stores-json-null",
+      "before": { "email": "x@y.z" },
+      "ops": [{ "op": "set", "path": ["email"], "value": null }],
+      "after": { "email": null }
+    },
+    {
+      "name": "set-replaces-a-whole-object",
+      "before": { "address": { "city": "Bonn", "zip": "53111" } },
+      "ops": [{ "op": "set", "path": ["address"], "value": { "city": "Köln" } }],
+      "after": { "address": { "city": "Köln" } }
+    },
+    {
+      "name": "set-replaces-an-array-atomically",
+      "before": { "roles": ["user", "admin"] },
+      "ops": [{ "op": "set", "path": ["roles"], "value": ["user"] }],
+      "after": { "roles": ["user"] }
+    },
+    {
+      "name": "set-nested-field-with-existing-parent",
+      "before": { "address": { "city": "Bonn", "zip": "53111" } },
+      "ops": [{ "op": "set", "path": ["address", "city"], "value": "Köln" }],
+      "after": { "address": { "city": "Köln", "zip": "53111" } }
+    },
+    {
+      "name": "set-with-missing-parent-fails",
+      "before": { "name": "Harry" },
+      "ops": [{ "op": "set", "path": ["address", "city"], "value": "Bonn" }],
+      "error": "parent-missing"
+    },
+    {
+      "name": "set-through-a-scalar-parent-fails",
+      "before": { "address": "Bonn" },
+      "ops": [{ "op": "set", "path": ["address", "city"], "value": "Bonn" }],
+      "error": "parent-missing"
+    },
+    {
+      "name": "set-below-a-null-parent-fails",
+      "before": { "address": null },
+      "ops": [{ "op": "set", "path": ["address", "city"], "value": "Bonn" }],
+      "error": "parent-missing"
+    },
+    {
+      "name": "set-below-an-array-parent-fails",
+      "before": { "address": [] },
+      "ops": [{ "op": "set", "path": ["address", "city"], "value": "Bonn" }],
+      "error": "parent-missing"
+    },
+    {
+      "name": "set-the-parent-first-then-the-child",
+      "before": { "name": "Harry" },
+      "ops": [
+        { "op": "set", "path": ["address"], "value": {} },
+        { "op": "set", "path": ["address", "city"], "value": "Bonn" }
+      ],
+      "after": { "name": "Harry", "address": { "city": "Bonn" } }
+    },
+    {
+      "name": "removing-the-parent-then-setting-the-child-fails",
+      "before": { "address": { "city": "Bonn" } },
+      "ops": [
+        { "op": "remove", "path": ["address"] },
+        { "op": "set", "path": ["address", "city"], "value": "Köln" }
+      ],
+      "error": "parent-missing"
+    },
+    {
+      "name": "remove-deletes-a-field",
+      "before": { "name": "Harry", "nick": "H" },
+      "ops": [{ "op": "remove", "path": ["nick"] }],
+      "after": { "name": "Harry" }
+    },
+    {
+      "name": "remove-deletes-a-subtree",
+      "before": { "address": { "city": "Bonn" }, "name": "Harry" },
+      "ops": [{ "op": "remove", "path": ["address"] }],
+      "after": { "name": "Harry" }
+    },
+    {
+      "name": "remove-nested-field",
+      "before": { "address": { "city": "Bonn", "zip": "53111" } },
+      "ops": [{ "op": "remove", "path": ["address", "zip"] }],
+      "after": { "address": { "city": "Bonn" } }
+    },
+    {
+      "name": "remove-missing-field-is-a-noop",
+      "before": { "name": "Harry" },
+      "ops": [{ "op": "remove", "path": ["nick"] }],
+      "after": { "name": "Harry" }
+    },
+    {
+      "name": "remove-with-missing-parent-is-a-noop",
+      "before": { "name": "Harry" },
+      "ops": [{ "op": "remove", "path": ["address", "zip"] }],
+      "after": { "name": "Harry" }
+    },
+    {
+      "name": "increment-existing-integer",
+      "before": { "count": 5 },
+      "ops": [{ "op": "increment", "path": ["count"], "by": 2 }],
+      "after": { "count": 7 }
+    },
+    {
+      "name": "increment-negative",
+      "before": { "count": 5 },
+      "ops": [{ "op": "increment", "path": ["count"], "by": -8 }],
+      "after": { "count": -3 }
+    },
+    {
+      "name": "increment-missing-field-counts-as-zero",
+      "before": { "name": "Harry" },
+      "ops": [{ "op": "increment", "path": ["count"], "by": 3 }],
+      "after": { "name": "Harry", "count": 3 }
+    },
+    {
+      "name": "increment-json-null-counts-as-zero",
+      "before": { "count": null },
+      "ops": [{ "op": "increment", "path": ["count"], "by": 3 }],
+      "after": { "count": 3 }
+    },
+    {
+      "name": "increment-keeps-decimal-fraction",
+      "before": { "price": 1.5 },
+      "ops": [{ "op": "increment", "path": ["price"], "by": 1 }],
+      "after": { "price": 2.5 }
+    },
+    {
+      "name": "increment-beyond-int64",
+      "before": { "count": 1 },
+      "ops": [{ "op": "increment", "path": ["count"], "by": 9223372036854775807 }],
+      "after": { "count": 9223372036854775808 }
+    },
+    {
+      "name": "increment-nested-field",
+      "before": { "stats": { "logins": 1 } },
+      "ops": [{ "op": "increment", "path": ["stats", "logins"], "by": 1 }],
+      "after": { "stats": { "logins": 2 } }
+    },
+    {
+      "name": "increment-a-non-numeric-string-fails",
+      "before": { "count": "abc" },
+      "ops": [{ "op": "increment", "path": ["count"], "by": 1 }],
+      "error": "not-numeric"
+    },
+    {
+      "name": "increment-a-numeric-string-fails",
+      "before": { "count": "5" },
+      "ops": [{ "op": "increment", "path": ["count"], "by": 1 }],
+      "error": "not-numeric"
+    },
+    {
+      "name": "increment-a-boolean-fails",
+      "before": { "count": true },
+      "ops": [{ "op": "increment", "path": ["count"], "by": 1 }],
+      "error": "not-numeric"
+    },
+    {
+      "name": "increment-an-object-fails",
+      "before": { "count": { "x": 1 } },
+      "ops": [{ "op": "increment", "path": ["count"], "by": 1 }],
+      "error": "not-numeric"
+    },
+    {
+      "name": "increment-with-missing-parent-fails",
+      "before": { "name": "Harry" },
+      "ops": [{ "op": "increment", "path": ["stats", "logins"], "by": 1 }],
+      "error": "parent-missing"
+    },
+    {
+      "name": "two-sets-on-different-paths",
+      "before": { "a": 1, "b": 2 },
+      "ops": [
+        { "op": "set", "path": ["a"], "value": 10 },
+        { "op": "set", "path": ["b"], "value": 20 }
+      ],
+      "after": { "a": 10, "b": 20 }
+    },
+    {
+      "name": "later-set-wins-on-the-same-path",
+      "before": { "a": 1 },
+      "ops": [
+        { "op": "set", "path": ["a"], "value": 2 },
+        { "op": "set", "path": ["a"], "value": 3 }
+      ],
+      "after": { "a": 3 }
+    },
+    {
+      "name": "set-then-remove-removes",
+      "before": { "a": 1 },
+      "ops": [
+        { "op": "set", "path": ["a"], "value": 2 },
+        { "op": "remove", "path": ["a"] }
+      ],
+      "after": {}
+    },
+    {
+      "name": "remove-then-set-sets",
+      "before": { "a": 1 },
+      "ops": [
+        { "op": "remove", "path": ["a"] },
+        { "op": "set", "path": ["a"], "value": 2 }
+      ],
+      "after": { "a": 2 }
+    },
+    {
+      "name": "increment-then-set-sets",
+      "before": { "a": 1 },
+      "ops": [
+        { "op": "increment", "path": ["a"], "by": 5 },
+        { "op": "set", "path": ["a"], "value": 100 }
+      ],
+      "after": { "a": 100 }
+    },
+    {
+      "name": "increments-on-the-same-path-accumulate",
+      "before": { "a": 1 },
+      "ops": [
+        { "op": "increment", "path": ["a"], "by": 2 },
+        { "op": "increment", "path": ["a"], "by": 3 }
+      ],
+      "after": { "a": 6 }
+    },
+    {
+      "name": "increment-after-set-builds-on-the-set-value",
+      "before": { "a": 1 },
+      "ops": [
+        { "op": "set", "path": ["a"], "value": 10 },
+        { "op": "increment", "path": ["a"], "by": 5 }
+      ],
+      "after": { "a": 15 }
+    }
+  ]
+}

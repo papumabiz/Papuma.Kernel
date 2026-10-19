@@ -1,0 +1,157 @@
+{
+  "spec": "papuma-changes",
+  "version": "0.1",
+  "kind": "policy",
+  "description": "Policy vectors: applying 'policies' to 'diff' for document 'documentType'/'documentId' must yield 'expected' (wire format). Policies not listed default to Track. Cases with status 'legacy-v1' pin behaviour that Phase 2 of the roadmap will change.",
+  "cases": [
+    {
+      "name": "no-policies-leave-the-diff-untouched",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": {},
+      "diff": { "name": { "old": "a", "new": "b" } },
+      "expected": { "name": { "old": "a", "new": "b" } }
+    },
+    {
+      "name": "redact-withholds-values",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": { "iban": "Redact" },
+      "diff": {
+        "iban": { "old": "DE01", "new": "DE02" },
+        "name": { "old": "a", "new": "b" }
+      },
+      "expected": {
+        "iban": { "changed": true },
+        "name": { "old": "a", "new": "b" }
+      }
+    },
+    {
+      "name": "redact-covers-added-and-removed-fields",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": { "iban": "Redact", "phone": "Redact" },
+      "diff": {
+        "iban": { "new": "DE02" },
+        "phone": { "old": "0228" }
+      },
+      "expected": {
+        "iban": { "changed": true },
+        "phone": { "changed": true }
+      }
+    },
+    {
+      "name": "reference-points-at-type-id-and-path",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": { "ssn": "Reference" },
+      "diff": { "ssn": { "old": "1", "new": "2" } },
+      "expected": { "ssn": { "ref": "User/123/ssn" } }
+    },
+    {
+      "name": "do-not-track-drops-the-entry",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": { "lastSeen": "DoNotTrack" },
+      "diff": {
+        "lastSeen": { "old": "t1", "new": "t2" },
+        "name": { "old": "a", "new": "b" }
+      },
+      "expected": { "name": { "old": "a", "new": "b" } }
+    },
+    {
+      "name": "do-not-track-can-empty-the-diff",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": { "lastSeen": "DoNotTrack" },
+      "diff": { "lastSeen": { "old": "t1", "new": "t2" } },
+      "expected": {}
+    },
+    {
+      "name": "ancestor-policy-covers-descendants",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": { "address": "Redact" },
+      "diff": {
+        "address.city": { "old": "Bonn", "new": "Köln" },
+        "address.zip": { "old": "1", "new": "2" }
+      },
+      "expected": {
+        "address.city": { "changed": true },
+        "address.zip": { "changed": true }
+      }
+    },
+    {
+      "name": "nearest-declared-path-wins",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": { "address": "Redact", "address.city": "Track" },
+      "diff": {
+        "address.city": { "old": "Bonn", "new": "Köln" },
+        "address.zip": { "old": "1", "new": "2" }
+      },
+      "expected": {
+        "address.city": { "old": "Bonn", "new": "Köln" },
+        "address.zip": { "changed": true }
+      }
+    },
+    {
+      "name": "reference-on-ancestor-yields-one-ref-per-descendant-path",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": { "address": "Reference" },
+      "diff": { "address.city": { "old": "Bonn", "new": "Köln" } },
+      "expected": { "address.city": { "ref": "User/123/address.city" } }
+    },
+    {
+      "name": "hash-of-a-string-value",
+      "status": "legacy-v1",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": { "pw": "Hash" },
+      "diff": { "pw": { "old": "a", "new": "b" } },
+      "expected": {
+        "pw": {
+          "changed": true,
+          "hash": "c100f95c1913f9c72fc1f4ef0847e1e723ffe0bde0b36e5f36c13f81fe8c26ed"
+        }
+      }
+    },
+    {
+      "name": "hash-of-a-number-value",
+      "status": "legacy-v1",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": { "pin": "Hash" },
+      "diff": { "pin": { "old": 1, "new": 42 } },
+      "expected": {
+        "pin": {
+          "changed": true,
+          "hash": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049"
+        }
+      }
+    },
+    {
+      "name": "hash-of-an-explicit-null",
+      "status": "legacy-v1",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": { "pw": "Hash" },
+      "diff": { "pw": { "old": "a", "new": null } },
+      "expected": {
+        "pw": {
+          "changed": true,
+          "hash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+        }
+      }
+    },
+    {
+      "name": "hash-of-a-removed-field-has-no-hash",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": { "pw": "Hash" },
+      "diff": { "pw": { "old": "a" } },
+      "expected": { "pw": { "changed": true } }
+    }
+  ]
+}

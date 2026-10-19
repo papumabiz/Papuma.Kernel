@@ -1,0 +1,177 @@
+{
+  "spec": "papuma-changes",
+  "version": "0.1",
+  "kind": "diff",
+  "description": "Document diff vectors: Diff(before, after) must equal 'diff' (wire format). A null before/after means insert/delete. Cases with 'error' must be rejected.",
+  "cases": [
+    {
+      "name": "scalar-change",
+      "before": { "name": "Harry", "city": "Bonn" },
+      "after": { "name": "Harald", "city": "Bonn" },
+      "diff": { "name": { "old": "Harry", "new": "Harald" } }
+    },
+    {
+      "name": "field-added",
+      "before": {},
+      "after": { "email": "x@y.z" },
+      "diff": { "email": { "new": "x@y.z" } }
+    },
+    {
+      "name": "field-removed",
+      "before": { "nick": "H" },
+      "after": {},
+      "diff": { "nick": { "old": "H" } }
+    },
+    {
+      "name": "null-is-not-absent-added-from-null",
+      "before": { "email": null },
+      "after": { "email": "x@y.z" },
+      "diff": { "email": { "old": null, "new": "x@y.z" } }
+    },
+    {
+      "name": "null-is-not-absent-changed-to-null",
+      "before": { "email": "a@b.c" },
+      "after": { "email": null },
+      "diff": { "email": { "old": "a@b.c", "new": null } }
+    },
+    {
+      "name": "nested-object-recurses",
+      "before": { "address": { "city": "Bonn", "zip": "53111" } },
+      "after": { "address": { "city": "Köln", "zip": "53111" } },
+      "diff": { "address.city": { "old": "Bonn", "new": "Köln" } }
+    },
+    {
+      "name": "deep-leaf-change",
+      "before": { "l1": { "l2": { "l3": { "keep": "x", "change": 1 } } } },
+      "after": { "l1": { "l2": { "l3": { "keep": "x", "change": 2 } } } },
+      "diff": { "l1.l2.l3.change": { "old": 1, "new": 2 } }
+    },
+    {
+      "name": "arrays-are-atomic",
+      "before": { "roles": ["user"] },
+      "after": { "roles": ["user", "admin"] },
+      "diff": { "roles": { "old": ["user"], "new": ["user", "admin"] } }
+    },
+    {
+      "name": "key-order-is-irrelevant",
+      "before": { "a": 1, "b": { "x": true } },
+      "after": { "b": { "x": true }, "a": 1 },
+      "diff": {}
+    },
+    {
+      "name": "insert-has-only-new-sides",
+      "before": null,
+      "after": { "name": "Harry", "address": { "city": "Bonn" } },
+      "diff": {
+        "address": { "new": { "city": "Bonn" } },
+        "name": { "new": "Harry" }
+      }
+    },
+    {
+      "name": "delete-has-only-old-sides",
+      "before": { "name": "Harry" },
+      "after": null,
+      "diff": { "name": { "old": "Harry" } }
+    },
+    {
+      "name": "object-to-scalar-is-one-entry",
+      "before": { "address": { "city": "Bonn", "zip": "53111" } },
+      "after": { "address": "Bonn, 53111" },
+      "diff": {
+        "address": {
+          "old": { "city": "Bonn", "zip": "53111" },
+          "new": "Bonn, 53111"
+        }
+      }
+    },
+    {
+      "name": "scalar-to-object-is-one-entry",
+      "before": { "a": 42 },
+      "after": { "a": { "b": { "c": true } } },
+      "diff": { "a": { "old": 42, "new": { "b": { "c": true } } } }
+    },
+    {
+      "name": "object-to-null-is-one-entry",
+      "before": { "a": { "b": 1 } },
+      "after": { "a": null },
+      "diff": { "a": { "old": { "b": 1 }, "new": null } }
+    },
+    {
+      "name": "object-to-array-is-one-entry",
+      "before": { "a": { "b": 1 } },
+      "after": { "a": [1, 2] },
+      "diff": { "a": { "old": { "b": 1 }, "new": [1, 2] } }
+    },
+    {
+      "name": "empty-object-gains-a-field",
+      "before": { "a": {} },
+      "after": { "a": { "x": 1 } },
+      "diff": { "a.x": { "new": 1 } }
+    },
+    {
+      "name": "object-loses-its-last-field",
+      "before": { "a": { "b": 1 } },
+      "after": { "a": {} },
+      "diff": { "a.b": { "old": 1 } }
+    },
+    {
+      "name": "entries-are-ordered-ordinally",
+      "before": {},
+      "after": { "b": 1, "a": 2, "B": 3 },
+      "diff": {
+        "B": { "new": 3 },
+        "a": { "new": 2 },
+        "b": { "new": 1 }
+      },
+      "orderedPaths": ["B", "a", "b"]
+    },
+    {
+      "name": "numbers-equal-by-value-integer-vs-decimal-form",
+      "before": { "v": 1 },
+      "after": { "v": 1.0 },
+      "diff": {}
+    },
+    {
+      "name": "numbers-equal-by-value-exponent-form",
+      "before": { "v": 100 },
+      "after": { "v": 1E2 },
+      "diff": {}
+    },
+    {
+      "name": "numbers-equal-by-value-trailing-zero",
+      "before": { "v": 0.1 },
+      "after": { "v": 0.10 },
+      "diff": {}
+    },
+    {
+      "name": "numbers-equal-by-value-negative-zero",
+      "before": { "v": 0 },
+      "after": { "v": -0 },
+      "diff": {}
+    },
+    {
+      "name": "numbers-differ-beyond-double-precision-integer",
+      "before": { "v": 9007199254740992 },
+      "after": { "v": 9007199254740993 },
+      "diff": { "v": { "old": 9007199254740992, "new": 9007199254740993 } }
+    },
+    {
+      "name": "numbers-differ-beyond-double-precision-decimal",
+      "before": { "v": 0.1 },
+      "after": { "v": 0.10000000000000001 },
+      "diff": { "v": { "old": 0.1, "new": 0.10000000000000001 } }
+    },
+    {
+      "name": "numbers-differ-beyond-64-bit-integer",
+      "before": { "v": 12345678901234567890 },
+      "after": { "v": 12345678901234567891 },
+      "diff": { "v": { "old": 12345678901234567890, "new": 12345678901234567891 } }
+    },
+    {
+      "name": "dotted-key-is-rejected",
+      "before": { "settings": {} },
+      "after": { "settings": { "feature.enabled": true } },
+      "error": "unsupported-key"
+    }
+  ]
+}

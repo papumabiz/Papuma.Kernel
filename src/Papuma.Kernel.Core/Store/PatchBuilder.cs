@@ -25,7 +25,8 @@ public sealed class PatchBuilder<T> where T : class
 
     /// <summary>
     /// Sets a field to a value. Parent objects along the path must already exist
-    /// in the stored document.
+    /// in the stored document; otherwise the patch fails with
+    /// <see cref="PatchTargetMissingException"/> (set the parent first).
     /// </summary>
     public PatchBuilder<T> Set<TValue>(Expression<Func<T, TValue>> property, TValue value)
     {
@@ -52,7 +53,9 @@ public sealed class PatchBuilder<T> where T : class
     /// <summary>
     /// Atomically increments a numeric field by <paramref name="by"/> (missing or null
     /// fields count as 0). The read-modify-write happens inside the statement — no
-    /// conflict window, no <c>expectedVersion</c> needed (ADR-012).
+    /// conflict window, no <c>expectedVersion</c> needed (ADR-012). A stored value that
+    /// is not a number fails with <see cref="NonNumericIncrementException"/>; a missing
+    /// parent with <see cref="PatchTargetMissingException"/>.
     /// </summary>
     public PatchBuilder<T> Increment(Expression<Func<T, object?>> property, long by = 1)
     {

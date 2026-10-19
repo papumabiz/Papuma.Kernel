@@ -9,6 +9,12 @@ Changed:
 
 Added:
 
+- **`NonNumericIncrementException`** and **`PatchTargetMissingException`** (`Papuma.Kernel.Core`):
+  typed patch failures (see Fixed). They carry `DocumentType`, and `DocumentId`/`FieldPath` when the
+  engine knows them.
+
+- **Storage-neutral specification** in `docs/spec/` (diff, policies, patch) with language-neutral
+  conformance vectors that run against PostgreSQL and SQLite. Repository only for now.
 - **`RunFeedWorkers`** on `PapumaKernelOptions` and `PapumaKernelLocalOptions` (default
   `true`; feedback F-23). `false` registers the feed processors without their hosted
   loops — schema setup, contributors and event retention still run — so a test fixture
@@ -18,6 +24,25 @@ Added:
 
 Fixed:
 
+- **Patch operations apply in order on both engines (PostgreSQL lost updates).** Within one
+  `PatchAsync`/`PatchManyAsync`/`PatchWhereAsync`, `Increment` read the *stored* value instead of
+  the result of the preceding operations: two increments on one field applied only the last, and
+  `Set` followed by `Increment` discarded the `Set`. Each operation now sees the previous one's
+  result (`Increment(+2).Increment(+3)` on `1` is `6`; `Set(10).Increment(+5)` is `15`).
+  SQLite was already correct. Multi-operation patches that touch one field twice change result.
+- **`Increment` never overwrites a non-numeric value.** On a string, boolean, object or array SQLite
+  silently replaced the value with the increment; PostgreSQL failed with a raw `PostgresException`
+  (and coerced numeric strings such as `"5"`). Both now throw the new
+  `NonNumericIncrementException` and roll the patch back. Absent and JSON `null` still count as 0.
+- **A JSON property name containing `.` fails at model build.** Paths in diffs, policies, keys and
+  patches are dot-separated, so `[JsonPropertyName("a.b")]` was ambiguous; it used to be accepted
+  and failed on the first save (the diff engine rejects such keys). It now throws `NotSupportedException`
+  when the model is built or the path is resolved.
+- **`Set`/`Increment` below a missing or non-object parent now fail on both engines** with the new
+  `PatchTargetMissingException` and roll the patch back. PostgreSQL used to do nothing (the version
+  still advanced with an empty diff, hiding path typos); SQLite created the parent objects or replaced
+  a scalar parent with an object. To build a nested value, `Set` the parent first in the same patch.
+  `Remove` below a missing parent stays a no-op.
 - **SQLite key lookups use the declared key index.** `LoadByKeyAsync`, `PatchWhereAsync`,
   `DeleteWhereAsync` and the MCP masked read by key bound the document type as a parameter,
   which SQLite cannot match against the *partial* key index (`WHERE document_type = '…'`); the

@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 
 using Papuma.Kernel.Changes;
 
-namespace Papuma.Kernel.Tests.Changes;
+namespace Papuma.Kernel.Core.Tests.Changes;
 
 public sealed class JsonDiffEngineTests
 {

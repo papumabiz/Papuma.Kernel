@@ -1,0 +1,58 @@
+# Papuma — Storage-neutral Specification
+
+Status: **draft 0.1** (2026-10-16) · first slice of phase 1 of the
+[interop and hardening roadmap](../analyses/interop-and-hardening-roadmap.md)
+
+The kernel exists twice (PostgreSQL and SQLite) and may exist a third time (Rust).
+What lets two implementations call themselves *compatible* is not shared code but
+a shared **specification** and a shared **conformance suite**. This folder holds
+both. It describes the *logical* contract; the PostgreSQL tables and the snapshot
+cursor of [feed-wire-format.md](../feed-wire-format.md) are one realisation of it.
+
+| Part | Status |
+|---|---|
+| [changes.md](changes.md) — diff, policies, change record | draft, normative for diff and policies |
+| [patch.md](patch.md) — patch operations (`set`, `remove`, `increment`) and the divergences it found between the two kernels (fixed) | draft |
+| [schemas/](schemas/) — JSON Schema for the diff and the change record | draft |
+| [vectors/](vectors/) — language-neutral test vectors | diff, policy and patch vectors; canonical JSON and end-to-end write-path vectors to follow |
+
+Not yet specified (tracked in the roadmap): canonical JSON, number range limits, the ordering and delivery guarantees as a stand-alone
+chapter, the event log.
+
+## Conformance
+
+An implementation conforms to this draft when it passes every case in
+[vectors/](vectors/). Each vector file is one JSON object:
+
+```jsonc
+{ "spec": "papuma-changes", "version": "0.1", "kind": "diff", "cases": [ { "name": "...", /* ... */ } ] }
+```
+
+- `diff.json` — `Diff(before, after)` must produce `diff` (wire format). `before`
+  or `after` is `null` for insert or delete. A case with `error` must be rejected.
+  Every non-error case must also be reversible (see [changes.md](changes.md#reversibility)).
+- `patch.json` — applying `ops` in order to `before` must yield `after` or fail with
+  `error`. Both engines pass every case (history: [patch.md](patch.md#3-history-divergences-found-and-fixed)).
+  Runners: `PatchVectorInProcessTests` (the in-process definition, `Papuma.Kernel.Core.Tests`,
+  no database) and `PatchVectorPostgresTests` (the real PostgreSQL expression).
+- `policy.json` — applying `policies` to `diff` for the given document type and id
+  must produce `expected`. Policies not listed default to `Track`. Cases marked
+  `"status": "legacy-v1"` pin current behaviour that is known to change
+  (see [changes.md](changes.md#hash-policy-v1-is-not-yet-normative)).
+
+Comparison is **JSON-semantic** (object key order is irrelevant), except where a
+case lists `orderedPaths`, which pins the emission order of diff entries.
+
+The reference runners live in
+[`Papuma.Kernel.Core.Tests`](https://github.com/papumabiz/Papuma.Kernel/tree/master/tests/Papuma.Kernel.Core.Tests/Spec):
+they run the vectors against `Papuma.Kernel.Core`, which both the PostgreSQL and the
+SQLite kernel share, in milliseconds and without a database. The patch vectors also run
+against the real PostgreSQL expression. End-to-end vectors through a full session on each
+engine are a later slice.
+
+## Changing the vectors
+
+Vectors are **hand-reviewed**, not generated on every run: a failing vector is
+either a kernel regression or a deliberate spec change. In the second case change
+the vector, bump `version` in the vector file, and note it in
+[changes.md](changes.md). Never edit a vector just to make a test pass.

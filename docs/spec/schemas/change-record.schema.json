@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/papumabiz/Papuma.Kernel/docs/spec/schemas/change-record.schema.json",
+  "title": "Papuma change record (logical form)",
+  "description": "The storage-neutral shape of one change feed entry. The PostgreSQL columns of docs/feed-wire-format.md are one realisation of it. See docs/spec/changes.md.",
+  "type": "object",
+  "required": [
+    "seq", "scope", "tenantId", "documentType", "documentId",
+    "version", "schemaVersion", "operation", "diff", "actorId", "metadata", "occurredAt"
+  ],
+  "properties": {
+    "seq": {
+      "description": "Identity of the record within one store. Not a cursor and not a watermark; do not order or skip by it.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "scope": { "enum": ["Platform", "Tenant"] },
+    "tenantId": {
+      "description": "Empty for platform scope.",
+      "type": "string"
+    },
+    "documentType": {
+      "description": "Logical document type name from the metamodel.",
+      "type": "string",
+      "minLength": 1
+    },
+    "documentId": { "type": "string", "minLength": 1 },
+    "version": {
+      "description": "Document version after this change. Gapless per document, starting at 1.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "schemaVersion": {
+      "description": "Schema version of the diff content. History is never upcast retroactively.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "operation": {
+      "description": "1 = insert, 2 = update, 3 = delete.",
+      "enum": [1, 2, 3]
+    },
+    "diff": { "$ref": "diff.schema.json" },
+    "actorId": {
+      "description": "Who caused the change; empty when not provided.",
+      "type": "string"
+    },
+    "metadata": {
+      "description": "correlationId, optional causationId / causationType / traceparent, rollback markers. Open object.",
+      "type": "object"
+    },
+    "occurredAt": {
+      "description": "RFC 3339 timestamp, UTC.",
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

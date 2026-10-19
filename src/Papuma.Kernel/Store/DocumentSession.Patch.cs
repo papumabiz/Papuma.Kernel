@@ -76,7 +76,8 @@ public sealed partial class DocumentSession
                 cmd.Parameters.AddWithValue("expectedVersion", expectedVersion.Value);
             }
 
-            var row = await ExecuteMappingKeyViolationsAsync(
+            var row = await MapPatchErrorsAsync(
+                () => ExecuteMappingKeyViolationsAsync(
                 async () =>
                 {
                     await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -87,7 +88,9 @@ public sealed partial class DocumentSession
 
                     return (reader.GetString(0), reader.GetString(1), reader.GetInt64(2), reader.GetInt32(3));
                 },
-                metadata.Name);
+                metadata.Name),
+                metadata.Name,
+                id);
 
             if (row is null)
             {
@@ -101,6 +104,8 @@ public sealed partial class DocumentSession
             RunValidator(metadata, storedNewJson);
 
             var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
+            // SQL cannot raise for a missing parent: the old state is already at hand, so the rule is checked here.
+            JsonPatchApplier.EnsureTargetsExist(oldJson, operations, metadata.Name, id);
             var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, storedNewJson), metadata, id);
 
             await InsertChangeRecordAsync(
@@ -252,7 +257,8 @@ public sealed partial class DocumentSession
             cmd.Parameters.AddWithValue("actorId", ActorId);
             addPredicateParameters(cmd);
 
-            var rows = await ExecuteMappingKeyViolationsAsync(
+            var rows = await MapPatchErrorsAsync(
+                () => ExecuteMappingKeyViolationsAsync(
                 async () =>
                 {
                     var collected = new List<(string Id, string OldJson, string NewJson, long Version, int SchemaVersion)>();
@@ -265,7 +271,9 @@ public sealed partial class DocumentSession
 
                     return collected;
                 },
-                metadata.Name);
+                metadata.Name),
+                metadata.Name,
+                null);
 
             var changes = new List<(string Id, long Version, int SchemaVersion, DocumentDiff Diff)>(rows.Count);
             foreach (var (id, oldJsonText, newJsonText, newVersion, oldSchemaVersion) in rows)
@@ -277,6 +285,8 @@ public sealed partial class DocumentSession
                 RunValidator(metadata, storedNewJson);
 
                 var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
+                // SQL cannot raise for a missing parent: the old state is already at hand, so the rule is checked here.
+                JsonPatchApplier.EnsureTargetsExist(oldJson, operations, metadata.Name, id);
                 var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, storedNewJson), metadata, id);
                 changes.Add((id, newVersion, metadata.SchemaVersion, diff));
             }
@@ -332,6 +342,45 @@ public sealed partial class DocumentSession
         }, ct);
     }
 
+    /// <summary>
+    /// Maps the PostgreSQL errors a patch statement can raise on its own to the typed
+    /// exceptions of the patch semantics (<c>docs/spec/patch.md</c>): the numeric cast of an
+    /// <c>Increment</c> on a non-number, and <c>jsonb_set</c> walking into an array with an
+    /// object key. A set-based statement cannot say which document or field failed, so those
+    /// stay unknown there. Returns <c>null</c> for every other error.
+    /// </summary>
+    internal static Exception? TranslatePatchError(PostgresException ex, string documentType, string? documentId)
+    {
+        if (ex.SqlState != PostgresErrorCodes.InvalidTextRepresentation)
+        {
+            return null;
+        }
+
+        if (ex.MessageText.Contains("type numeric", StringComparison.Ordinal))
+        {
+            return new NonNumericIncrementException(documentType, documentId, fieldPath: null, ex);
+        }
+
+        return ex.MessageText.Contains("path element", StringComparison.Ordinal)
+            ? new PatchTargetMissingException(documentType, documentId, fieldPath: null, ex)
+            : null;
+    }
+
+    private static async Task<TResult> MapPatchErrorsAsync<TResult>(
+        Func<Task<TResult>> execute,
+        string documentType,
+        string? documentId)
+    {
+        try
+        {
+            return await execute();
+        }
+        catch (PostgresException ex) when (TranslatePatchError(ex, documentType, documentId) is not null)
+        {
+            throw TranslatePatchError(ex, documentType, documentId)!;
+        }
+    }
+
     private static List<PatchOperation> CollectOperations<T>(Action<PatchBuilder<T>> patch)
         where T : class
     {
@@ -350,7 +399,7 @@ public sealed partial class DocumentSession
     /// and registers their values as parameters. Paths and values are always bound as
     /// parameters — no patch content reaches the SQL text.
     /// </summary>
-    private static string BuildPatchExpression(NpgsqlCommand cmd, IReadOnlyList<PatchOperation> operations)
+    internal static string BuildPatchExpression(NpgsqlCommand cmd, IReadOnlyList<PatchOperation> operations)
     {
         var expression = new StringBuilder("data");
         for (var i = 0; i < operations.Count; i++)
@@ -375,12 +424,19 @@ public sealed partial class DocumentSession
                     break;
 
                 case PatchOperationKind.Increment:
-                    // Reads from the original `data` column: increments are relative to the
-                    // stored state, atomic within the statement (ADR-012).
+                    // Operations apply in order, each seeing the previous result: the current
+                    // value is read from the expression built so far (one copy, in the derived
+                    // table), not from the stored column. Only a JSON number is incremented —
+                    // a string gets a '!' suffix so even "5" fails the cast instead of being
+                    // coerced; booleans, objects and arrays fail it on their own text. The
+                    // read-modify-write stays inside the one statement (ADR-012).
                     var byParam = $"patchValue{i}";
                     cmd.Parameters.AddWithValue(byParam, op.IncrementBy);
-                    expression.Insert(0, "jsonb_set(").Append(
-                        $", @{pathParam}, to_jsonb(COALESCE((data #>> @{pathParam})::numeric, 0) + @{byParam}), true)");
+                    var current = expression.ToString();
+                    expression.Clear().Append(
+                        $"(SELECT jsonb_set(d, @{pathParam}, to_jsonb(COALESCE((CASE WHEN jsonb_typeof(d #> @{pathParam}) = 'string' " +
+                        $"THEN (d #>> @{pathParam}) || '!' ELSE d #>> @{pathParam} END)::numeric, 0) + @{byParam}), true) " +
+                        $"FROM (SELECT {current} AS d) AS s)");
                     break;
             }
         }

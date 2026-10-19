@@ -76,7 +76,7 @@ public sealed partial class SqliteDocumentSession
                 EnsurePatchableSchema(metadata, id, oldSchemaVersion);
 
                 var patchedJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
-                JsonPatchApplier.Apply(patchedJson, operations);
+                JsonPatchApplier.Apply(patchedJson, operations, metadata.Name, id);
                 RunValidator(metadata, patchedJson);
 
                 await using var updateCmd = conn.CreateCommand();
@@ -258,7 +258,7 @@ public sealed partial class SqliteDocumentSession
                 EnsurePatchableSchema(metadata, id, oldSchemaVersion);
 
                 var patchedJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
-                JsonPatchApplier.Apply(patchedJson, operations);
+                JsonPatchApplier.Apply(patchedJson, operations, metadata.Name, id);
                 RunValidator(metadata, patchedJson);
 
                 await using var updateCmd = conn.CreateCommand();
