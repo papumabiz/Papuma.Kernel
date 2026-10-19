@@ -6,6 +6,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
+using Papuma.Kernel.Changes;
 using Papuma.Kernel.Events;
 using Papuma.Kernel.Model;
 using Papuma.Kernel.Processing;
@@ -23,18 +24,35 @@ namespace Papuma.Kernel.Hosting;
 internal sealed class SqliteKernelSchemaInitializer(
     PapumaKernelLocalOptions options,
     KernelModel model,
-    IEnumerable<ISqliteSchemaContributor> contributors) : IHostedService
+    IEnumerable<ISqliteSchemaContributor> contributors,
+    IHashKeyProvider? hashKeys = null) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        if (!options.EnsureSchema)
+        if (!options.EnsureSchema && hashKeys is null)
         {
             return;
         }
 
         await using var connection = await SqliteConnectionFactory.OpenAsync(
             options.ResolveConnectionString(), cancellationToken);
-        await SqliteSchemaManager.EnsureSchemaAsync(connection, model, cancellationToken);
+        if (options.EnsureSchema)
+        {
+            await SqliteSchemaManager.EnsureSchemaAsync(connection, model, cancellationToken);
+        }
+
+        if (hashKeys is not null)
+        {
+            // Also when the schema is applied elsewhere: a wrong key must stop the process before
+            // it writes a single hash (ADR-025).
+            await SqliteSchemaManager.EnsureHashKeyAsync(connection, hashKeys, cancellationToken);
+        }
+
+        if (!options.EnsureSchema)
+        {
+            return;
+        }
+
         foreach (var contributor in contributors)
         {
             await contributor.EnsureSchemaAsync(connection, cancellationToken);

@@ -140,6 +140,16 @@ internal static class SchemaDdl
             PRIMARY KEY (handler_name, seq)
         );
 
+        -- ── Hash key check (ADR-025): one row per hash key id, no tenant data, no RLS ──
+        -- The check value is an HMAC of a fixed message under the key; it lets an instance
+        -- notice at startup that it was configured with a different key for the same id.
+        CREATE TABLE IF NOT EXISTS papuma.hash_key_check
+        (
+            kid             text        NOT NULL PRIMARY KEY,
+            check_value     text        NOT NULL,
+            created_at      timestamptz NOT NULL DEFAULT now()
+        );
+
         -- ── Row Level Security (layer 2 of the two-layer scope model) ─────────────
         ALTER TABLE papuma.document ENABLE ROW LEVEL SECURITY;
         ALTER TABLE papuma.document FORCE ROW LEVEL SECURITY;

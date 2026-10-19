@@ -23,7 +23,7 @@ internal static class HashV2
 
     private static readonly byte[] HkdfSalt = Encoding.ASCII.GetBytes("papuma-hash-v2");
 
-    private static readonly byte[] KeyCheckMessage = Encoding.ASCII.GetBytes("papuma-hash-check");
+    internal static readonly byte[] KeyCheckMessageBytes = Encoding.ASCII.GetBytes("papuma-hash-check");
 
     /// <summary>
     /// Derives the key for one tenant and type from the master key. <paramref name="tenantId"/>
@@ -56,6 +56,6 @@ internal static class HashV2
     public static string KeyCheck(ReadOnlySpan<byte> masterKey)
     {
         var key = DeriveTenantKey(masterKey, tenantId: string.Empty, KeyCheckTypeName);
-        return Convert.ToHexStringLower(HMACSHA256.HashData(key, KeyCheckMessage));
+        return Convert.ToHexStringLower(HMACSHA256.HashData(key, KeyCheckMessageBytes));
     }
 }

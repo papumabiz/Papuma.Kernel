@@ -109,5 +109,13 @@ internal static class SqliteSchemaDdl
 
             PRIMARY KEY (handler_name, seq)
         );
+
+        -- Hash key check (ADR-025): one row per hash key id, no tenant data.
+        CREATE TABLE IF NOT EXISTS hash_key_check
+        (
+            kid             TEXT NOT NULL PRIMARY KEY,
+            check_value     TEXT NOT NULL,
+            created_at      TEXT NOT NULL
+        );
         """;
 }

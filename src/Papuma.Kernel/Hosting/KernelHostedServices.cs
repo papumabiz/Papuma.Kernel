@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 using Npgsql;
 
+using Papuma.Kernel.Changes;
 using Papuma.Kernel.Events;
 using Papuma.Kernel.Model;
 using Papuma.Kernel.Processing;
@@ -18,22 +19,35 @@ namespace Papuma.Kernel.Hosting;
 /// Applies the kernel schema (including declared key indexes), then the application's
 /// <see cref="ISchemaContributor"/>s, on startup when
 /// <see cref="PapumaKernelOptions.EnsureSchema"/> is enabled — before the feed workers,
-/// which are registered after this service.
+/// which are registered after this service. With a hash key configured it also verifies the
+/// key against the database (ADR-025), whether or not the schema is ensured here.
 /// </summary>
 internal sealed class KernelSchemaInitializer(
     NpgsqlDataSource dataSource,
     KernelModel model,
     PapumaKernelOptions options,
-    IEnumerable<ISchemaContributor> contributors) : IHostedService
+    IEnumerable<ISchemaContributor> contributors,
+    IHashKeyProvider? hashKeys = null) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        if (options.EnsureSchema)
+        {
+            await SchemaManager.EnsureSchemaAsync(dataSource, model, cancellationToken);
+        }
+
+        if (hashKeys is not null)
+        {
+            // Also when the schema is applied by a separate deployment step: a wrong key must stop
+            // an instance before it writes a single hash (ADR-025).
+            await SchemaManager.EnsureHashKeyAsync(dataSource, hashKeys, cancellationToken);
+        }
+
         if (!options.EnsureSchema)
         {
             return;
         }
 
-        await SchemaManager.EnsureSchemaAsync(dataSource, model, cancellationToken);
         foreach (var contributor in contributors)
         {
             await contributor.EnsureSchemaAsync(dataSource, cancellationToken);

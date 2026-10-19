@@ -5,6 +5,7 @@ using System.Text;
 
 using Microsoft.Data.Sqlite;
 
+using Papuma.Kernel.Changes;
 using Papuma.Kernel.Model;
 using Papuma.Kernel.Validation;
 
@@ -92,5 +93,59 @@ public static class SqliteSchemaManager
         }
 
         return ddl.ToString();
+    }
+
+    /// <summary>
+    /// Records the hash key in use and verifies it against the key the database file was
+    /// initialized with (ADR-025, point 5) — the counterpart of
+    /// <c>SchemaManager.EnsureHashKeyAsync</c>. The first start with a key id stores its check value;
+    /// every later start with the same id must compute the same value. Call it once at startup after
+    /// <see cref="EnsureSchemaAsync(SqliteConnection, KernelModel?, CancellationToken)"/>; the hosting
+    /// bootstrap does so when a key is configured.
+    /// </summary>
+    /// <param name="connection">An open SQLite connection.</param>
+    /// <param name="hashKeys">The key provider this process writes hashes with.</param>
+    /// <param name="ct">A cancellation token.</param>
+    /// <exception cref="HashKeyMismatchException">The configured key differs from the stored one for the same key id.</exception>
+    /// <exception cref="InvalidOperationException">The <c>hash_key_check</c> table does not exist; run <c>EnsureSchemaAsync</c>.</exception>
+    public static async Task EnsureHashKeyAsync(
+        SqliteConnection connection,
+        IHashKeyProvider hashKeys,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(hashKeys);
+
+        var keyId = hashKeys.ActiveKeyId;
+        var computed = HashKeyCheckValue.Compute(hashKeys);
+
+        string? stored;
+        try
+        {
+            await using (var insert = connection.CreateCommand())
+            {
+                insert.CommandText = """
+                    INSERT INTO hash_key_check (kid, check_value, created_at) VALUES (@kid, @value, @now)
+                    ON CONFLICT (kid) DO NOTHING
+                    """;
+                insert.Parameters.AddWithValue("@kid", keyId);
+                insert.Parameters.AddWithValue("@value", computed);
+                insert.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
+                await insert.ExecuteNonQueryAsync(ct);
+            }
+
+            await using var select = connection.CreateCommand();
+            select.CommandText = "SELECT check_value FROM hash_key_check WHERE kid = @kid";
+            select.Parameters.AddWithValue("@kid", keyId);
+            stored = (string?)await select.ExecuteScalarAsync(ct);
+        }
+        catch (SqliteException ex) when (ex.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "The table hash_key_check does not exist. Run SqliteSchemaManager.EnsureSchemaAsync " +
+                "(PapumaKernelLocalOptions.EnsureSchema) once with this version before starting with a hash key.", ex);
+        }
+
+        HashKeyCheckValue.Verify(keyId, computed, stored!);
     }
 }

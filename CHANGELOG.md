@@ -13,6 +13,15 @@ Added:
   typed patch failures (see Fixed). They carry `DocumentType`, and `DocumentId`/`FieldPath` when the
   engine knows them.
 
+- **Hash key check (ADR-025, point 5).** A new table `papuma.hash_key_check` (`hash_key_check` on
+  SQLite) stores one check value per hash key id — an HMAC of a fixed message, never the key. With a
+  key configured, the hosted startup records it on the first start and verifies it on every later
+  one (`SchemaManager.EnsureHashKeyAsync` / `SqliteSchemaManager.EnsureHashKeyAsync`, also callable
+  without a host): an instance configured with a different key under the same `HashKeyId` fails to
+  start with the new `HashKeyMismatchException` instead of writing hashes that match nothing.
+  Changing the key means configuring a new `HashKeyId`. The check runs even when `EnsureSchema` is
+  off, so run `EnsureSchema` once with this version first (the application role needs `SELECT` and
+  `INSERT` on the new table).
 - **Keyed `Hash` policy, opt-in (ADR-025, first step).** `IHashKeyProvider`, the default
   `MasterKeyHashKeyProvider` (HKDF-derived key per tenant and type), the options `HashMasterKey`
   (base64, at least 32 bytes) and `HashKeyId` on `PapumaKernelOptions` and `PapumaKernelLocalOptions`

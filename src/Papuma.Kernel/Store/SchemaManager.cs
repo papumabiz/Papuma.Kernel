@@ -5,6 +5,7 @@ using System.Text;
 
 using Npgsql;
 
+using Papuma.Kernel.Changes;
 using Papuma.Kernel.Model;
 using Papuma.Kernel.Tenancy;
 using Papuma.Kernel.Validation;
@@ -67,6 +68,60 @@ public static class SchemaManager
         }
 
         await RepairFeedAfterLogicalRestoreAsync(conn, ct);
+    }
+
+    /// <summary>
+    /// Records the hash key in use and verifies it against the key the database was initialized
+    /// with (ADR-025, point 5). The first instance to start with a key id stores its check value;
+    /// every later instance with the same id must compute the same value. Call it once at startup
+    /// after <see cref="EnsureSchemaAsync(NpgsqlDataSource, KernelModel?, CancellationToken)"/>; the
+    /// hosting bootstrap does so when a key is configured.
+    /// </summary>
+    /// <param name="dataSource">The PostgreSQL data source.</param>
+    /// <param name="hashKeys">The key provider this instance writes hashes with.</param>
+    /// <param name="ct">A cancellation token.</param>
+    /// <exception cref="HashKeyMismatchException">The configured key differs from the stored one for the same key id.</exception>
+    /// <exception cref="InvalidOperationException">The <c>papuma.hash_key_check</c> table does not exist; run <c>EnsureSchemaAsync</c>.</exception>
+    public static async Task EnsureHashKeyAsync(
+        NpgsqlDataSource dataSource,
+        IHashKeyProvider hashKeys,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(dataSource);
+        ArgumentNullException.ThrowIfNull(hashKeys);
+
+        var keyId = hashKeys.ActiveKeyId;
+        var computed = HashKeyCheckValue.Compute(hashKeys);
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        string? stored;
+        try
+        {
+            // Insert-or-ignore, then read: concurrent first starts all compare with the winner.
+            await using (var insert = conn.CreateCommand())
+            {
+                insert.CommandText = """
+                    INSERT INTO papuma.hash_key_check (kid, check_value) VALUES (@kid, @value)
+                    ON CONFLICT (kid) DO NOTHING
+                    """;
+                insert.Parameters.AddWithValue("kid", keyId);
+                insert.Parameters.AddWithValue("value", computed);
+                await insert.ExecuteNonQueryAsync(ct);
+            }
+
+            await using var select = conn.CreateCommand();
+            select.CommandText = "SELECT check_value FROM papuma.hash_key_check WHERE kid = @kid";
+            select.Parameters.AddWithValue("kid", keyId);
+            stored = (string?)await select.ExecuteScalarAsync(ct);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
+        {
+            throw new InvalidOperationException(
+                "The table papuma.hash_key_check does not exist. Run SchemaManager.EnsureSchemaAsync " +
+                "(PapumaKernelOptions.EnsureSchema) once with this version before starting with a hash key.", ex);
+        }
+
+        HashKeyCheckValue.Verify(keyId, computed, stored!);
     }
 
     /// <summary>

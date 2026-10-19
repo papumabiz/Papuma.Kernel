@@ -20,6 +20,12 @@ truth (`papuma.document`, `papuma.change`, `papuma.event`), its feed cursors
 snapshot gives the projections *and* the matching checkpoints for free. A backup that
 takes `papuma.document` alone loses history and the privacy-relevant redaction state.
 
+With the keyed `Hash` policy ([ADR-025](../adr/adr-025-keyed-hash-policy.md)) the database also
+holds `papuma.hash_key_check`: one check value per hash key id, never a key. It travels with the
+snapshot, so a restored database still refuses an instance configured with a different key under
+the same `HashKeyId`. The **master key itself is not in the database** — back it up with your
+other secrets; losing it ends comparability of the hashes, not the data.
+
 Roles and the application's login role are cluster-wide and not part of a
 database dump; recreate them from your provisioning (`pg_dumpall --globals-only`
 captures them if you have none).
