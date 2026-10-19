@@ -25,7 +25,7 @@ integration events instead.
 | `seq` | `bigint` (identity, PK) | Identity of the change; order within a slice. **Not** a cursor (section 4). |
 | `scope` | `text` | `'Platform'` or `'Tenant'`. |
 | `tenant_id` | `text` | Tenant id; empty string for platform scope. |
-| `document_type` | `text` | Logical aggregate name (the CLR type name). |
+| `document_type` | `text` | Logical aggregate name: declared with `[DocumentType]`/`Named`, by default the CLR simple class name (ADR-028). |
 | `document_id` | `text` | Document identifier. |
 | `version` | `bigint` | Document version *after* this change (gapless per document). |
 | `schema_version` | `int` | Schema version of the diff content (ADR-005). |

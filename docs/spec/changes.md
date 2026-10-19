@@ -17,7 +17,9 @@ cannot reproduce.
 Logical names MUST be unique among the document types of one model, and among its event types,
 compared case-insensitively (key index names are derived from the lower-cased name); a model that
 registers two types with the same name MUST be rejected when it is built. The .NET kernel currently
-derives the name from the simple class name and enforces this uniqueness. Each write increments `version` by exactly one, starting at 1.
+derives the name from the simple class name by default, lets a type declare it
+(`[DocumentType]`, `[EventType]`, `Named`; ADR-028), and enforces this uniqueness. A declared name is what
+another implementation should share. Each write increments `version` by exactly one, starting at 1.
 
 For diffing, an *absent* document (before an insert, after a delete) is
 equivalent to the empty object: every top-level field is reported as added

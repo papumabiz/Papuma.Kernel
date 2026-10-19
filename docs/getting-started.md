@@ -53,6 +53,10 @@ builder.Services
     .AddEventHandler<LoginAuditHandler>();   // ADR-013: event consumption
 ```
 
+Documents and events are stored under a *logical name* — by default the class name. Give a type a
+declared name (`[DocumentType("user")]`, `[EventType("user_logged_in")]`) if it must survive being renamed or
+moved: renaming a class whose name is the default orphans its stored documents (ADR-028).
+
 A model with a `[TrackHash]` field also needs a **hash key** — the Hash policy is keyed
 (ADR-025) and the kernel refuses to start without one:
 

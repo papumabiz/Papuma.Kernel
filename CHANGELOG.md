@@ -44,6 +44,13 @@ Added:
   `INSERT` on the new table).
 - **`Papuma.Kernel.Testing.TestHashKeys`**: a published test hash key (`Provider`, `MasterKeyBase64`,
   `KeyId`); `PapumaTestDatabase.CreateStoreAsync` uses it. Never a real key.
+- **Explicit logical type names (ADR-028).** `[DocumentType("customer")]` / `[EventType("user_signed_in")]` on a
+  class, or `Named("…")` in the fluent model (which wins), set the name stored in every row's `document_type` /
+  `event_type` — and with it the key index names, `Reference` text and the hash key of the type. **The default is
+  unchanged** (the simple class name), so no existing model or row changes. Declare a name for any type that must
+  survive being renamed or moved: with the class name as the name, renaming the class orphaned its documents
+  (loads found nothing, silently). The pattern is unchanged (`[A-Za-z][A-Za-z0-9_]{1,100}`); the uniqueness error
+  now names the fix.
 - **Keyed `Hash` policy (ADR-025).** `IHashKeyProvider`, the default
   `MasterKeyHashKeyProvider` (HKDF-derived key per tenant and type), the options `HashMasterKey`
   (base64, at least 32 bytes) and `HashKeyId` on `PapumaKernelOptions` and `PapumaKernelLocalOptions`

@@ -115,10 +115,11 @@ public sealed class KernelModelBuilder
                 var detail = string.Equals(other.Name, name, StringComparison.Ordinal)
                     ? $"both map to the logical name '{name}'"
                     : $"map to the logical names '{other.Name}' and '{name}', which differ only in case";
+                var attribute = kind == "Event" ? "[EventType(\"…\")]" : "[DocumentType(\"…\")]";
                 throw new InvalidOperationException(
                     $"{kind} types {other.ClrType.FullName} and {clrType.FullName} {detail}. " +
                     "The name is stored in every row (and key index names are lower-cased), so two types may not share it. " +
-                    "Rename one of the classes.");
+                    $"Give one of them a different logical name with {attribute} or .Named(\"…\"), or rename a class.");
             }
 
             seen[name] = (clrType, name);
@@ -145,9 +146,23 @@ public sealed class KernelModelBuilder
     {
         private readonly Dictionary<string, FieldPolicy> _policyOverrides = new(StringComparer.Ordinal);
         private TimeSpan? _retention;
+        private string? _name;
 
         internal EventTypeBuilder()
         {
+        }
+
+        /// <summary>
+        /// Sets the logical event name (ADR-028), overriding <c>[EventType]</c> and the class name. It is the
+        /// value stored in every row, so declare it for any type that must survive renaming or moving
+        /// the class. Must match <c>[A-Za-z][A-Za-z0-9_]{1,100}</c> and be unique in the model.
+        /// </summary>
+        /// <param name="name">The logical name.</param>
+        public EventTypeBuilder<T> Named(string name)
+        {
+            InputValidator.ValidateDocumentType(name);
+            _name = name;
+            return this;
         }
 
         /// <summary>
@@ -177,7 +192,7 @@ public sealed class KernelModelBuilder
         EventTypeMetadata IEventTypeBuilder.Build()
         {
             var clrType = typeof(T);
-            var name = clrType.Name;
+            var name = _name ?? clrType.GetCustomAttribute<EventTypeAttribute>(inherit: false)?.Name ?? clrType.Name;
             InputValidator.ValidateDocumentType(name);
 
             var policies = new Dictionary<string, FieldPolicy>(StringComparer.Ordinal);
@@ -257,6 +272,20 @@ public sealed class KernelModelBuilder
         private LambdaExpression? _idExpression;
         private Action<object>? _validator;
         private bool _exposeToMcp;
+        private string? _name;
+
+        /// <summary>
+        /// Sets the logical document name (ADR-028), overriding <c>[DocumentType]</c> and the class name. It is the
+        /// value stored in every row, so declare it for any type that must survive renaming or moving
+        /// the class. Must match <c>[A-Za-z][A-Za-z0-9_]{1,100}</c> and be unique in the model.
+        /// </summary>
+        /// <param name="name">The logical name.</param>
+        public DocumentTypeBuilder<T> Named(string name)
+        {
+            InputValidator.ValidateDocumentType(name);
+            _name = name;
+            return this;
+        }
 
         internal DocumentTypeBuilder()
         {
@@ -365,7 +394,7 @@ public sealed class KernelModelBuilder
         DocumentTypeMetadata IDocumentTypeBuilder.Build()
         {
             var clrType = typeof(T);
-            var name = clrType.Name;
+            var name = _name ?? clrType.GetCustomAttribute<DocumentTypeAttribute>(inherit: false)?.Name ?? clrType.Name;
             InputValidator.ValidateDocumentType(name);
 
             // 1. Attribute defaults, scanned recursively into nested POCO types.

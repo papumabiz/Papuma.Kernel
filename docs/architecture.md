@@ -481,6 +481,7 @@ non-superuser role via `Papuma.Kernel.Testing` (ADR-021), so they exercise it.
 | [025](adr/adr-025-keyed-hash-policy.md) | The Hash policy is keyed and canonical (HMAC-SHA-256, a derived key per tenant, key-check value, fail closed) | Proposed |
 | [026](adr/adr-026-load-all-by-key.md) | `LoadAllByKeyAsync`: read all documents behind a declared key — bounded, ordinal id order, paged, index-backed | Accepted |
 | [027](adr/adr-027-strip-legacy-hashes.md) | Removing legacy v1 hashes from history: an explicit, resumable sweep (documents and events) | Deferred (no production v1 history) |
+| [028](adr/adr-028-explicit-type-names.md) | Logical type names are declared: `[DocumentType]`, `[EventType]`, `Named` (default: the class name) | Accepted |
 
 ## 13. Recipes (tutorial precursors)
 
