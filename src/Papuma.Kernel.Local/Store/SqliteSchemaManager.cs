@@ -155,7 +155,7 @@ public static class SqliteSchemaManager
             select.Parameters.AddWithValue("@kid", keyId);
             stored = (string?)await select.ExecuteScalarAsync(ct);
         }
-        catch (SqliteException ex) when (ex.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase))
+        catch (SqliteException ex) when (IsMissingTable(ex))
         {
             throw new InvalidOperationException(
                 "The table hash_key_check does not exist. Run SqliteSchemaManager.EnsureSchemaAsync " +
@@ -164,4 +164,12 @@ public static class SqliteSchemaManager
 
         HashKeyCheckValue.Verify(keyId, computed, stored!);
     }
+
+    // "no such table" has no result code of its own: it is the generic SQLITE_ERROR (1), shared with every
+    // syntax and binding error, so the code narrows the message check down instead of replacing it (review L-23).
+    private const int SqliteError = 1;
+
+    internal static bool IsMissingTable(SqliteException exception) =>
+        exception.SqliteErrorCode == SqliteError
+        && exception.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase);
 }

@@ -1042,7 +1042,7 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
         }
 
         return new RawDocument(
-            (JsonObject)JsonNode.Parse(reader.GetString(0))!,
+            DocumentJson.ParseStored(reader.GetString(0), metadata.Name, id),
             reader.GetInt64(1),
             reader.GetInt32(2));
     }
@@ -1093,7 +1093,7 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            diffs.Add((JsonObject)JsonNode.Parse(reader.GetString(0))!);
+            diffs.Add(DocumentJson.ParseStored(reader.GetString(0), metadata.Name, id));
         }
 
         return diffs;
@@ -1198,13 +1198,20 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
         T? document;
         if (storedSchemaVersion < metadata.SchemaVersion)
         {
-            var raw = (JsonObject)JsonNode.Parse(json)!;
+            var raw = DocumentJson.ParseStored(json, metadata.Name, id);
             metadata.Upcast(raw, storedSchemaVersion);
             document = raw.Deserialize<T>(KernelJson.Options);
         }
         else
         {
-            document = JsonSerializer.Deserialize<T>(json, KernelJson.Options);
+            try
+            {
+                document = JsonSerializer.Deserialize<T>(json, KernelJson.Options);
+            }
+            catch (JsonException ex) when (JsonLimits.TextExceedsMaxDepth(json))
+            {
+                throw new DocumentTooDeepException(metadata.Name, id, "cannot be read", ex);
+            }
         }
 
         return document
@@ -1258,13 +1265,6 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
     }
 
     /// <summary>
-    /// Converts a declared key's dot-separated path into a SQLite JSONPath string, safe to
-    /// interpolate literally into SQL text (validated per segment, same discipline as
-    /// <see cref="SqliteSchemaManager.BuildKeyIndexDdl"/> — path segments are
-    /// developer-declared property names, not user input, but interpolation still demands
-    /// the same identifier-pattern check before it happens).
-    /// </summary>
-    /// <summary>
     /// Builds the single/composite key lookup statement (parameters: <c>@scope</c>,
     /// <c>@tenantId</c>, <c>@value0..n</c>). Internal so the EXPLAIN test runs this exact text.
     /// </summary>
@@ -1301,6 +1301,13 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
         return $"'{documentType}'";
     }
 
+    /// <summary>
+    /// Converts a declared key's dot-separated path into a SQLite JSONPath string, safe to
+    /// interpolate literally into SQL text (validated per segment, same discipline as
+    /// <see cref="SqliteSchemaManager.BuildKeyIndexDdl"/> — path segments are
+    /// developer-declared property names, not user input, but interpolation still demands
+    /// the same identifier-pattern check before it happens).
+    /// </summary>
     private static string ValidatedKeyJsonPath(KeyMetadata key) => ValidatedKeyJsonPath(key.PathSegments);
 
     private static string ValidatedKeyJsonPath(string[] segments)

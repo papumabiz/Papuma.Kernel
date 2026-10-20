@@ -23,7 +23,7 @@ public sealed class HashKeyOptionsTests
         before?.Invoke(services);
         services.AddPapumaKernelLocal(o =>
         {
-            o.ConnectionString = "Data Source=:memory:";
+            o.ConnectionString = "Data Source=hash-key-options.db"; // never opened: EnsureSchema is off, no worker runs
             o.Model(m => m.Document<Account>());
             o.EnsureSchema = false;
             o.RunFeedWorkers = false;

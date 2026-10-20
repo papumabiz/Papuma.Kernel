@@ -110,7 +110,11 @@ the same rules:
   already finished, then ends the cycle with the cancellation. The record that was in flight
   is not counted and is delivered again on the next start; the ones before it are not. This
   is best effort — if the connection is torn down with the cancellation, the progress is
-  lost and the records come again, which at-least-once allows.
+  lost and the records come again, which at-least-once allows. On SQLite the cancellation
+  also reaches the database late: Microsoft.Data.Sqlite checks the token only before a
+  command runs, so a worker waiting for the write lock (or in a long statement) returns when
+  that wait ends — up to the command timeout of 30 s — and a shutdown takes that long. Plan
+  `HostOptions.ShutdownTimeout` for it; what the cycle had not yet recorded is delivered again.
 - **A half-dead LISTEN connection costs latency, not data.** The wakeup comes through one
   `LISTEN` connection per processor. After a failover or a dropped route without a TCP reset
   that connection can look open while no `NOTIFY` arrives any more; the feeds then fall back

@@ -110,6 +110,61 @@ public sealed class SqliteHashKeyCheckTests(SqliteFixture fixture) : IAsyncLifet
         }
     }
 
+    // Review L-23: the missing table is recognised by SQLITE_ERROR (1) and the message together, not the message alone.
+    [Fact]
+    public async Task ARealMissingTable_IsSqliteErrorOne_WithTheNoSuchTableMessage()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT check_value FROM hash_key_check";
+
+        var ex = await Assert.ThrowsAsync<SqliteException>(() => cmd.ExecuteScalarAsync());
+
+        Assert.Equal(1, ex.SqliteErrorCode);
+        Assert.True(SqliteSchemaManager.IsMissingTable(ex));
+    }
+
+    [Theory]
+    [InlineData(1, "SQLite Error 1: 'no such table: hash_key_check'.", true)]
+    [InlineData(1, "SQLite Error 1: 'NO SUCH TABLE: hash_key_check'.", true)]
+    [InlineData(1, "SQLite Error 1: 'near \"FROM\": syntax error'.", false)]
+    [InlineData(1, "SQLite Error 1: 'table hash_key_check has no column named check_value'.", false)]
+    [InlineData(5, "SQLite Error 5: 'database is locked' (no such table: hash_key_check).", false)]
+    [InlineData(10, "SQLite Error 10: 'no such table: hash_key_check'.", false)]
+    public void IsMissingTable_NeedsTheGenericErrorCodeAndTheMessage(int errorCode, string message, bool expected)
+    {
+        var exception = new SqliteException(message, errorCode);
+
+        Assert.Equal(expected, SqliteSchemaManager.IsMissingTable(exception));
+    }
+
+    [Fact]
+    public async Task AnotherSqliteError_IsNotReportedAsAMissingTable()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"papuma_badkey_{Guid.NewGuid():N}.db");
+        try
+        {
+            await using (var connection = new SqliteConnection($"Data Source={path}"))
+            {
+                await connection.OpenAsync();
+                await using (var create = connection.CreateCommand())
+                {
+                    create.CommandText = "CREATE TABLE hash_key_check (kid TEXT NOT NULL PRIMARY KEY)"; // a table without the columns
+                    await create.ExecuteNonQueryAsync();
+                }
+
+                await Assert.ThrowsAsync<SqliteException>(() =>
+                    SqliteSchemaManager.EnsureHashKeyAsync(connection, new MasterKeyHashKeyProvider(MasterKey, "k1")));
+            }
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            File.Delete(path);
+        }
+    }
+
     private IHost Host(byte[] key, string keyId, bool ensureSchema = true)
     {
         var builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder();

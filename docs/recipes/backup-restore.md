@@ -6,7 +6,9 @@ by `ListenConnectionTests`, both in the kernel's test suite. Statements about
 replication and PITR describe PostgreSQL itself and are not kernel-tested — they
 follow from the kernel's few cluster-bound facts (§4). PostgreSQL kernel only —
 `Papuma.Kernel.Local` is a SQLite file: copy it while the application is stopped, or use
-SQLite's online backup.
+SQLite's online backup. The file runs in WAL mode — copy `app.db`, `app.db-wal` and `app.db-shm`
+together or checkpoint first, and protect every copy like the original (clear text;
+[SECURITY.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/SECURITY.md#sqlite-file-security-papumakernellocal)).
 
 Background: [concepts §19](../concepts.md#19-checkpoints-backup-and-rebuild-what-is-truth-what-is-derivable)
 (what is truth, what is derivable), [ADR-022 §7](../adr/adr-022-snapshot-cursor.md)

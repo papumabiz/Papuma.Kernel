@@ -227,6 +227,17 @@ Fixed:
   `ConnectionString` (`""`, whitespace) throws `ArgumentException` (`ConnectionString`) instead of failing at the
   first connection, and a `RetentionInterval` above what a `PeriodicTimer` accepts (about 49.7 days) throws
   `InvalidOperationException` instead of failing when the retention worker starts.
+- **A stored document nested too deep is reported as `DocumentTooDeepException` on the SQLite read paths (review L-22).**
+  `LoadAsync`, `LoadManyAsync`, the key loads and `RollbackAsync` parsed a stored document (or, for a rollback, the
+  stored diffs) with the raw parser, so a row deeper than the 64-level limit — written by a tool, a hand edit or a
+  foreign backup — failed with a `JsonException` carrying a byte position, while the write paths and the PostgreSQL
+  session say `DocumentTooDeepException` with the type and id. They go through the shared parser now. Also removed a
+  doubled `<summary>` on the key-lookup helpers of `SqliteDocumentSession`.
+- **`SqliteSchemaManager.EnsureHashKeyAsync` tells a missing `hash_key_check` table from other SQLite errors by the
+  result code (review L-23).** The `InvalidOperationException` ("run EnsureSchemaAsync") was raised for any
+  `SqliteException` whose message contained "no such table"; it now also needs `SQLITE_ERROR` (1), the code SQLite
+  gives that failure, so an error with another result code keeps its own `SqliteException` instead of being
+  translated by a text match (hardening; a plain missing table behaves as before).
 
 Breaking:
 
@@ -305,6 +316,16 @@ Breaking:
   a role that is the connecting account, a superuser, or may create roles. Use a dedicated role name; ordinary
   existing roles are reused as before.
 
+- **`PapumaKernelLocalOptions` takes `DbPath` literally and rejects a database that would not be shared (review L-7).**
+  The connection string was built as `$"Data Source={DbPath}"`, so a path such as `app.db;Mode=ReadOnly` added a
+  keyword. It is built with `SqliteConnectionStringBuilder` now: `;`, `=` and quotes in a path are part of the file
+  name. **Startup now throws `ArgumentException` (`DbPath` or `ConnectionString`) for** an empty or blank `DbPath`, a
+  private in-memory database (`:memory:`, `Mode=Memory` or a `file:` URI of memory without `Cache=Shared`), a
+  connection string without a data source and one that does not parse. Such a configuration used to start without
+  a word and then gave the schema initializer, every session and each feed worker a database of their own (empty
+  everywhere but where the schema was applied). A shared in-memory database (`Cache=Shared`) and every file path
+  are accepted as before; a test that used `Data Source=:memory:` needs a temp file or `Cache=Shared`.
+
 Changed:
 
 - **One feed engine per backend instead of four copies (review Q-1, P-7, L-15).** `ChangeFeedProcessor`,
@@ -372,6 +393,22 @@ Changed:
   Rejecting poison entries was considered and dropped: it would remove the only way to replay them. `IChangeHandler`
   and `IEventHandler` state that handlers run across all scopes and must establish the record's scope themselves.
   `docs/observability.md` recommends Npgsql's `Keepalive` so a half-dead `LISTEN` connection is noticed.
+- **Guard clauses of the SQLite session name the right argument (review L-12, L-14).** The counterpart of the
+  PostgreSQL change (S-10): `PatchAsync` rejects an `expectedVersion` below 1 with `ArgumentOutOfRangeException` (it
+  used to fail later as "not found" or a version conflict); `PatchWhereAsync` and `DeleteWhereAsync` reject a `null`
+  value with `ArgumentNullException` (`value`) before a transaction is opened (it was an `ArgumentException` from
+  inside the write); `GetHistoryAsync` reports `toVersion` when that is the bound that is wrong (it always blamed
+  `fromVersion`); `RedactEventsAsync` validates the selector path before opening the transaction and reports a bad one
+  as `selectorPath` (it said `path`, a name no caller passes).
+- **Documentation corrected and extended (review L-16, L-17, L-20, L-21, Q-5).** `Papuma.Kernel.Local` has no
+  `GdprExport` and no `DataInventory` — the playbook said GDPR "applies unchanged", the README and the factsheets
+  claimed parity; they now say that only redaction exists there and how to assemble an export by hand
+  (`docs/gdpr.md`). `SECURITY.md` gets a section on SQLite file security (clear text, permissions, the `-wal`/`-shm`
+  sidecars, backups, sync folders, no network drives) and the known limitation of unbounded result sets (which
+  operations, desktop, MCP — capped by `MaxRecordsPerCall`). `SqliteConnectionFactory`, `AddPapumaKernelLocal` and
+  `docs/observability.md` state that Microsoft.Data.Sqlite checks a `CancellationToken` only before a command runs: a
+  worker waiting for a lock returns after the command timeout (30 s; measured about 33 s), so a host shutdown can take
+  that long.
 
 Added:
 

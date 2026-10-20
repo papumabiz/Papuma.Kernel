@@ -154,7 +154,7 @@ observability to judge it is built in.
 ## `Papuma.Kernel.Local` — the same model, no server
 
 Same documents, same reversible diffs, same change feed, same privacy
-policies, same GDPR tooling, same schema-evolution story — built for the
+policies, same GDPR redaction, same schema-evolution story — built for the
 deployment shape where PostgreSQL is the wrong tool, not a smaller version of
 it: a single-writer SQLite file, opening in milliseconds, with no daemon, no
 port, no installer step your users have to run.
@@ -171,7 +171,7 @@ flowchart LR
 
 What's identical to `Papuma.Kernel` (same code, `Papuma.Kernel.Core`, not two
 implementations agreeing by convention): write primitives, field policies,
-GDPR tooling, event log, schema upcasting, per-handler ordered/checkpointed/
+GDPR redaction (the Art.-15/20 export and the Art.-30 inventory are PostgreSQL-only), event log, schema upcasting, per-handler ordered/checkpointed/
 retried feed delivery, and — genuinely shared, not a lookalike — the same
 `Meter`/`ActivitySource` (`KernelDiagnostics` lives in Core too, so both
 kernels' metrics/traces land in the same OTel pipeline). What's Postgres-only

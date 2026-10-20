@@ -43,6 +43,8 @@ These are the parts where a bug is a vulnerability rather than a defect:
   ([gdpr.md](docs/gdpr.md), [ADR-015](docs/adr/adr-015-gdpr-tooling.md)).
 - **Schema and identifier handling** — the DDL identifier validator on the
   startup schema path.
+- **The SQLite connection string of `Papuma.Kernel.Local`** — `DbPath` must stay data
+  (a path that smuggles in connection-string keywords is a bug).
 - **The ASP.NET Core dashboard** — it is unauthenticated unless you put
   authorization in front of it; mapping it without authorization metadata emits a
   startup warning. Exposing it publicly is a deployment mistake, not a kernel
@@ -69,9 +71,78 @@ application role). Also set `idle_in_transaction_session_timeout` on that role
 ([architecture](docs/architecture.md#session--unit-of-work)). Isolation tests must not run as a
 superuser, which passes them whether or not isolation works.
 
+## SQLite file security (`Papuma.Kernel.Local`)
+
+`Papuma.Kernel.Local` has no server, no roles and no row-level security: the database **file is
+the security boundary**, and the operating system is what protects it. The kernel does not
+encrypt, does not set file permissions and does not manage the files it leaves behind.
+
+- **Data at rest is clear text.** The `document` table holds every document in full (the stored
+  truth, [gdpr.md](docs/gdpr.md)); `change` holds the diffs, `event` the payloads, `failure` handler
+  error texts. Privacy policies keep sensitive values out of the *feed and events*, not out of the
+  documents. Use full-disk or per-user encryption of the OS (BitLocker, FileVault, LUKS). An
+  encrypted SQLite build (SQLCipher through your own `SQLitePCLRaw` bundle) is a possible
+  alternative, but nothing the kernel's tests cover.
+- **File permissions are the process's defaults.** SQLite creates the file with the process
+  umask (commonly `0644` on Unix) or the ACL the directory gives it (Windows). Put the file in a
+  per-user directory (`Environment.SpecialFolder.LocalApplicationData`, never a shared or
+  world-readable one), create that directory yourself with restrictive permissions (`0700`, a
+  user-only ACL) and, on Unix, start the process with `umask 077`.
+- **The `-wal` and `-shm` files hold data too.** The kernel opens every connection in WAL mode:
+  next to `app.db` there is `app.db-wal` with recently committed pages (not yet in the main file)
+  and `app.db-shm`. They sit beside the database, get the same permissions and exist until the
+  last connection closes. Encrypt, protect and delete the three files together. A redaction
+  (`RedactHistoryAsync`) rewrites the rows, but the earlier page contents can survive in the WAL and
+  in free pages of the main file until they are overwritten or checkpointed; the kernel sets
+  neither `PRAGMA secure_delete` nor runs `VACUUM`. If an erasure has to leave no trace in the file,
+  do both yourself after the redaction (with all other connections closed).
+- **Back up and copy carefully.** Copying `app.db` alone while a connection is open can miss
+  committed data that still sits in the WAL, and pairing it with a `-wal` file from another moment
+  is not safe either. Copy while the application is stopped (all connections closed), or use
+  SQLite's online backup (`SqliteConnection.BackupDatabase`) or `PRAGMA wal_checkpoint(TRUNCATE)`
+  first ([backup recipe](docs/recipes/backup-restore.md)). A copy is as sensitive as the original:
+  it needs the same encryption and permissions. Do not keep the live file in a folder that a sync
+  client (OneDrive, Dropbox, iCloud) uploads; the client copies the three files at different
+  moments and puts the clear text in the cloud.
+- **No network drives.** WAL needs shared memory on the same host and reliable file locking;
+  SQLite documents that WAL does not work over a network file system, and SMB/NFS locking is
+  not reliable enough for the single-writer assumption. Keep the file on a local disk, open it from
+  one process only.
+- **`DbPath` is data, not syntax.** The path is passed as a data source, so `;` or
+  `=` in it cannot add connection-string keywords (such as `Mode=ReadOnly`); a path that is empty
+  or `:memory:` is rejected at startup. If your application takes the path from user input,
+  you still decide which directories it may point to.
+
+## Known limitation: unbounded materialisation
+
+Several operations load everything they touch into memory in one piece; the kernel puts no limit
+on the size of the result. This is a deliberate trade-off at the application layer, not a defect
+the kernel hides, but it matters when the caller is not trusted or the machine is small:
+
+- **Affected operations (both kernels):** `GetHistoryAsync` (a document's whole history),
+  `GetChangesByCorrelationAsync`, `LoadManyAsync`, `PatchManyAsync` / `PatchWhereAsync` and
+  `DeleteManyAsync` / `DeleteWhereAsync` (every matching document and its diff), `RedactHistoryAsync`
+  and `RedactEventsAsync` (every matching record), and on PostgreSQL `GdprExport.ExportAsync`.
+  `LoadAllByKeyAsync` is the paged read (capped by `KeyMetadata.MaxLoadAllLimit`); feed batches are
+  bounded by `BatchSize`.
+- **Desktop and `Papuma.Kernel.Local`.** There is no memory limit of a server to fall back on: a
+  document with a long history, or a `Where` over a large table, can use most of the machine's RAM
+  and bring the whole application to a halt. Bound the ids you pass to the `*Many` operations, prefer
+  paged reads, and run bulk and redaction jobs in the background.
+- **MCP (`Papuma.Kernel.Mcp`, PostgreSQL only).** The tools were the exposed case (an agent can ask for
+  "the whole history"): they are capped by `PapumaMcpOptions.MaxRecordsPerCall` (default 500; the
+  history and correlation reads fetch at most the cap plus one row, the failure table is capped after
+  loading) and report `"truncated"` ([observability](docs/observability.md)). The limit applies per
+  call, not per client, so rate-limit the endpoint if agents are not trusted.
+- **Web applications.** Do not hand a client-controlled id list or key value to a `*Many`/`*Where`
+  operation without bounding it in your endpoint.
+
 ## Out of scope
 
 - Findings that require an already-compromised database superuser.
 - Denial of service by unbounded application input that the application itself
-  is expected to bound.
+  is expected to bound (see the known limitation above for what the kernel does
+  not bound).
+- Access to the SQLite file by anyone the operating system lets read it
+  ([SQLite file security](#sqlite-file-security-papumakernellocal)).
 - Missing hardening in `samples/` — samples are illustrative, not deployable.

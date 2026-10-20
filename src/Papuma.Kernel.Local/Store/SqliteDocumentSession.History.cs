@@ -25,6 +25,10 @@ public sealed partial class SqliteDocumentSession
     /// <param name="fromVersion">Inclusive lower version bound (e.g. <c>expectedVersion + 1</c> in a conflict).</param>
     /// <param name="toVersion">Inclusive upper version bound.</param>
     /// <param name="ct">A cancellation token.</param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="fromVersion"/> or <paramref name="toVersion"/> is below 1, or
+    /// <paramref name="toVersion"/> is below <paramref name="fromVersion"/> (reported as <c>toVersion</c>).
+    /// </exception>
     public async Task<IReadOnlyList<ChangeRecord>> GetHistoryAsync<T>(
         string id,
         long? fromVersion = null,
@@ -34,10 +38,19 @@ public sealed partial class SqliteDocumentSession
     {
         var metadata = _model.GetRequired<T>();
         InputValidator.ValidateDocumentId(id);
-        if (fromVersion is < 1 || toVersion is < 1 || toVersion < fromVersion)
+        if (fromVersion is < 1)
         {
-            throw new ArgumentOutOfRangeException(nameof(fromVersion),
-                "Version bounds must be >= 1 and fromVersion <= toVersion.");
+            throw new ArgumentOutOfRangeException(nameof(fromVersion), fromVersion, "Version bounds must be >= 1.");
+        }
+
+        if (toVersion is < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(toVersion), toVersion, "Version bounds must be >= 1.");
+        }
+
+        if (toVersion < fromVersion)
+        {
+            throw new ArgumentOutOfRangeException(nameof(toVersion), toVersion, "toVersion must not be below fromVersion.");
         }
 
         var (conn, tx) = await EnsureTransactionAsync(ct);

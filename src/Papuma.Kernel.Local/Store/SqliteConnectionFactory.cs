@@ -32,6 +32,16 @@ namespace Papuma.Kernel.Store;
 /// (<c>PRAGMA wal_checkpoint(TRUNCATE)</c>) or ensure all connections to the file are
 /// closed before copying it for export/backup.
 /// </para>
+/// <para>
+/// <b>Cancellation is checked before a command runs, not while it waits.</b>
+/// Microsoft.Data.Sqlite runs commands synchronously behind its <c>*Async</c> methods: a
+/// <see cref="CancellationToken"/> that fires while a statement runs, or while it waits for another
+/// writer's lock, is not observed until the call returns. Such a wait ends with the command timeout
+/// (30 s by default; measured here: a token cancelled after 300 ms, <c>SQLITE_BUSY</c> after about
+/// 33 s), a running statement with its own completion. A host shutdown can therefore take that long;
+/// plan <c>HostOptions.ShutdownTimeout</c> accordingly. The <c>busy_timeout</c> below (5 s) only
+/// bounds the engine's own busy handler.
+/// </para>
 /// </remarks>
 internal static class SqliteConnectionFactory
 {

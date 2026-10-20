@@ -101,13 +101,13 @@ public sealed class UserProjection : IChangeHandler, IProjection
 await processor.GetLagAsync(); await processor.GetFailuresAsync();
 await processor.RetryFailureAsync(name, seq);
 await processor.ResetProjectionsAsync();           // or ResetProjectionAsync(name) — projections only
-DataInventory.Build(model);                         // Art. 30 + policy review
+DataInventory.Build(model);                         // Art. 30 + policy review (PostgreSQL kernel only)
 
 // Tests (Papuma.Kernel.Testing, ADR-021)
 await using var db = await PapumaTestDatabase.StartAsync();   // non-superuser app role: RLS applies
 var testStore = await db.CreateStoreAsync(model);
 await processor.DrainAsync();                                  // throws if a handler failed
-await GdprExport.ExportAsync(store, scope, docRefs, eventSelectors);
+await GdprExport.ExportAsync(store, scope, docRefs, eventSelectors);   // PostgreSQL kernel only; no SQLite counterpart
 await s.RedactHistoryAsync<User>(id, reason, paths);
 ```
 
@@ -207,13 +207,41 @@ same hard rules above — with these engine-specific adjustments:
 - **Key values compare as numbers, not text.** SQLite's `json_extract` returns INTEGER/REAL
   for JSON numbers, so numeric keys bind as numbers (integers as `long`, exact beyond 2^53).
   `RedactEventsAsync` selects by the JSON spelling as text, like PostgreSQL's `#>>`.
+- **No `GdprExport`, no `DataInventory`.** Both live in the PostgreSQL package (`Papuma.Kernel`);
+  `Papuma.Kernel.Local` has the erasure half — `RedactHistoryAsync` and `RedactEventsAsync` behave
+  as on PostgreSQL — but nothing that assembles an Art. 15/20 export or the Art. 30 inventory. Build
+  the export by hand: per document `LoadAsync` + `GetHistoryAsync` (diffs are policy-applied, so the
+  minimisation holds), events straight from the `event` table by payload path. Keep the metadata
+  rule of [gdpr.md](../gdpr.md#export-art-15-access--art-20-portability) in mind: `actorId`,
+  causation and `reason` name third parties.
+- **`DbPath` is a file path, taken literally.** `;` and `=` in it are part of the name, not
+  connection-string syntax. An empty path and `:memory:` fail at startup — the schema initializer,
+  sessions and feed workers each open their own connection and would each see a different, empty
+  database. A raw `ConnectionString` needs a data source too; a shared in-memory database
+  (`Cache=Shared`) is accepted and lives only while a connection to it stays open.
+- **Cancellation is checked before a command, not during it.** Microsoft.Data.Sqlite does not
+  interrupt a running statement or a wait for a lock when the token fires. A write that waits for
+  another writer's lock returns only after the command timeout (30 s by default; measured: a token
+  cancelled after 300 ms, the call returned after about 33 s) — so a host shutdown can take that
+  long. The kernel's own `PRAGMA busy_timeout` is 5 s; a long-running statement also runs to its
+  end. Plan `HostOptions.ShutdownTimeout` (default 30 s) with that in mind: if it elapses first, the
+  host stops waiting and the process ends — SQLite rolls the interrupted write back, and the
+  records of an unfinished feed cycle come again (at-least-once). Keep sessions short and never hold
+  one open across user interaction (it holds the write lock).
+- **Result sets are not bounded.** `GetHistoryAsync`, `GetChangesByCorrelationAsync`,
+  `LoadManyAsync`, `PatchManyAsync`/`PatchWhereAsync`, `DeleteManyAsync`/`DeleteWhereAsync` and
+  both `Redact…` calls materialise everything they touch in memory, which on a desktop with little
+  RAM is a real limit — see the known limitation in [SECURITY.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/SECURITY.md#known-limitation-unbounded-materialisation).
+  Page with `LoadAllByKeyAsync` (capped) and bound the ids you pass.
+- **The `.db` file is the data, in clear text.** Permissions, the `-wal`/`-shm` sidecar files,
+  backups and network drives: [SECURITY.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/SECURITY.md#sqlite-file-security-papumakernellocal).
 - **No embedded dashboard, no feed-lag health check, no MCP surface (yet).**
   Those live in `Papuma.Kernel.AspNetCore`/`Papuma.Kernel.Mcp`, which have no
   SQLite counterpart. `KernelDiagnostics` (`Meter`/`ActivitySource`) *is*
   shared — both kernels' metrics/traces land in the same OTel pipeline.
 
 Everything else on this page — `SaveAsync`/`PatchAsync`/`Increment`/handlers/
-GDPR/schema evolution/scope-binding — applies unchanged; it's the same code,
+GDPR redaction/schema evolution/scope-binding — applies unchanged; it's the same code,
 shared via `Papuma.Kernel.Core`. Full reasoning for every difference above:
 [docs/analyses/local-kernel-sqlite-sibling.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/docs/analyses/local-kernel-sqlite-sibling.md)
 (shipped inside the `Papuma.Kernel.Local` package).

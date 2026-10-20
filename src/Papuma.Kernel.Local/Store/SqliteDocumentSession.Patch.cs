@@ -33,6 +33,7 @@ public sealed partial class SqliteDocumentSession
     /// field-level last-writer-wins — correct for independent fields (ADR-012).
     /// </param>
     /// <param name="ct">A cancellation token.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="expectedVersion"/> is given and below 1 (stored versions start at 1).</exception>
     /// <exception cref="DocumentNotFoundException">The document does not exist.</exception>
     /// <exception cref="ConcurrencyException">The stored version does not match <paramref name="expectedVersion"/>.</exception>
     /// <exception cref="SchemaUpcastRequiredException">The document is stored with an older schema version.</exception>
@@ -46,6 +47,11 @@ public sealed partial class SqliteDocumentSession
         ArgumentNullException.ThrowIfNull(patch);
         var metadata = _model.GetRequired<T>();
         InputValidator.ValidateDocumentId(id);
+        if (expectedVersion is { } expected)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(expected, nameof(expectedVersion));
+        }
+
         var operations = CollectOperations(patch, metadata);
 
         using var activity = StartWriteActivity("patch", metadata.Name, id);
@@ -169,6 +175,7 @@ public sealed partial class SqliteDocumentSession
         where T : class
     {
         var keyMetadata = ResolveDeclaredKey(key);
+        ArgumentNullException.ThrowIfNull(value);
         // Path interpolated as a validated literal, not bound — a bound parameter defeats
         // the declared-key expression index (ValidatedKeyJsonPath's remarks).
         return BulkPatchAsync(
@@ -213,6 +220,7 @@ public sealed partial class SqliteDocumentSession
         where T : class
     {
         var keyMetadata = ResolveDeclaredKey(key);
+        ArgumentNullException.ThrowIfNull(value);
         return BulkDeleteAsync<T>(
             $"AND json_extract(data, '{ValidatedKeyJsonPath(keyMetadata)}') = @keyValue",
             cmd => cmd.Parameters.AddWithValue("keyValue", ToKeyComparisonValue(value)),

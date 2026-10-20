@@ -55,6 +55,11 @@ values went into the feed unprotected before: `RedactHistoryAsync` cleans the hi
 
 ## Export (Art. 15 access / Art. 20 portability)
 
+> **PostgreSQL kernel only.** `GdprExport` and `DataInventory` are not part of
+> `Papuma.Kernel.Local` (SQLite); there, redaction (below) works the same, but an export has to be
+> assembled by hand — see the playbook's
+> [Differences section](ai/papuma-kernel-playbook.md#differences-when-using-papumakernellocal-sqlite-embedded).
+
 The application supplies the subject→data mapping (via its keys and projections);
 the kernel assembles in **one repeatable-read, read-only transaction** (one consistent
 snapshot: state and history never come from two different moments, even while a writer

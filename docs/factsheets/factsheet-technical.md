@@ -142,7 +142,8 @@ workloads, run a pilot first; the observability needed to evaluate it is built
 in.
 
 `Papuma.Kernel.Local` is newer and earlier-stage: full API parity with the
-Postgres kernel's write/read/patch/GDPR/rollback/feed-processing surface, 80
+Postgres kernel's write/read/patch/GDPR-redaction/rollback/feed-processing surface (no
+`GdprExport`/`DataInventory`), 80
 tests green against the real SQLite engine (including empirically pinned
 driver behavior — WAL mode, busy timeouts, expression-index matching — not
 assumed), but zero production hours and no throughput measurements yet, only

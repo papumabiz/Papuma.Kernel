@@ -149,6 +149,8 @@ public sealed partial class SqliteDocumentSession
                 nameof(paths));
         }
 
+        var selectorJsonPath = ToJsonPath(selectorPath, nameof(selectorPath));
+
         using var activity = StartWriteActivity("redact", metadata.Name, documentId: null);
         try
         {
@@ -170,7 +172,7 @@ public sealed partial class SqliteDocumentSession
                     cmd.Parameters.AddWithValue("scope", Scope.Scope.ToString());
                     cmd.Parameters.AddWithValue("tenantId", Scope.TenantId ?? string.Empty);
                     cmd.Parameters.AddWithValue("type", metadata.Name);
-                    cmd.Parameters.AddWithValue("path", ToJsonPath(selectorPath));
+                    cmd.Parameters.AddWithValue("path", selectorJsonPath);
                     cmd.Parameters.AddWithValue("value", selectorValue);
 
                     await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -240,7 +242,7 @@ public sealed partial class SqliteDocumentSession
     /// containing a dot is one label. Labels are bound as a parameter, not interpolated; a quote or
     /// backslash inside a key has no portable JSONPath spelling and is refused.
     /// </summary>
-    private static string ToJsonPath(string path)
+    private static string ToJsonPath(string path, string paramName)
     {
         var builder = new System.Text.StringBuilder("$");
         foreach (var segment in DiffPath.Split(path))
@@ -249,7 +251,7 @@ public sealed partial class SqliteDocumentSession
             {
                 throw new ArgumentException(
                     $"The selector path '{path}' has a key with a quote or a backslash, which an SQLite JSONPath cannot name.",
-                    nameof(path));
+                    paramName);
             }
 
             builder.Append(".\"").Append(segment).Append('"');

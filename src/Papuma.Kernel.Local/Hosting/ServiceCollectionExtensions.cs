@@ -27,6 +27,13 @@ public static class ServiceCollectionExtensions
     /// hosted services for schema setup, feed processing and event retention. Register
     /// handlers via the returned builder.
     /// </summary>
+    /// <remarks>
+    /// Host shutdown can take longer than the stopping token suggests: Microsoft.Data.Sqlite checks
+    /// a <see cref="CancellationToken"/> only before a command runs, so a worker that waits for the
+    /// write lock (or runs a long statement) returns only when the wait ends — up to the command
+    /// timeout of 30 s. Size <c>HostOptions.ShutdownTimeout</c> accordingly; progress of an
+    /// unfinished feed cycle is redelivered (at-least-once).
+    /// </remarks>
     /// <param name="services">The service collection.</param>
     /// <param name="configure">The kernel configuration.</param>
     public static PapumaKernelLocalBuilder AddPapumaKernelLocal(

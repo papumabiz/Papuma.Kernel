@@ -207,7 +207,8 @@ version. For regulated, mission-critical workloads, run a pilot first — the
 observability to judge it is built in.
 
 `Papuma.Kernel.Local` is newer and should be read as such: full parity with
-the Postgres kernel's write/read/patch/GDPR/rollback/feed-processing surface,
+the Postgres kernel's write/read/patch/GDPR-redaction/rollback/feed-processing surface
+(the Art.-15/20 export and the Art.-30 inventory are PostgreSQL-only),
 **58 tests green against the real SQLite engine** (including empirically
 verified driver behavior, not assumed — WAL mode, busy timeouts, expression
 index matching), but zero hours of real application traffic yet and no
