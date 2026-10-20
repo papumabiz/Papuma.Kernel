@@ -123,6 +123,26 @@ let! result =
 Plain `runSession` leaves committing to you; a dispose with uncommitted writes rolls
 back and logs a warning (event id 1001).
 
+The dispose is awaited, not blocked on, so `runSession` is safe on a UI thread. If the
+body throws *and* the dispose throws, the caller gets the body's exception (the dispose
+failure is attached as `ex.Data["Papuma.DisposeException"]`); if only the dispose throws,
+that one propagates.
+
+## Cancellation
+
+F# module functions cannot take an optional argument, so each function that talks to the
+database has a twin with the token as its first argument:
+
+| Without a token | With a token |
+|---|---|
+| `trySaveAsync session doc v` | `trySaveWithTokenAsync ct session doc v` |
+| `tryPatchAsync session id patch v` | `tryPatchWithTokenAsync ct session id patch v` |
+| `runSessionCommitted session f` | `runSessionCommittedWithToken ct session f` |
+
+The plain names pass `CancellationToken.None`. Cancellation is not a `KernelError`: it
+surfaces as `OperationCanceledException`. A token cancelled before the commit leaves the
+writes uncommitted — the dispose rolls them back.
+
 ## What this package deliberately does not do
 
 Discriminated-union or `'T option` fields on document types aren't supported —

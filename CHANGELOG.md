@@ -175,6 +175,16 @@ Breaking:
 
 Changed:
 
+- **F# wrapper: `runSession` no longer blocks, and the writes can be cancelled (review F-2, F-1).** `runSession`
+  disposed the session with `GetAwaiter().GetResult()` inside a `finally` — a blocked thread per call and a
+  deadlock under a single-threaded `SynchronizationContext` (UI thread, `.Local` on the desktop); a throwing dispose
+  also replaced the exception of the body. The dispose is awaited now (the body's outcome is buffered and replayed
+  with its original stack trace); if both throw, the caller sees the body's exception and the dispose failure
+  hangs on it as `Data["Papuma.DisposeException"]`. New token variants — `trySaveWithTokenAsync`,
+  `tryPatchWithTokenAsync`, `runSessionCommittedWithToken` — take the `CancellationToken` as the first argument
+  (F# module functions have no optional parameters); the existing functions keep their signatures and pass
+  `CancellationToken.None`. Cancellation surfaces as `OperationCanceledException`, not as a `KernelError`.
+
 - **MCP: hardening without a design change (review M-8, M-5, M-6, M-7).** `get_feed_failures` cuts `lastError` at
   300 characters like the dashboard; the descriptions of all tools that return tenant data say that the values are
   untrusted and must not be followed as instructions. The reflection bridge to `GetHistoryAsync<T>` is replaced by
