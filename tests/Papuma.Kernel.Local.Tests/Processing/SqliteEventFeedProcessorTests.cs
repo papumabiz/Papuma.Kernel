@@ -4,6 +4,7 @@
 using System.Collections.Concurrent;
 
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
 
 using Papuma.Kernel.Events;
 using Papuma.Kernel.Local.Tests.Infrastructure;
@@ -196,6 +197,19 @@ public sealed class SqliteEventFeedProcessorTests : IAsyncLifetime
         Assert.Equal(0, after.Lag);
     }
 
+    [Fact]
+    public async Task ResetCheckpoint_IsLogged_LikeInTheChangeFeed()
+    {
+        var handler = new RecordingHandler(NewHandlerName());
+        var logger = new ListLogger<SqliteEventFeedProcessor>();
+        using var processor = new SqliteEventFeedProcessor(
+            _fixture.ConnectionString, [handler], notifier: null, new ChangeFeedProcessorOptions { BatchSize = 100_000 }, logger);
+
+        await processor.ResetCheckpointAsync(handler.Name);
+
+        Assert.Contains(logger.Messages, m => m.Contains("reset") && m.Contains(handler.Name));
+    }
+
     private async Task<long> CountRowsAsync(string table, string key)
     {
         await using var conn = new SqliteConnection(_fixture.ConnectionString);
@@ -204,5 +218,28 @@ public sealed class SqliteEventFeedProcessorTests : IAsyncLifetime
         cmd.CommandText = $"SELECT COUNT(*) FROM {table} WHERE handler_name = @name";
         cmd.Parameters.AddWithValue("name", key);
         return (long)(await cmd.ExecuteScalarAsync())!;
+    }
+
+    /// <summary>Keeps the formatted messages of everything logged at information level or above.</summary>
+    private sealed class ListLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel >= LogLevel.Information)
+            {
+                lock (Messages)
+                {
+                    Messages.Add(formatter(state, exception));
+                }
+            }
+        }
     }
 }

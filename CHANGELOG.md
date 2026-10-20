@@ -175,6 +175,18 @@ Breaking:
 
 Changed:
 
+- **One feed engine per backend instead of four copies (review Q-1, P-7, L-15).** `ChangeFeedProcessor`,
+  `EventFeedProcessor`, `SqliteChangeFeedProcessor` and `SqliteEventFeedProcessor` were four ~700-line copies of
+  one engine that had already drifted apart. Each backend now has one internal engine (`PostgresFeedEngine`,
+  `SqliteFeedEngine`) that a feed extends with its table, checkpoint-key prefix and row mapping; the four public
+  processors are thin facades with an **unchanged public surface** (pinned by reflection tests). Behaviour is the
+  same, with the drift removed: the event feeds' raw `ResetCheckpointAsync` now logs like the change feeds'; the
+  poison, failure and lifecycle log messages carry the feed as a structured value (`{Kind}`/`{Feed}`) instead of
+  differing wording ("Event handler … skips poison event seq" → "Handler … skips poison event seq"). Anyone
+  alerting on the exact text of those log lines has to adjust. The tests that were missing for the event feeds
+  (poison, retry, lag, raw reset, leader coordination on PostgreSQL) were added first and ran green against the old
+  code before anything moved.
+
 - **F# wrapper: `runSession` no longer blocks, and the writes can be cancelled (review F-2, F-1).** `runSession`
   disposed the session with `GetAwaiter().GetResult()` inside a `finally` — a blocked thread per call and a
   deadlock under a single-threaded `SynchronizationContext` (UI thread, `.Local` on the desktop); a throwing dispose

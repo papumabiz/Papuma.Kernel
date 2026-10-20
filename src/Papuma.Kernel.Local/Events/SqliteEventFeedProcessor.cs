@@ -1,16 +1,12 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
-using System.Collections.Concurrent;
-using System.Diagnostics;
-using System.Diagnostics.Metrics;
 using System.Text.Json.Nodes;
 
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
-using Papuma.Kernel.Diagnostics;
 using Papuma.Kernel.Processing;
 using Papuma.Kernel.Store;
 using Papuma.Kernel.Tenancy;
@@ -31,24 +27,20 @@ namespace Papuma.Kernel.Events;
 /// </remarks>
 public sealed class SqliteEventFeedProcessor : IDisposable
 {
-    private const string CheckpointPrefix = "event:";
-    private const string FeedTag = "event";
-
-    private readonly string _connectionString;
-    private readonly IReadOnlyList<IEventHandler> _handlers;
-    private readonly ChangeFeedProcessorOptions _options;
-    private readonly SqliteChangeNotifier? _notifier;
-    private readonly ILogger _logger;
-
-    private readonly Meter _meter;
-    private readonly ConcurrentDictionary<string, long> _lagByHandler = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, int?> _projectionVersions;
-    private readonly ConcurrentDictionary<string, bool> _pauseLogged = new(StringComparer.Ordinal);
-    private bool _registered;
+    private readonly EventFeedEngine _engine;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SqliteEventFeedProcessor"/> class.
     /// </summary>
+    /// <param name="connectionString">The SQLite connection string.</param>
+    /// <param name="handlers">
+    /// The event handlers: unique names of letters, digits, <c>.</c>, <c>_</c> and <c>-</c> (at most 100
+    /// characters, starting with a letter or digit) — the name is the handler's checkpoint identity.
+    /// </param>
+    /// <exception cref="ArgumentException">A handler name is missing, invalid or used twice.</exception>
+    /// <param name="notifier">Optional in-process wakeup signal; <c>null</c> falls back to pure polling.</param>
+    /// <param name="options">Engine options (optional).</param>
+    /// <param name="logger">Logger (optional).</param>
     public SqliteEventFeedProcessor(
         string connectionString,
         IEnumerable<IEventHandler> handlers,
@@ -56,621 +48,55 @@ public sealed class SqliteEventFeedProcessor : IDisposable
         ChangeFeedProcessorOptions? options = null,
         ILogger<SqliteEventFeedProcessor>? logger = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
-        ArgumentNullException.ThrowIfNull(handlers);
-
-        _connectionString = connectionString;
-        _handlers = handlers.ToList();
-        _options = options ?? new ChangeFeedProcessorOptions();
-        _options.Validate();
-        _notifier = notifier;
-        _logger = logger ?? NullLogger<SqliteEventFeedProcessor>.Instance;
-
-        foreach (var handler in _handlers)
-        {
-            FeedHandlerNames.Validate(handler.Name, handler.GetType(), nameof(handlers));
-        }
-
-        var duplicate = _handlers.GroupBy(h => h.Name, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1);
-        if (duplicate is not null)
-        {
-            throw new ArgumentException($"Handler name '{duplicate.Key}' is registered more than once.", nameof(handlers));
-        }
-
-        _projectionVersions = _handlers.ToDictionary(
-            h => h.Name, h => HandlerKind.Validate(h, h.Name), StringComparer.Ordinal);
-
-        _meter = new Meter(KernelDiagnostics.SourceName);
-        _meter.CreateObservableGauge(
-            "papuma.feed.lag",
-            ObserveLag,
-            unit: "{record}",
-            description: "Feed head minus checkpoint, per handler.");
+        _engine = new EventFeedEngine(
+            connectionString, handlers, notifier, options, logger ?? NullLogger<SqliteEventFeedProcessor>.Instance);
     }
 
     /// <summary>Disposes the per-instance lag gauge.</summary>
-    public void Dispose() => _meter.Dispose();
+    public void Dispose() => _engine.Dispose();
 
     /// <summary>Gets a value indicating whether there is anything for <see cref="RunAsync"/> to run.</summary>
-    internal bool HasHandlers => _handlers.Count > 0;
-
-    private IEnumerable<Measurement<long>> ObserveLag()
-    {
-        foreach (var (handler, lag) in _lagByHandler)
-        {
-            yield return new Measurement<long>(lag,
-                new KeyValuePair<string, object?>("papuma.feed", FeedTag),
-                new KeyValuePair<string, object?>("papuma.handler", handler));
-        }
-    }
+    internal bool HasHandlers => _engine.HasHandlers;
 
     /// <summary>
     /// Runs the processing loop until cancellation.
     /// </summary>
-    public async Task RunAsync(CancellationToken ct)
-    {
-        if (_handlers.Count == 0)
-        {
-            _logger.LogInformation("Event feed processor idle — no handlers registered.");
-            return;
-        }
-
-        _logger.LogInformation("Event feed processor started ({HandlerCount} handlers).", _handlers.Count);
-
-        // Own signal buffer, taken before the first cycle: a commit during any cycle wakes
-        // this processor right after it — the other feed processor gets its own signal.
-        using var subscription = _notifier?.Subscribe();
-
-        var faultedCycles = 0;
-        while (!ct.IsCancellationRequested)
-        {
-            FeedCycleResult cycle;
-            try
-            {
-                cycle = await RunCycleAsync(ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                break; // shutdown — and only shutdown: any other OCE is a fault, never a stop
-            }
-            catch (Exception ex)
-            {
-                cycle = FeedCycleResult.Failed(ex);
-            }
-
-            if (cycle.HasFaults)
-            {
-                faultedCycles++;
-                LogFaults(cycle.Faults, faultedCycles);
-            }
-            else
-            {
-                faultedCycles = 0;
-            }
-
-            if (cycle.Processed > 0)
-            {
-                continue; // more may be waiting
-            }
-
-            try
-            {
-                if (cycle.HasFaults)
-                {
-                    // Never retry a failing cycle at once: a missing file or a locked database
-                    // must not turn the worker into a busy loop.
-                    await Task.Delay(FeedLoop.BackoffDelay(_options.PollInterval, faultedCycles), ct);
-                }
-                else
-                {
-                    await TryRefreshLagCacheAsync(ct);
-                    if (subscription is not null)
-                    {
-                        await subscription.WaitAsync(_options.PollInterval, ct);
-                    }
-                    else
-                    {
-                        await Task.Delay(_options.PollInterval, ct);
-                    }
-                }
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                break;
-            }
-        }
-
-        _logger.LogInformation("Event feed processor stopped.");
-    }
-
-    private void LogFaults(IReadOnlyList<FeedFault> faults, int consecutiveFaultedCycles)
-    {
-        foreach (var fault in faults)
-        {
-            if (FeedLoop.ShouldLog(consecutiveFaultedCycles))
-            {
-                _logger.LogError(fault.Error,
-                    "Event feed processing failed for {Handler} (cycle {Cycle} in a row); backing off.",
-                    fault.Handler ?? "<all handlers>", consecutiveFaultedCycles);
-            }
-            else
-            {
-                _logger.LogDebug(fault.Error,
-                    "Event feed processing still failing for {Handler} (cycle {Cycle} in a row).",
-                    fault.Handler ?? "<all handlers>", consecutiveFaultedCycles);
-            }
-        }
-    }
-
-    private async Task TryRefreshLagCacheAsync(CancellationToken ct)
-    {
-        try
-        {
-            await GetLagAsync(ct);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            _logger.LogWarning(ex, "Lag refresh failed; continuing.");
-        }
-    }
+    /// <param name="ct">The cancellation token stopping the loop.</param>
+    public Task RunAsync(CancellationToken ct) => _engine.RunAsync(ct);
 
     /// <summary>
     /// Runs one processing cycle over all handlers and returns the number of delivered events.
     /// </summary>
     /// <exception cref="AggregateException">More than one handler's batch faulted (the others still ran).</exception>
-    public async Task<int> ProcessOnceAsync(CancellationToken ct = default)
-    {
-        var cycle = await RunCycleAsync(ct);
-        FeedLoop.ThrowIfFaulted(cycle.Faults);
-        return cycle.Processed;
-    }
-
-    // A fault in one handler's batch (an unmappable row, a busy database on the outcome
-    // write) must not keep the handlers after it from running: each one is isolated, the
-    // faults are reported.
-    private async Task<FeedCycleResult> RunCycleAsync(CancellationToken ct)
-    {
-        await EnsureRegisteredAsync(ct);
-
-        var stopwatch = Stopwatch.StartNew();
-        var total = 0;
-        List<FeedFault>? faults = null;
-        foreach (var handler in _handlers)
-        {
-            try
-            {
-                total += await ProcessHandlerBatchAsync(handler, ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                (faults ??= []).Add(new FeedFault(handler.Name, ex));
-            }
-        }
-
-        KernelDiagnostics.CycleDuration.Record(stopwatch.Elapsed.TotalMilliseconds,
-            new KeyValuePair<string, object?>("papuma.feed", FeedTag));
-        return new FeedCycleResult(total, faults ?? []);
-    }
+    public Task<int> ProcessOnceAsync(CancellationToken ct = default) => _engine.ProcessOnceAsync(ct);
 
     /// <summary>
     /// Returns the persisted failure entries (retrying and poison) of this processor's handlers.
     /// </summary>
-    public async Task<IReadOnlyList<FeedFailure>> GetFailuresAsync(CancellationToken ct = default)
-    {
-        var keys = _handlers.Select(h => CheckpointPrefix + h.Name).ToArray();
-
-        await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT handler_name, seq, attempts, last_error, next_retry_at, updated_at
-            FROM failure
-            WHERE handler_name IN (SELECT value FROM json_each(@names))
-            ORDER BY handler_name, seq
-            """;
-        cmd.Parameters.AddWithValue("names", System.Text.Json.JsonSerializer.Serialize(keys));
-
-        var failures = new List<FeedFailure>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            failures.Add(new FeedFailure(
-                HandlerName: reader.GetString(0)[CheckpointPrefix.Length..],
-                Seq: reader.GetInt64(1),
-                Attempts: reader.GetInt32(2),
-                LastError: reader.GetString(3),
-                NextRetryAt: SqliteTimestamp.Parse(reader.GetString(4)),
-                UpdatedAt: SqliteTimestamp.Parse(reader.GetString(5))));
-        }
-
-        return failures;
-    }
+    public Task<IReadOnlyList<FeedFailure>> GetFailuresAsync(CancellationToken ct = default) =>
+        _engine.GetFailuresAsync(ct);
 
     /// <summary>
     /// Removes a failure entry so the next cycle retries the event immediately.
     /// </summary>
     /// <exception cref="ArgumentException">No handler of that name runs in this processor.</exception>
-    public async Task<bool> RetryFailureAsync(string handlerName, long seq, CancellationToken ct = default)
-    {
-        EnsureKnownHandler(handlerName);
-
-        await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM failure WHERE handler_name = @name AND seq = @seq";
-        cmd.Parameters.AddWithValue("name", CheckpointPrefix + handlerName);
-        cmd.Parameters.AddWithValue("seq", seq);
-
-        return await cmd.ExecuteNonQueryAsync(ct) > 0;
-    }
+    public Task<bool> RetryFailureAsync(string handlerName, long seq, CancellationToken ct = default) =>
+        _engine.RetryFailureAsync(handlerName, seq, ct);
 
     /// <summary>
     /// Resets a handler's checkpoint to 0 and clears its failure entries.
     /// </summary>
     /// <exception cref="ArgumentException">No handler of that name runs in this processor.</exception>
-    public async Task ResetCheckpointAsync(string handlerName, CancellationToken ct = default)
-    {
-        EnsureKnownHandler(handlerName);
-        var key = CheckpointPrefix + handlerName;
-
-        await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
-        await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
-        await SqliteProjectionLifecycle.ResetCursorAsync(conn, tx, key, version: null, ct);
-        await tx.CommitAsync(ct);
-    }
+    public Task ResetCheckpointAsync(string handlerName, CancellationToken ct = default) =>
+        _engine.ResetCheckpointAsync(handlerName, ct);
 
     /// <summary>
     /// Returns a lag snapshot per handler (event log head vs. checkpoint). A pure read: it neither
     /// registers a handler nor reconciles a projection version, so a dashboard or health probe
     /// can never trigger a rebuild. A handler that has not been registered yet shows the whole backlog.
     /// </summary>
-    public async Task<IReadOnlyList<ChangeFeedLagSnapshot>> GetLagAsync(CancellationToken ct = default)
-    {
-        // Deferred: a lag read must not take the file's write lock (it runs every idle cycle).
-        await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
-        await using var tx = conn.BeginTransaction(deferred: true);
-
-        long latestSeq;
-        await using (var headCmd = conn.CreateCommand())
-        {
-            headCmd.Transaction = tx;
-            headCmd.CommandText = "SELECT COALESCE(MAX(seq), 0) FROM event";
-            latestSeq = (long)(await headCmd.ExecuteScalarAsync(ct))!;
-        }
-
-        var snapshots = new List<ChangeFeedLagSnapshot>(_handlers.Count);
-        foreach (var handler in _handlers)
-        {
-            await using var checkpointCmd = conn.CreateCommand();
-            checkpointCmd.Transaction = tx;
-            checkpointCmd.CommandText = "SELECT last_seq FROM checkpoint WHERE handler_name = @name";
-            checkpointCmd.Parameters.AddWithValue("name", CheckpointPrefix + handler.Name);
-            var checkpoint = await checkpointCmd.ExecuteScalarAsync(ct) is long seq ? seq : 0L;
-
-            var lag = latestSeq > checkpoint ? latestSeq - checkpoint : 0L;
-            var declared = _projectionVersions[handler.Name];
-            var stored = await SqliteProjectionLifecycle.ReadVersionAsync(conn, tx, CheckpointPrefix + handler.Name, ct);
-            snapshots.Add(new ChangeFeedLagSnapshot(handler.Name, checkpoint, latestSeq, lag)
-            {
-                ProjectionVersion = declared,
-                Paused = declared is int d && stored > d,
-            });
-            _lagByHandler[handler.Name] = lag;
-        }
-
-        await tx.CommitAsync(ct);
-        return snapshots;
-    }
-
-    private async Task<int> ProcessHandlerBatchAsync(IEventHandler handler, CancellationToken ct)
-    {
-        var key = CheckpointPrefix + handler.Name;
-
-        // Three short phases instead of one transaction around the handlers: a handler
-        // may write to the same database file through its own connection (a local
-        // projection), and a slow handler (mail, HTTP) must not hold the file's single
-        // write lock against the application. Guarantees are unchanged — at-least-once,
-        // strict order, stop-the-line — because the checkpoint still only moves after
-        // the handler returned.
-
-        // 1. Read: one consistent snapshot of checkpoint and batch.
-        long checkpoint;
-        long generation; // the checkpoint's reset_count: told apart from "reset to the same position"
-        IReadOnlyList<BatchItem> batch;
-        await using (var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct))
-        await using (var tx = conn.BeginTransaction(deferred: true))
-        {
-            (checkpoint, generation) = await SqliteProjectionLifecycle.ReadCursorAsync(conn, tx, key, ct);
-            batch = await IsPausedAsync(handler, conn, tx, key, ct)
-                ? []
-                : await LoadBatchAsync(conn, tx, key, checkpoint, ct);
-            await tx.CommitAsync(ct);
-        }
-
-        if (batch.Count == 0)
-        {
-            return 0;
-        }
-
-        // 2. Handle: no transaction is open.
-        var processed = 0;
-        var newCheckpoint = checkpoint;
-        var recovered = new List<long>();
-        (long Seq, Exception Error)? failed = null;
-        foreach (var item in batch)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            if (item.Attempts >= _options.MaxAttempts)
-            {
-                // Poison: skip, keep the failure entry as the permanent record.
-                _logger.LogError(
-                    "Event handler {Handler} skips poison event seq {Seq} after {Attempts} attempts.",
-                    handler.Name, item.Record.Seq, item.Attempts);
-                KernelDiagnostics.FeedPoisoned.Add(1,
-                    new KeyValuePair<string, object?>("papuma.feed", FeedTag),
-                    new KeyValuePair<string, object?>("papuma.handler", handler.Name));
-                newCheckpoint = item.Record.Seq;
-                continue;
-            }
-
-            if (item.NextRetryAt is { } retryAt && retryAt > DateTimeOffset.UtcNow)
-            {
-                break; // stop-the-line: strict ordering, retry after backoff
-            }
-
-            using var activity = FeedDiagnostics.StartHandlerActivity(
-                FeedTag, handler.Name, item.Record.Seq, item.Record.Metadata);
-            var stopwatch = Stopwatch.StartNew();
-            try
-            {
-                await handler.HandleAsync(item.Record, ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw; // shutdown; an OCE the handler raised on its own (HttpClient timeout) is a failure below
-            }
-            catch (Exception ex)
-            {
-                activity?.SetStatus(ActivityStatusCode.Error, FeedDiagnostics.SanitizeError(ex));
-                KernelDiagnostics.FeedFailures.Add(1,
-                    new KeyValuePair<string, object?>("papuma.feed", FeedTag),
-                    new KeyValuePair<string, object?>("papuma.handler", handler.Name));
-                failed = (item.Record.Seq, ex);
-                break; // stop-the-line; checkpoint stays before the failed seq
-            }
-
-            KernelDiagnostics.HandlerDuration.Record(stopwatch.Elapsed.TotalMilliseconds,
-                new KeyValuePair<string, object?>("papuma.feed", FeedTag),
-                new KeyValuePair<string, object?>("papuma.handler", handler.Name));
-            KernelDiagnostics.FeedProcessed.Add(1,
-                new KeyValuePair<string, object?>("papuma.feed", FeedTag),
-                new KeyValuePair<string, object?>("papuma.handler", handler.Name));
-
-            if (item.Attempts > 0)
-            {
-                recovered.Add(item.Record.Seq);
-            }
-
-            newCheckpoint = item.Record.Seq;
-            processed++;
-        }
-
-        // 3. Record the outcome — only against the checkpoint it was computed from. If it
-        // moved meanwhile (a reset for a rebuild), the outcome belongs to a stale position:
-        // drop it, the next cycle reads from the new one.
-        await using (var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct))
-        await using (var tx = conn.BeginTransaction(deferred: false))
-        {
-            // Position AND generation: a reset from 0 to 0 (backfill, rebuild) leaves last_seq
-            // unchanged, but not the generation (review L-3).
-            if (await SqliteProjectionLifecycle.ReadCursorAsync(conn, tx, key, ct) != (checkpoint, generation))
-            {
-                await tx.RollbackAsync(ct);
-                _logger.LogInformation(
-                    "Checkpoint of {Handler} moved while its batch was handled; outcome dropped, next cycle re-reads.",
-                    handler.Name);
-                return 0;
-            }
-
-            foreach (var seq in recovered)
-            {
-                await ClearFailureAsync(conn, tx, key, seq, ct);
-            }
-
-            if (failed is { } failure)
-            {
-                var attempts = await RegisterFailureAsync(conn, tx, key, failure.Seq, failure.Error, ct);
-                _logger.LogWarning(failure.Error,
-                    "Event handler {Handler} failed on event seq {Seq} (attempt {Attempts}/{MaxAttempts}).",
-                    handler.Name, failure.Seq, attempts, _options.MaxAttempts);
-            }
-
-            if (newCheckpoint != checkpoint)
-            {
-                await SaveCheckpointAsync(conn, tx, key, newCheckpoint, ct);
-            }
-
-            await tx.CommitAsync(ct);
-        }
-
-        return processed;
-    }
-
-    // The checkpoint and failure tables are shared by both feeds and keyed by name only: an
-    // unchecked name would let a typo create an orphan checkpoint row.
-    private void EnsureKnownHandler(string handlerName)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(handlerName);
-        if (!_projectionVersions.ContainsKey(handlerName))
-        {
-            throw new ArgumentException(
-                $"No handler named '{handlerName}' runs in this event feed processor.", nameof(handlerName));
-        }
-    }
-
-    private static async Task SaveCheckpointAsync(
-        SqliteConnection conn, SqliteTransaction tx, string handlerName, long seq, CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = "UPDATE checkpoint SET last_seq = @seq, updated_at = @now WHERE handler_name = @name";
-        cmd.Parameters.AddWithValue("name", handlerName);
-        cmd.Parameters.AddWithValue("seq", seq);
-        cmd.Parameters.AddWithValue("now", DateTimeOffset.UtcNow.ToString("O"));
-        await cmd.ExecuteNonQueryAsync(ct);
-    }
-
-    private sealed record BatchItem(EventRecord Record, int Attempts, DateTimeOffset? NextRetryAt);
-
-    private async Task<IReadOnlyList<BatchItem>> LoadBatchAsync(
-        SqliteConnection conn, SqliteTransaction tx, string checkpointKey, long checkpoint, CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = """
-            SELECT e.seq, e.scope, e.tenant_id, e.event_type, e.payload, e.actor_id,
-                   e.metadata, e.occurred_at, COALESCE(f.attempts, 0), f.next_retry_at
-            FROM event e
-            LEFT JOIN failure f
-                   ON f.handler_name = @name AND f.seq = e.seq
-            WHERE e.seq > @checkpoint
-            ORDER BY e.seq
-            LIMIT @batchSize
-            """;
-        cmd.Parameters.AddWithValue("name", checkpointKey);
-        cmd.Parameters.AddWithValue("checkpoint", checkpoint);
-        cmd.Parameters.AddWithValue("batchSize", _options.BatchSize);
-
-        var batch = new List<BatchItem>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            var seq = reader.GetInt64(0);
-            try
-            {
-                var scopeKind = reader.GetString(1);
-                var scope = scopeKind == nameof(ScopeType.Tenant)
-                    ? ScopeContext.Tenant(reader.GetString(2))
-                    : ScopeContext.Platform();
-
-                var record = new EventRecord(
-                    Seq: seq,
-                    Scope: scope,
-                    EventType: reader.GetString(3),
-                    Payload: (JsonObject)JsonNode.Parse(reader.GetString(4))!,
-                    ActorId: reader.GetString(5),
-                    Metadata: (JsonObject)JsonNode.Parse(reader.GetString(6))!,
-                    OccurredAt: SqliteTimestamp.Parse(reader.GetString(7)));
-
-                batch.Add(new BatchItem(
-                    record,
-                    reader.GetInt32(8),
-                    reader.IsDBNull(9) ? null : SqliteTimestamp.Parse(reader.GetString(9))));
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                throw new InvalidDataException(
-                    $"Event row seq {seq} could not be mapped to an EventRecord for handler {checkpointKey}: {ex.Message}", ex);
-            }
-        }
-
-        return batch;
-    }
-
-    private async Task<int> RegisterFailureAsync(
-        SqliteConnection conn, SqliteTransaction tx, string checkpointKey, long seq, Exception ex, CancellationToken ct)
-    {
-        int attemptsBefore;
-        await using (var readCmd = conn.CreateCommand())
-        {
-            readCmd.Transaction = tx;
-            readCmd.CommandText = "SELECT attempts FROM failure WHERE handler_name = @name AND seq = @seq";
-            readCmd.Parameters.AddWithValue("name", checkpointKey);
-            readCmd.Parameters.AddWithValue("seq", seq);
-            attemptsBefore = await readCmd.ExecuteScalarAsync(ct) is long a ? (int)a : 0;
-        }
-
-        var attempts = attemptsBefore + 1;
-        var delaySeconds = Math.Min(
-            _options.BaseRetryDelay.TotalSeconds * Math.Pow(2, attemptsBefore),
-            _options.MaxRetryDelay.TotalSeconds);
-        var nextRetryAt = DateTimeOffset.UtcNow.AddSeconds(delaySeconds).ToString("O");
-        var now = DateTimeOffset.UtcNow.ToString("O");
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = """
-            INSERT INTO failure (handler_name, seq, attempts, last_error, next_retry_at, updated_at)
-            VALUES (@name, @seq, 1, @error, @nextRetryAt, @now)
-            ON CONFLICT (handler_name, seq) DO UPDATE SET
-                attempts = attempts + 1,
-                last_error = excluded.last_error,
-                next_retry_at = @nextRetryAt,
-                updated_at = @now
-            """;
-        cmd.Parameters.AddWithValue("name", checkpointKey);
-        cmd.Parameters.AddWithValue("seq", seq);
-        cmd.Parameters.AddWithValue("error", FeedDiagnostics.SanitizeError(ex));
-        cmd.Parameters.AddWithValue("nextRetryAt", nextRetryAt);
-        cmd.Parameters.AddWithValue("now", now);
-        await cmd.ExecuteNonQueryAsync(ct);
-
-        return attempts;
-    }
-
-    private static async Task ClearFailureAsync(
-        SqliteConnection conn, SqliteTransaction tx, string checkpointKey, long seq, CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = "DELETE FROM failure WHERE handler_name = @name AND seq = @seq";
-        cmd.Parameters.AddWithValue("name", checkpointKey);
-        cmd.Parameters.AddWithValue("seq", seq);
-        await cmd.ExecuteNonQueryAsync(ct);
-    }
-
-    private async Task EnsureRegisteredAsync(CancellationToken ct)
-    {
-        if (_registered)
-        {
-            return;
-        }
-
-        // Before the first delivery: new checkpoints, and projection versions reconciled
-        // (record, rebuild once, or pause for a newer version — ADR-024).
-        foreach (var handler in _handlers)
-        {
-            await SqliteProjectionLifecycle.RegisterAsync(
-                _connectionString, CheckpointPrefix + handler.Name, "event", handler, _projectionVersions[handler.Name], _logger, ct);
-        }
-
-        _registered = true;
-    }
-
-    // A stored version above the declared one means newer code rebuilt the projection;
-    // this (older) code must not write the old shape into it (ADR-024).
-    private async Task<bool> IsPausedAsync(
-        IEventHandler handler, SqliteConnection conn, SqliteTransaction tx, string key, CancellationToken ct)
-    {
-        if (_projectionVersions[handler.Name] is not int declared
-            || await SqliteProjectionLifecycle.ReadVersionAsync(conn, tx, key, ct) is not int stored
-            || stored <= declared)
-        {
-            return false;
-        }
-
-        if (_pauseLogged.TryAdd(handler.Name, true))
-        {
-            _logger.LogWarning(
-                "Projection {Handler} is at version {Stored}, this instance declares {Declared} — paused.",
-                handler.Name, stored, declared);
-        }
-
-        return true;
-    }
+    public Task<IReadOnlyList<ChangeFeedLagSnapshot>> GetLagAsync(CancellationToken ct = default) =>
+        _engine.GetLagAsync(ct);
 
     /// <summary>
     /// Rebuilds every projection (<see cref="IProjection"/>) this processor runs: empties
@@ -679,21 +105,7 @@ public sealed class SqliteEventFeedProcessor : IDisposable
     /// </summary>
     /// <param name="ct">A cancellation token.</param>
     /// <returns>The number of projections reset.</returns>
-    public async Task<int> ResetProjectionsAsync(CancellationToken ct = default)
-    {
-        await EnsureRegisteredAsync(ct);
-
-        var reset = 0;
-        foreach (var handler in _handlers)
-        {
-            if (handler is IProjection && await ResetProjectionAsync(handler.Name, ct))
-            {
-                reset++;
-            }
-        }
-
-        return reset;
-    }
+    public Task<int> ResetProjectionsAsync(CancellationToken ct = default) => _engine.ResetProjectionsAsync(ct);
 
     /// <summary>
     /// Rebuilds one projection: empties its target via <see cref="IProjection.ResetAsync"/>,
@@ -703,19 +115,59 @@ public sealed class SqliteEventFeedProcessor : IDisposable
     /// <param name="ct">A cancellation token.</param>
     /// <returns><c>false</c> when a newer instance owns the projection (higher stored version).</returns>
     /// <exception cref="ArgumentException">No handler of that name, or it is not a projection.</exception>
-    public async Task<bool> ResetProjectionAsync(string handlerName, CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(handlerName);
-        var handler = _handlers.FirstOrDefault(h => h.Name == handlerName)
-            ?? throw new ArgumentException($"No handler named {handlerName} runs in this processor.", nameof(handlerName));
-        if (handler is not IProjection projection || _projectionVersions[handlerName] is not int declared)
-        {
-            throw new ArgumentException(
-                $"Handler {handlerName} is not a projection (IProjection) — resetting it would repeat its effects.",
-                nameof(handlerName));
-        }
+    public Task<bool> ResetProjectionAsync(string handlerName, CancellationToken ct = default) =>
+        _engine.ResetProjectionAsync(handlerName, ct);
 
-        await EnsureRegisteredAsync(ct);
-        return await SqliteProjectionLifecycle.ResetProjectionAsync(_connectionString, CheckpointPrefix + handlerName, projection, declared, _logger, ct);
+    /// <summary>What the event feed adds to the shared engine: its table, key space and row mapping.</summary>
+    private sealed class EventFeedEngine(
+        string connectionString,
+        IEnumerable<IEventHandler> handlers,
+        SqliteChangeNotifier? notifier,
+        ChangeFeedProcessorOptions? options,
+        ILogger logger)
+        : SqliteFeedEngine<IEventHandler, EventRecord>(
+            connectionString, handlers, notifier, options, logger, nameof(handlers))
+    {
+        protected override string FeedTag => "event";
+
+        protected override string FeedName => "Event";
+
+        protected override string Table => "event";
+
+        protected override string CheckpointPrefix => "event:";
+
+        protected override string Alias => "e";
+
+        protected override string RecordColumns => """
+            e.seq, e.scope, e.tenant_id, e.event_type, e.payload, e.actor_id,
+            e.metadata, e.occurred_at
+            """;
+
+        protected override int RecordColumnCount => 8;
+
+        protected override string NameOf(IEventHandler handler) => handler.Name;
+
+        protected override Task HandleAsync(IEventHandler handler, EventRecord record, CancellationToken ct) =>
+            handler.HandleAsync(record, ct);
+
+        protected override long SeqOf(EventRecord record) => record.Seq;
+
+        protected override JsonObject MetadataOf(EventRecord record) => record.Metadata;
+
+        protected override EventRecord Map(SqliteDataReader reader)
+        {
+            var scope = reader.GetString(1) == nameof(ScopeType.Tenant)
+                ? ScopeContext.Tenant(reader.GetString(2))
+                : ScopeContext.Platform();
+
+            return new EventRecord(
+                Seq: reader.GetInt64(0),
+                Scope: scope,
+                EventType: reader.GetString(3),
+                Payload: (JsonObject)JsonNode.Parse(reader.GetString(4))!,
+                ActorId: reader.GetString(5),
+                Metadata: (JsonObject)JsonNode.Parse(reader.GetString(6))!,
+                OccurredAt: SqliteTimestamp.Parse(reader.GetString(7)));
+        }
     }
 }
