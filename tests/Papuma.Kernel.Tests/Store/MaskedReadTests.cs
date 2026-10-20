@@ -3,6 +3,8 @@
 
 using System.Text.Json.Nodes;
 
+using ModelContextProtocol;
+
 using Papuma.Kernel.Changes;
 using Papuma.Kernel.Mcp;
 using Papuma.Kernel.Model;
@@ -168,8 +170,9 @@ public sealed class MaskedReadTests : IAsyncLifetime
         Assert.Equal(id, (string?)json["document"]!["id"]);
 
         // 'name' is not a declared key → rejected (no free-form query, ADR-009).
-        await Assert.ThrowsAsync<ArgumentException>(() =>
+        var undeclared = await Assert.ThrowsAsync<McpException>(() =>
             tools.GetDocumentByKeyAsync(nameof(MaskedUser), "name", "Harry", scope.TenantId));
+        Assert.Contains("not a declared key", undeclared.Message);
     }
 
     [Fact]
@@ -184,8 +187,13 @@ public sealed class MaskedReadTests : IAsyncLifetime
         }
 
         var tools = NewTools();
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        await Assert.ThrowsAsync<McpException>(() =>
             tools.GetDocumentAsync(nameof(SecretDoc), id, scope.TenantId));
+
+        // The session enforces the opt-in on its own — the tool's check is only the message.
+        await using var direct = _store.OpenSession(scope);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            direct.LoadMaskedForMcpAsync(nameof(SecretDoc), id, default));
     }
 
     private PapumaKernelTools NewTools()

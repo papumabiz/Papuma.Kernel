@@ -4,6 +4,7 @@
 using System.Text.Json.Nodes;
 
 using Papuma.Kernel.Changes;
+using Papuma.Kernel.Model;
 using Papuma.Kernel.Validation;
 
 namespace Papuma.Kernel.Store;
@@ -30,9 +31,33 @@ public sealed partial class DocumentSession
         long? fromVersion = null,
         long? toVersion = null,
         CancellationToken ct = default)
-        where T : class
+        where T : class =>
+        await GetHistoryCoreAsync(_model.GetRequired<T>(), id, fromVersion, toVersion, limit: null, ct);
+
+    /// <summary>
+    /// MCP entry point: history by the type's logical name, reading at most
+    /// <paramref name="limit"/> records (the caller asks for one more than it returns to
+    /// detect truncation) — replaces a reflection bridge to the generic overload.
+    /// </summary>
+    internal Task<IReadOnlyList<ChangeRecord>> GetHistoryForMcpAsync(
+        string documentType, string id, long? fromVersion, long? toVersion, int limit, CancellationToken ct)
     {
-        var metadata = _model.GetRequired<T>();
+        var metadata = _model.DocumentTypes.FirstOrDefault(m => m.Name == documentType)
+            ?? throw new ArgumentException(
+                $"Document type '{documentType}' is not registered. Use get_model_inventory to list types.",
+                nameof(documentType));
+        return GetHistoryCoreAsync(metadata, id, fromVersion, toVersion, limit, ct);
+    }
+
+    /// <summary>MCP entry point: the unit of work's changes, reading at most <paramref name="limit"/> records.</summary>
+    internal Task<IReadOnlyList<ChangeRecord>> GetChangesByCorrelationForMcpAsync(
+        Guid correlationId, int limit, CancellationToken ct) =>
+        GetChangesByCorrelationCoreAsync(correlationId, limit, ct);
+
+    private async Task<IReadOnlyList<ChangeRecord>> GetHistoryCoreAsync(
+        DocumentTypeMetadata metadata, string id, long? fromVersion, long? toVersion, int? limit,
+        CancellationToken ct)
+    {
         InputValidator.ValidateDocumentId(id);
         if (fromVersion is < 1 || toVersion is < 1 || toVersion < fromVersion)
         {
@@ -52,8 +77,13 @@ public sealed partial class DocumentSession
               AND (@fromVersion::bigint IS NULL OR version >= @fromVersion)
               AND (@toVersion::bigint IS NULL OR version <= @toVersion)
             ORDER BY version
+            LIMIT @limit
             """;
         AddIdentityParameters(cmd, metadata.Name, id);
+        cmd.Parameters.Add(new Npgsql.NpgsqlParameter<long?>("limit", NpgsqlTypes.NpgsqlDbType.Bigint)
+        {
+            TypedValue = limit,
+        });
         cmd.Parameters.Add(new Npgsql.NpgsqlParameter<long?>("fromVersion", NpgsqlTypes.NpgsqlDbType.Bigint)
         {
             TypedValue = fromVersion,
@@ -98,7 +128,11 @@ public sealed partial class DocumentSession
     /// <param name="ct">A cancellation token.</param>
     public async Task<IReadOnlyList<ChangeRecord>> GetChangesByCorrelationAsync(
         Guid correlationId,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        await GetChangesByCorrelationCoreAsync(correlationId, limit: null, ct);
+
+    private async Task<IReadOnlyList<ChangeRecord>> GetChangesByCorrelationCoreAsync(
+        Guid correlationId, int? limit, CancellationToken ct)
     {
         var (conn, tx) = await EnsureTransactionAsync(ct);
 
@@ -111,7 +145,12 @@ public sealed partial class DocumentSession
             WHERE scope = @scope AND tenant_id = @tenantId
               AND metadata ->> 'correlationId' = @correlationId
             ORDER BY seq
+            LIMIT @limit
             """;
+        cmd.Parameters.Add(new Npgsql.NpgsqlParameter<long?>("limit", NpgsqlTypes.NpgsqlDbType.Bigint)
+        {
+            TypedValue = limit,
+        });
         cmd.Parameters.AddWithValue("scope", Scope.Scope.ToString());
         cmd.Parameters.AddWithValue("tenantId", Scope.TenantId ?? string.Empty);
         cmd.Parameters.AddWithValue("correlationId", correlationId.ToString("N"));

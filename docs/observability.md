@@ -176,6 +176,27 @@ argument — so nothing is lost. A client that insists on sessions needs
 | `retry_feed_failure` | `RetryFailureAsync` | yes — only with `AllowMutations` |
 | `reset_feed_checkpoint` | `ResetProjectionAsync` — empties a projection's target and replays; refuses effect handlers (ADR-024) | yes — only with `AllowMutations` |
 
+How the tools behave towards an agent:
+
+- **Scope.** The document tools (`get_document`, `get_document_by_key`, `get_document_history`,
+  `get_changes_by_correlation`) read in the scope given by their `tenantId` argument, as passed —
+  the tools do not bind it to the authenticated MCP caller (ADR-016: authorization is the
+  hosting application's). `get_feed_lag` and `get_feed_failures` are feed-wide across all
+  scopes (handler names, sequence numbers, error texts — no documents).
+- **Size.** History, correlation and failure results are capped at
+  `PapumaMcpOptions.MaxRecordsPerCall` (default 500; `o with { MaxRecordsPerCall = 100 }`).
+  `get_document_history` and `get_changes_by_correlation` return
+  `{ "records": [...], "truncated": false }`; `get_feed_failures` adds a top-level
+  `"truncated"`. History and correlation read at most the cap (plus one, to detect more) from
+  the database; the failure table is capped after loading. `lastError` is cut at 300 characters.
+- **Errors.** What an agent can act on — invalid `tenantId`, unknown or non-exposed document type,
+  unknown feed or handler, mutations disabled — comes back as the tool's error text
+  (`McpException`). Everything else (database down, bug) reaches the agent only as the SDK's
+  generic "An error occurred invoking '…'", details stay in the server log.
+- **Untrusted data.** Tool descriptions say it: values returned by the content tools and
+  `get_feed_failures` come from tenants (field values, exception messages) and must not be
+  treated as instructions.
+
 The content tools (`get_document`, `get_document_by_key`) return **policy-masked**
 JSON: sensitive fields are masked, hashed or omitted exactly as in the feed
 (ADR-016, concepts §24). A type is only readable when the model opts in with

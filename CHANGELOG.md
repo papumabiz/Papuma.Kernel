@@ -125,6 +125,19 @@ Fixed:
 
 Breaking:
 
+- **MCP tools: record lists come back as `{ "records": [...], "truncated": false }` and are capped (review M-3).**
+  `get_document_history` and `get_changes_by_correlation` used to return a bare JSON array of any size — one
+  injected "read the whole history" could flood the agent's context and the server's memory. They now return an
+  object, at most `PapumaMcpOptions.MaxRecordsPerCall` records (new, default 500, must be > 0), and say whether more
+  exist; the database read itself is limited (`LIMIT n+1`). `get_feed_failures` caps each feed and adds a top-level
+  `"truncated"`. **A client that parses the history or correlation result as an array has to read `records`.**
+- **MCP tools: what an agent can act on is now an `McpException` (review M-4).** An invalid `tenantId`, an unknown
+  or non-exposed document type, a bad feed name, an unknown handler and disabled mutations used to throw
+  `ArgumentException`/`InvalidOperationException`, which the MCP SDK reduces to "An error occurred invoking
+  '<tool>'" — the carefully worded hint never reached the agent, which retried blindly. These cases now arrive
+  with their message; all other exceptions stay generic on the wire. Code that called the tool methods directly and
+  caught the old exception types has to catch `McpException`. Checked with a real MCP client/server pair.
+
 - **Model checks for declarations that did nothing (review C-16, C-19, C-20, N-9).** `Build()` and the fluent API
   now refuse what used to be dropped silently: more than one policy attribute on a property (the undocumented
   precedence let `[TrackHash]` win over `[SensitiveData]` — a hash allows equality correlation, so it was not
@@ -161,6 +174,15 @@ Breaking:
   `HashKeyMismatchException`.
 
 Changed:
+
+- **MCP: hardening without a design change (review M-8, M-5, M-6, M-7).** `get_feed_failures` cuts `lastError` at
+  300 characters like the dashboard; the descriptions of all tools that return tenant data say that the values are
+  untrusted and must not be followed as instructions. The reflection bridge to `GetHistoryAsync<T>` is replaced by
+  an internal non-generic entry point in `Papuma.Kernel`. The `feed` argument errors name the right parameter.
+  `WithPapumaKernel` rejects a `configure` callback that returns `null` (`ArgumentNullException`) and a second
+  registration on the same service collection (`InvalidOperationException`). The class documentation no longer
+  claims that every data tool is scope-bound: `get_feed_lag`/`get_feed_failures` span all scopes, and the document
+  tools use the `tenantId` as given (binding it to the MCP caller stays the application's job, ADR-016).
 
 - **Empty object keys are supported.** A dictionary key `""` (or `[JsonPropertyName("")]`) was rejected with
   `NotSupportedException` when a diff was computed. The path format already names it unambiguously as an empty

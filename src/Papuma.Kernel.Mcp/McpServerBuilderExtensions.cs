@@ -31,16 +31,25 @@ public static class McpServerBuilderExtensions
     /// </summary>
     /// <param name="builder">The MCP server builder.</param>
     /// <param name="configure">Optional options transform (read-only defaults).</param>
+    /// <exception cref="InvalidOperationException">The Papuma tools are already registered on this service collection.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="configure"/> returned <c>null</c>.</exception>
     public static IMcpServerBuilder WithPapumaKernel(
         this IMcpServerBuilder builder,
         Func<PapumaMcpOptions, PapumaMcpOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(builder);
 
+        if (builder.Services.Any(d => d.ServiceType == typeof(PapumaMcpOptions)))
+        {
+            throw new InvalidOperationException(
+                "WithPapumaKernel() was already called on this service collection — register the Papuma tools once.");
+        }
+
         var options = new PapumaMcpOptions();
         if (configure is not null)
         {
-            options = configure(options);
+            options = configure(options)
+                ?? throw new ArgumentNullException(nameof(configure), "The options transform returned null.");
         }
 
         builder.Services.AddSingleton(options);

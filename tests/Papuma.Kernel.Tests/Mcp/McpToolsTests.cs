@@ -3,6 +3,8 @@
 
 using System.Text.Json.Nodes;
 
+using ModelContextProtocol;
+
 using Papuma.Kernel.Changes;
 using Papuma.Kernel.Events;
 using Papuma.Kernel.Mcp;
@@ -111,8 +113,10 @@ public sealed class McpToolsTests : IAsyncLifetime
         using var events = new EventFeedProcessor(_fixture.DataSource, [new NoopEventHandler()]);
         var tools = CreateTools(change, events);
 
-        var history = (JsonArray)JsonNode.Parse(
+        var page = (JsonObject)JsonNode.Parse(
             await tools.GetDocumentHistoryAsync(nameof(McpDoc), id, tenant))!;
+        var history = page["records"]!.AsArray();
+        Assert.False((bool)page["truncated"]!);
         Assert.Equal(2, history.Count);
         Assert.Equal("Insert", (string?)history[0]!["operation"]);
 
@@ -121,12 +125,13 @@ public sealed class McpToolsTests : IAsyncLifetime
         Assert.False(secretEntry.ContainsKey("new")); // policy applied — no value leaks
 
         // Other tenant sees nothing (scope-bound).
-        var foreign = (JsonArray)JsonNode.Parse(
-            await tools.GetDocumentHistoryAsync(nameof(McpDoc), id, $"t{Guid.NewGuid():N}"))!;
+        var foreign = JsonNode.Parse(
+            await tools.GetDocumentHistoryAsync(nameof(McpDoc), id, $"t{Guid.NewGuid():N}"))!["records"]!.AsArray();
         Assert.Empty(foreign);
 
-        await Assert.ThrowsAsync<ArgumentException>(
+        var unknown = await Assert.ThrowsAsync<McpException>(
             () => tools.GetDocumentHistoryAsync("Nope", id, tenant));
+        Assert.Contains("get_model_inventory", unknown.Message);
     }
 
     [Fact]
@@ -148,16 +153,16 @@ public sealed class McpToolsTests : IAsyncLifetime
         using var events = new EventFeedProcessor(_fixture.DataSource, [new NoopEventHandler()]);
         var tools = CreateTools(change, events);
 
-        var changes = (JsonArray)JsonNode.Parse(
-            await tools.GetChangesByCorrelationAsync(correlationId.ToString(), tenant))!;
+        var changes = JsonNode.Parse(
+            await tools.GetChangesByCorrelationAsync(correlationId.ToString(), tenant))!["records"]!.AsArray();
         Assert.Equal([first, second], changes.Select(c => (string?)c!["documentId"]));
         Assert.False(changes[0]!["diff"]!["secret"]!.AsObject().ContainsKey("new")); // policy applied
 
-        var foreign = (JsonArray)JsonNode.Parse(
-            await tools.GetChangesByCorrelationAsync(correlationId.ToString(), $"t{Guid.NewGuid():N}"))!;
+        var foreign = JsonNode.Parse(
+            await tools.GetChangesByCorrelationAsync(correlationId.ToString(), $"t{Guid.NewGuid():N}"))!["records"]!.AsArray();
         Assert.Empty(foreign);
 
-        await Assert.ThrowsAsync<ArgumentException>(
+        await Assert.ThrowsAsync<McpException>(
             () => tools.GetChangesByCorrelationAsync("not-a-guid", tenant));
     }
 
@@ -188,9 +193,9 @@ public sealed class McpToolsTests : IAsyncLifetime
         using var events = new EventFeedProcessor(_fixture.DataSource, [new NoopEventHandler()]);
 
         var readOnly = CreateTools(change, events);
-        await Assert.ThrowsAsync<InvalidOperationException>(
+        await Assert.ThrowsAsync<McpException>(
             () => readOnly.RetryFeedFailureAsync("change", "mcp-test-projection", 1));
-        await Assert.ThrowsAsync<InvalidOperationException>(
+        await Assert.ThrowsAsync<McpException>(
             () => readOnly.ResetFeedCheckpointAsync("change", "mcp-test-projection"));
 
         var mutating = CreateTools(change, events, new PapumaMcpOptions { AllowMutations = true });
@@ -198,7 +203,7 @@ public sealed class McpToolsTests : IAsyncLifetime
             await mutating.RetryFeedFailureAsync("change", "mcp-test-projection", 999));
         Assert.Contains("replays from the beginning",
             await mutating.ResetFeedCheckpointAsync("change", "mcp-test-projection"));
-        var refused = await Assert.ThrowsAsync<ArgumentException>(
+        var refused = await Assert.ThrowsAsync<McpException>(
             () => mutating.ResetFeedCheckpointAsync("change", "mcp-test-effect"));
         Assert.Contains("not a projection", refused.Message);
 
@@ -206,7 +211,156 @@ public sealed class McpToolsTests : IAsyncLifetime
         Assert.Equal("projection", (string?)lag.Single(h => (string?)h!["handler"] == "mcp-test-projection")!["kind"]);
         Assert.Equal("effect", (string?)lag.Single(h => (string?)h!["handler"] == "mcp-test-effect")!["kind"]);
 
-        await Assert.ThrowsAsync<ArgumentException>(
+        var badFeed = await Assert.ThrowsAsync<McpException>(
             () => mutating.RetryFeedFailureAsync("neither", "x", 1));
+        Assert.Contains("'change' or 'event'", badFeed.Message);
+        var unknownHandler = await Assert.ThrowsAsync<McpException>(
+            () => mutating.ResetFeedCheckpointAsync("change", "no-such-handler"));
+        Assert.NotEmpty(unknownHandler.Message);
+    }
+
+    [Fact]
+    public async Task InvalidTenantId_IsRejectedWithActionableMessage_OnEveryScopedTool()
+    {
+        using var change = new ChangeFeedProcessor(_fixture.DataSource, [new NoopChangeHandler()]);
+        using var events = new EventFeedProcessor(_fixture.DataSource, [new NoopEventHandler()]);
+        var tools = CreateTools(change, events);
+
+        var ex = await Assert.ThrowsAsync<McpException>(
+            () => tools.GetDocumentHistoryAsync(nameof(McpDoc), "x", "bad tenant!"));
+        Assert.Contains("tenantId is not valid", ex.Message);
+        Assert.Contains("Omit it", ex.Message);
+
+        await Assert.ThrowsAsync<McpException>(
+            () => tools.GetChangesByCorrelationAsync(Guid.NewGuid().ToString(), ""));
+        await Assert.ThrowsAsync<McpException>(
+            () => tools.GetDocumentAsync(nameof(McpDoc), "x", "a"));
+        await Assert.ThrowsAsync<McpException>(
+            () => tools.GetDocumentByKeyAsync(nameof(McpDoc), "name", "v", "a b"));
+    }
+
+    [Fact]
+    public async Task GetDocument_ForUnknownOrNotExposedType_TellsTheAgent()
+    {
+        using var change = new ChangeFeedProcessor(_fixture.DataSource, [new NoopChangeHandler()]);
+        using var events = new EventFeedProcessor(_fixture.DataSource, [new NoopEventHandler()]);
+        var tools = CreateTools(change, events);
+        var tenant = $"t{Guid.NewGuid():N}";
+
+        var unknown = await Assert.ThrowsAsync<McpException>(
+            () => tools.GetDocumentAsync("Nope", "x", tenant));
+        Assert.Contains("not registered", unknown.Message);
+
+        var notExposed = await Assert.ThrowsAsync<McpException>(
+            () => tools.GetDocumentAsync(nameof(McpDoc), "x", tenant));
+        Assert.Contains("not exposed", notExposed.Message);
+    }
+
+    [Fact]
+    public async Task FeedFailures_TruncateLongErrors_AndCapTheEntryCount()
+    {
+        var handler = $"mcp-trunc-{Guid.NewGuid():N}";
+        await using (var conn = await _fixture.DataSource.OpenConnectionAsync())
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO papuma.failure (handler_name, seq, attempts, last_error, next_retry_at)
+                SELECT @handler, g, 1, repeat('x', 5000), now() FROM generate_series(1, 5) g
+                """;
+            cmd.Parameters.AddWithValue("handler", handler);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        using var change = new ChangeFeedProcessor(_fixture.DataSource, [new NamedChangeHandler(handler)]);
+        using var events = new EventFeedProcessor(_fixture.DataSource, [new NoopEventHandler()]);
+
+        var all = (JsonObject)JsonNode.Parse(
+            await CreateTools(change, events).GetFeedFailuresAsync())!;
+        var entries = all["changeFeed"]!.AsArray();
+        Assert.Equal(5, entries.Count);
+        Assert.False((bool)all["truncated"]!);
+        foreach (var entry in entries)
+        {
+            var lastError = (string)entry!["lastError"]!;
+            Assert.True(lastError.Length <= 301);
+            Assert.EndsWith("…", lastError);
+        }
+
+        var capped = (JsonObject)JsonNode.Parse(await CreateTools(
+            change, events, new PapumaMcpOptions { MaxRecordsPerCall = 3 }).GetFeedFailuresAsync())!;
+        Assert.Equal(3, capped["changeFeed"]!.AsArray().Count);
+        Assert.True((bool)capped["truncated"]!);
+    }
+
+    [Fact]
+    public async Task History_BeyondMaxRecordsPerCall_IsCutOffAndMarkedTruncated()
+    {
+        var tenant = $"t{Guid.NewGuid():N}";
+        var id = NewId();
+        await using (var session = _store.OpenSession(ScopeContext.Tenant(tenant)))
+        {
+            await session.SaveAsync(new McpDoc(id, "v1"), 0);
+            await session.CommitAsync();
+            for (var version = 1; version < 5; version++)
+            {
+                var loaded = await session.LoadAsync<McpDoc>(id);
+                await session.SaveAsync(loaded!.Document with { Name = $"v{version + 1}" }, version);
+                await session.CommitAsync();
+            }
+        }
+
+        using var change = new ChangeFeedProcessor(_fixture.DataSource, [new NoopChangeHandler()]);
+        using var events = new EventFeedProcessor(_fixture.DataSource, [new NoopEventHandler()]);
+
+        var exactly = JsonNode.Parse(await CreateTools(change, events, new PapumaMcpOptions { MaxRecordsPerCall = 5 })
+            .GetDocumentHistoryAsync(nameof(McpDoc), id, tenant))!;
+        Assert.Equal(5, exactly["records"]!.AsArray().Count);
+        Assert.False((bool)exactly["truncated"]!); // exactly the cap is not "more"
+
+        var tools = CreateTools(change, events, new PapumaMcpOptions { MaxRecordsPerCall = 3 });
+        var cut = JsonNode.Parse(await tools.GetDocumentHistoryAsync(nameof(McpDoc), id, tenant))!;
+        Assert.Equal(3, cut["records"]!.AsArray().Count);
+        Assert.True((bool)cut["truncated"]!);
+        Assert.Equal(1, (long)cut["records"]![0]!["version"]!); // oldest first
+    }
+
+    [Fact]
+    public async Task Correlation_BeyondMaxRecordsPerCall_IsCutOffAndMarkedTruncated()
+    {
+        var tenant = $"t{Guid.NewGuid():N}";
+        Guid correlationId;
+        await using (var session = _store.OpenSession(ScopeContext.Tenant(tenant)))
+        {
+            correlationId = session.CorrelationId;
+            for (var i = 0; i < 4; i++)
+            {
+                await session.SaveAsync(new McpDoc(NewId(), $"d{i}"), 0);
+            }
+
+            await session.CommitAsync();
+        }
+
+        using var change = new ChangeFeedProcessor(_fixture.DataSource, [new NoopChangeHandler()]);
+        using var events = new EventFeedProcessor(_fixture.DataSource, [new NoopEventHandler()]);
+        var tools = CreateTools(change, events, new PapumaMcpOptions { MaxRecordsPerCall = 3 });
+
+        var cut = JsonNode.Parse(await tools.GetChangesByCorrelationAsync(correlationId.ToString(), tenant))!;
+        Assert.Equal(3, cut["records"]!.AsArray().Count);
+        Assert.True((bool)cut["truncated"]!);
+    }
+
+    [Fact]
+    public void MaxRecordsPerCall_MustBePositive_AndDefaultsTo500()
+    {
+        Assert.Equal(500, new PapumaMcpOptions().MaxRecordsPerCall);
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PapumaMcpOptions { MaxRecordsPerCall = 0 });
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PapumaMcpOptions { MaxRecordsPerCall = -1 });
+    }
+
+    private sealed class NamedChangeHandler(string name) : IChangeHandler
+    {
+        public string Name => name;
+
+        public Task HandleAsync(ChangeRecord change, CancellationToken ct) => Task.CompletedTask;
     }
 }
