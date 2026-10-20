@@ -101,7 +101,9 @@ PII field (e.g. `Name` without an attribute) remains in plain text in historical
 diffs after the delete. Exactly this gap is closed by the redaction primitives:
 
 - `RedactHistoryAsync<T>(id, reason, paths?)` rewrites historical diff entries to
-  the redaction marker (`paths` covers descendants; `null` = everything). Also
+  the redaction marker (`paths` covers descendants, and also redacts a whole-object entry
+  whose value carries the path — `address.street` reaches the `address` entry of an insert; `null` =
+  everything). Also
   works for already-deleted documents. Idempotent.
 - `RedactEventsAsync<TEvent>(selectorPath, selectorValue, paths, reason)` removes
   payload fields from selected events (semantics of the Redact event policy: the

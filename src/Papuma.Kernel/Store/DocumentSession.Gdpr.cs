@@ -35,7 +35,9 @@ public sealed partial class DocumentSession
     /// <param name="reason">The mandatory audit reason (e.g. the erasure request reference).</param>
     /// <param name="paths">
     /// Dot-separated paths to redact, covering descendants (<c>address</c> covers
-    /// <c>address.city</c>). <c>null</c> redacts every entry of every change.
+    /// <c>address.city</c>) and reaching an ancestor entry whose value carries the path
+    /// (<c>address.city</c> redacts an <c>address</c> entry holding a <c>city</c>, as an insert
+    /// writes it). <c>null</c> redacts every entry of every change.
     /// </param>
     /// <param name="ct">A cancellation token.</param>
     /// <returns>The number of change records that were rewritten.</returns>

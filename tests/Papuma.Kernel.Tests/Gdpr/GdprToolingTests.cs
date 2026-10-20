@@ -250,6 +250,86 @@ public sealed class GdprToolingTests : IAsyncLifetime
         Assert.Equal(0, await session.RedactHistoryAsync<GdprUser>(userId, "erasure-1"));
     }
 
+    [Fact]
+    public async Task RedactHistory_OfANestedPath_ErasesItInsideWholeObjectEntries()
+    {
+        var scope = NewTenant();
+        var userId = NewId();
+
+        await using (var session = _store.OpenSession(scope))
+        {
+            var user = new GdprUser(userId, "Harry", $"{userId}@x.de", Address: new GdprAddress("Main St 1", "Bonn"));
+            await session.SaveAsync(user, 0);                                                        // "address": whole object
+            await session.SaveAsync(user with { Address = new GdprAddress("Main St 2", "Bonn") }, 1); // "address.street"
+            await session.SaveAsync(user with { Address = null }, 2);                                // "address": whole object
+            await session.CommitAsync();
+        }
+
+        await using (var session = _store.OpenSession(scope))
+        {
+            Assert.Equal(3, await session.RedactHistoryAsync<GdprUser>(userId, "erasure-4715", ["address.street"]));
+            await session.CommitAsync();
+        }
+
+        await using (var verify = _store.OpenSession(scope))
+        {
+            var history = await verify.GetHistoryAsync<GdprUser>(userId);
+            Assert.All(history, c => Assert.DoesNotContain("Main St", c.Diff.ToJson().ToJsonString(), StringComparison.Ordinal));
+            Assert.Equal(DiffEntryKind.Redacted, history[0].Diff.Entries["address"].Kind);
+            Assert.Equal(DiffEntryKind.Redacted, history[1].Diff.Entries["address.street"].Kind);
+            Assert.Equal(DiffEntryKind.Redacted, history[2].Diff.Entries["address"].Kind);
+            Assert.Equal(DiffEntryKind.Tracked, history[0].Diff.Entries["email"].Kind); // unrelated paths stay
+        }
+    }
+
+    [Fact]
+    public async Task RedactHistory_ReachesADiffWrittenBeforePoliciesWereSplit_AndSparesASplitOne()
+    {
+        var scope = NewTenant();
+        var userId = NewId();
+
+        await using (var session = _store.OpenSession(scope))
+        {
+            await session.SaveAsync(new GdprUser(userId, "Harry", $"{userId}@x.de", Address: new GdprAddress("x", "Bonn")), 0);
+            var loaded = await session.LoadAsync<GdprUser>(userId);
+            await session.SaveAsync(loaded!.Document with { Name = "Harald" }, 1);
+            await session.CommitAsync();
+        }
+
+        // Rewrite the stored history into the two shapes a protected nested field can have in the feed: version 1
+        // as written before the split fix (the street in clear inside "address"), version 2 as written since then.
+        await SetStoredDiffAsync(userId, 1, """{"address":{"new":{"street":"SECRET-STREET","city":"Bonn"}},"name":{"new":"Harry"}}""");
+        await SetStoredDiffAsync(userId, 2, """{"address":{"old":null,"new":{"city":"Bonn"}},"address.street":{"changed":true}}""");
+
+        await using (var session = _store.OpenSession(scope))
+        {
+            Assert.Equal(1, await session.RedactHistoryAsync<GdprUser>(userId, "erasure-4716", ["address.street"]));
+            await session.CommitAsync();
+        }
+
+        await using (var verify = _store.OpenSession(scope))
+        {
+            var history = await verify.GetHistoryAsync<GdprUser>(userId);
+            Assert.DoesNotContain("SECRET", history[0].Diff.ToJson().ToJsonString(), StringComparison.Ordinal);
+            Assert.Equal(DiffEntryKind.Redacted, history[0].Diff.Entries["address"].Kind);
+            Assert.Equal("Harry", (string?)history[0].Diff.Entries["name"].New);
+            Assert.Equal("Bonn", (string?)history[1].Diff.Entries["address"].New!["city"]); // nothing to erase there
+            Assert.False(history[1].Metadata.ContainsKey("redaction"));
+        }
+    }
+
+    private async Task SetStoredDiffAsync(string documentId, long version, string diff)
+    {
+        await using var cmd = _fixture.DataSource.CreateCommand("""
+            UPDATE papuma.change SET diff = @diff::jsonb
+            WHERE document_type = 'GdprUser' AND document_id = @id AND version = @version
+            """);
+        cmd.Parameters.AddWithValue("diff", diff);
+        cmd.Parameters.AddWithValue("id", documentId);
+        cmd.Parameters.AddWithValue("version", version);
+        Assert.Equal(1, await cmd.ExecuteNonQueryAsync());
+    }
+
     // ── RedactEventsAsync ──────────────────────────────────────────────────────
 
     [Fact]

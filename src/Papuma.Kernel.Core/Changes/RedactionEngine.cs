@@ -23,7 +23,11 @@ internal static class RedactionEngine
         var changed = false;
         foreach (var entryPath in diff.Select(e => e.Key).ToList())
         {
-            if (paths is not null && !paths.Any(p => PathCovers(p, entryPath)))
+            // An entry is erased when an erasure path covers it, or when it is an ancestor that carries the
+            // erased field inside its value — a whole-object entry written before policies were split
+            // (insert, delete, an object set or cleared) holds address.street under "address".
+            if (paths is not null
+                && !paths.Any(p => PathCovers(p, entryPath) || CarriesInValue(diff[entryPath], entryPath, p)))
             {
                 continue;
             }
@@ -64,6 +68,31 @@ internal static class RedactionEngine
         }
 
         return changed;
+    }
+
+    // Whether the entry at entryPath is a strict ancestor of erasedPath and its old or new value holds the field.
+    private static bool CarriesInValue(JsonNode? entry, string entryPath, string erasedPath)
+    {
+        if (entryPath == erasedPath || !PathCovers(entryPath, erasedPath) || entry is not JsonObject entryJson)
+        {
+            return false;
+        }
+
+        var below = DiffPath.Split(erasedPath[(entryPath.Length + 1)..]);
+        return Holds(entryJson["old"], below) || Holds(entryJson["new"], below);
+    }
+
+    private static bool Holds(JsonNode? value, string[] segments)
+    {
+        foreach (var segment in segments)
+        {
+            if (value is not JsonObject obj || !obj.TryGetPropertyValue(segment, out value))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>Returns whether <paramref name="declared"/> covers <paramref name="path"/> (self or descendant).</summary>

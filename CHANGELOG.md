@@ -91,8 +91,13 @@ Fixed:
   keeps the rest of its value, each subtree with a different effective policy gets its own entry (spec
   changes.md §3, *Policies below an entry*; vectors `nested-policy-*`). A stored diff can now hold a path and
   paths below it. `Apply`/`ApplyReverse` no longer create a missing parent when removing a field, which keeps such
-  diffs reversible. Diffs written before this fix are not rewritten: the GDPR erasure of a nested path does not
-  yet cover an older whole-object entry either.
+  diffs reversible. Diffs written before this fix are not rewritten; `RedactHistoryAsync` reaches them (next entry).
+
+- **`RedactHistoryAsync` erases a nested path inside whole-object entries.** An erasure of `address.street` only
+  rewrote entries at or below that path, so the street stayed in every entry that carried the whole `address`
+  object — every insert, delete and set or cleared object written before the fix above, and still today for a
+  nested field without a policy. An ancestor entry is now redacted when its old or new value holds the erased
+  path; a split container that no longer holds it is left alone. Both engines.
 
 - **The diff, canonical and projection engines refuse a document nested deeper than 128 levels** with a clean
   exception (`NotSupportedException`; `CanonicalJsonException` code `too-deep`) instead of recursing into it. The

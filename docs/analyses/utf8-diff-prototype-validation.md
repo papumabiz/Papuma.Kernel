@@ -69,13 +69,15 @@ policies on descendants; the split diff rebuilds both states) and session tests 
 (`NestedPolicyFeedTests`, `SqliteNestedPolicyFeedTests`). With the split disabled, the property test
 fails at its first seed.
 
-### 3.3 GDPR erasure has the same blind spot (not fixed)
+### 3.3 GDPR erasure had the same blind spot (fixed)
 
-`RedactionEngine.RedactDiffEntries` erases the entries whose path is covered by an erasure path — an
-erasure of `address.street` does not touch an entry `address` that carries the street inside its value.
-Diffs written before the fix in §3.1 contain such entries, so erasing a nested field leaves its old
-values in history. Proposal: also redact an entry whose path is an ancestor of an erasure path
-(over-redacting the container, which is safe), plus a test with a pre-fix diff.
+`RedactionEngine.RedactDiffEntries` erased only the entries whose path is covered by an erasure path — an
+erasure of `address.street` did not touch an entry `address` that carries the street inside its value.
+Diffs written before the fix in §3.1 contain such entries (and fields without a policy still produce them),
+so erasing a nested field left its old values in history. **Fixed** (2026-10-20): an ancestor entry is
+redacted as a whole when its old or new value holds the erased path; a split container that no longer holds
+it keeps its values. Tests: `RedactionEngineTests`, two `GdprToolingTests` cases on PostgreSQL (one with a
+stored diff rewritten into the pre-fix shape), `SqliteNestedErasureTests`.
 
 ### 3.2 Depth limits disagree
 
