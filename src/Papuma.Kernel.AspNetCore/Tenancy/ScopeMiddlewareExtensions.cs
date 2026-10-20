@@ -34,6 +34,11 @@ public static class ScopeMiddlewareExtensions
     /// <summary>
     /// Adds scope resolution middleware to the request pipeline.
     /// </summary>
+    /// <remarks>
+    /// Call it after <c>UseAuthentication()</c> (and normally <c>UseAuthorization()</c>) so the
+    /// registered <see cref="IScopeResolver"/> sees the authenticated user; see
+    /// <see cref="IScopeResolver"/> for the trust rules.
+    /// </remarks>
     /// <param name="app">The application builder.</param>
     /// <returns>The application builder for chaining.</returns>
     public static IApplicationBuilder UseScopeResolution(this IApplicationBuilder app)

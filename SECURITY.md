@@ -37,6 +37,10 @@ These are the parts where a bug is a vulnerability rather than a defect:
 - **Scope and tenant isolation** — `ScopeContext`, the explicit `scope`/`tenant_id`
   predicates, and the PostgreSQL row-level security policies behind them
   ([ADR-001](docs/adr/adr-001-postgresql-18-only.md), [architecture](docs/architecture.md)).
+  Which tenant a request gets is decided by *your* `IScopeResolver`: derive it from
+  authenticated claims only, never from a client-set header (that is tenant spoofing), and
+  register `UseScopeResolution()` after `UseAuthentication()`. The kernel cannot check this
+  for you.
 - **Privacy policies** — the five-tier catalog applied at write time, before
   anything reaches the immutable change feed ([ADR-007](docs/adr/adr-007-privacy-policies.md)).
 - **GDPR tooling** — history redaction, masked reads, export assembly
@@ -46,9 +50,12 @@ These are the parts where a bug is a vulnerability rather than a defect:
 - **The SQLite connection string of `Papuma.Kernel.Local`** — `DbPath` must stay data
   (a path that smuggles in connection-string keywords is a bug).
 - **The ASP.NET Core dashboard** — it is unauthenticated unless you put
-  authorization in front of it; mapping it without authorization metadata emits a
-  startup warning. Exposing it publicly is a deployment mistake, not a kernel
-  vulnerability. The page itself escapes all dynamic values and sends a
+  protection in front of it (`RequireAuthorization()`, `RequireHost(...)`, an authorization
+  `FallbackPolicy`, or an internal-only host). If the endpoints carry none of the first three,
+  the kernel logs **one error** (category `Papuma.Kernel.Dashboard`). That check runs when
+  the endpoint table is built, in practice on the first request — **not at host start** — and
+  it cannot see a reverse proxy or network rule, so treat it as a nudge, not a guard.
+  Exposing the dashboard publicly is a deployment mistake, not a kernel vulnerability. The page itself escapes all dynamic values and sends a
   Content-Security-Policy plus `nosniff` / `no-store` headers; a rendering
   bypass of that escaping is in scope.
 

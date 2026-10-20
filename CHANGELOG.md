@@ -4,6 +4,19 @@
 
 Security:
 
+- **Dashboard guard-rail: error instead of warning, once, without false alarms (review A-3).** The check for an
+  unprotected dashboard logged a warning (silent at a higher log level) once per endpoint, and cried wolf for a
+  dashboard pinned with `RequireHost(...)` or covered by an authorization `FallbackPolicy` — the layers
+  `docs/observability.md` itself recommends. It now logs **one `LogError`** per `MapPapumaDashboard` call, and
+  counts `RequireAuthorization` (also with a policy object), `RequireHost` and a fallback policy as protection;
+  an explicit `AllowAnonymous` still warns. The check runs when the endpoint table is built, in practice on the
+  first request, **not at host start** as `SECURITY.md` and the code comment claimed; both now say so. It stays
+  a nudge: a reverse proxy or network rule is invisible to it.
+- **Tenant-id errors no longer echo the raw value (review A-7).** `ScopeContext.Tenant(string)` put the rejected
+  value, as received from a header or claim, into the `ArgumentException` message — and from there into logs
+  (forged log lines via CR/LF, unbounded size). The message now shows at most the first 40 characters with
+  control characters and Unicode line separators replaced, plus the length for longer values.
+
 - **Policy attributes on structs and on elements of collections are no longer silently ignored (review C-1).**
   `[SensitiveData]`, `[TrackHash]`, `[TrackReference]` and `[DoNotTrack]` were only honoured on members of
   *classes*. On a member of a **struct** (`record struct Address([property: SensitiveData] string Street, …)`,
@@ -46,6 +59,17 @@ Security:
   transaction, so no cross-tenant write was reachable; this removes the sole reliance on layer 2.
 
 Fixed:
+
+- **A scope resolver returning `null` fails with a clear message (review A-5).** `ScopeMiddleware` stored the
+  `null`, and the request then failed later with "ScopeContext not set. Is ScopeMiddleware registered?" — a
+  misleading pointer. It now throws `InvalidOperationException` naming the resolver type. Nothing failed open
+  before either (`GetScopeContext` threw).
+- **`ChangeFeedHealthCheckOptions` are validated at host start, whatever the source (review A-9).** Only the
+  `AddPapumaChangeFeedLag(maxAllowedLag)` argument was checked; a value set through `Configure<...>` or a bound
+  configuration section went unchecked. The options are now registered with `Validate(MaxAllowedLag > 0)` and
+  `ValidateOnStart()`. **An application that configured `MaxAllowedLag` as zero or negative now fails to start**
+  with an `OptionsValidationException` (it also throws on first use of the options). The extension signature is
+  unchanged.
 
 - **Event retention deletes in batches (review P-8, L-11).** `EventRetention.PurgeExpiredAsync` (PostgreSQL) removed
   everything expired in one transaction — the first purge after retention was switched on for a type with a large
@@ -241,6 +265,15 @@ Fixed:
 
 Breaking:
 
+- **`ClaimsSessionOptionsEnricher`: causation type from explicit names only, actor id bounded (review A-8).**
+  `CausationType` was the endpoint *display name* — `HTTP: GET /orders/{id} => Handler` for Minimal APIs,
+  `Ns.Controller.Action (Assembly)` for MVC — so route templates and assembly names were stored in tenant data
+  (and shown by the MCP tools), contrary to the documentation ("action name"). It is now the endpoint name
+  (`.WithName("PlaceOrder")`, `[EndpointName]`) or, for MVC, `Controller.Action`, and `null` for an endpoint
+  without such a name. **Records written by an unnamed Minimal API endpoint no longer carry a causation type;
+  name the endpoints that should.** A claim longer than the new `ClaimsSessionOptionsEnricher.MaxActorIdLength`
+  (256) now makes `Enrich` throw `InvalidOperationException` instead of being stored unbounded in `actor_id`.
+
 - **MCP tools: record lists come back as `{ "records": [...], "truncated": false }` and are capped (review M-3).**
   `get_document_history` and `get_changes_by_correlation` used to return a bare JSON array of any size — one
   injected "read the whole history" could flood the agent's context and the server's memory. They now return an
@@ -327,6 +360,14 @@ Breaking:
   are accepted as before; a test that used `Data Source=:memory:` needs a temp file or `Cache=Shared`.
 
 Changed:
+
+- **`ScopeMiddleware` answers a malformed tenant with `400` (review A-7).** An `ArgumentException` thrown by the
+  resolver (typically `ScopeContext.Tenant(...)` for a bad header or claim) used to surface as an unhandled
+  `500`. It is now answered with `400 Bad Request` and the rest of the pipeline does not run; the exception
+  message is not logged. An `ArgumentNullException` (a resolver that forgot a missing claim) and every other
+  exception still propagate, as do exceptions from later middleware. The `IScopeResolver` documentation now
+  states the trust rules (authenticated claims only, `UseScopeResolution()` after `UseAuthentication()`, fail
+  closed instead of `Platform()`).
 
 - **One feed engine per backend instead of four copies (review Q-1, P-7, L-15).** `ChangeFeedProcessor`,
   `EventFeedProcessor`, `SqliteChangeFeedProcessor` and `SqliteEventFeedProcessor` were four ~700-line copies of

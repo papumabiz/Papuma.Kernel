@@ -49,8 +49,12 @@ public static class DashboardExtensions
     /// </summary>
     /// <remarks>
     /// The dashboard exposes operational metadata (handler names, lag, error messages)
-    /// — protect it like a health endpoint: <c>MapPapumaDashboard(...).RequireAuthorization(...)</c>
-    /// or bind it to an internal-only host.
+    /// — protect it like a health endpoint: <c>MapPapumaDashboard(...).RequireAuthorization(...)</c>,
+    /// <c>.RequireHost(...)</c>, an authorization fallback policy, or an internal-only host.
+    /// If none of these is present the kernel logs one error (category
+    /// <c>Papuma.Kernel.Dashboard</c>) when the endpoint table is built — in practice on the
+    /// first request, not when the host starts. The check is a nudge, not a guard: it
+    /// does not block the endpoint and cannot see a reverse proxy or network rule.
     /// </remarks>
     /// <param name="endpoints">The endpoint route builder.</param>
     /// <param name="path">
@@ -97,25 +101,61 @@ public static class DashboardExtensions
             return Results.Content(json.ToJsonString(), "application/json");
         });
 
-        // Pit-of-success nudge (security review M2): the dashboard exposes operational
-        // metadata. A Finally convention runs after any chained .RequireAuthorization(),
-        // so if no authorization metadata is present we warn once at startup.
+        // Pit-of-success nudge (security review M2, A-3): the dashboard exposes operational
+        // metadata. A Finally convention runs after any chained .RequireAuthorization() or
+        // .RequireHost(), so we see the final endpoint metadata. It runs when the endpoint
+        // table is built — in practice on the first request, NOT at host start — and once per
+        // endpoint, hence the flag: one log entry per MapPapumaDashboard call.
+        var reported = 0;
         ((IEndpointConventionBuilder)group).Finally(builder =>
         {
-            if (builder.Metadata.OfType<IAuthorizeData>().Any())
+            if (IsProtected(builder.Metadata, endpoints.ServiceProvider)
+                || Interlocked.Exchange(ref reported, 1) == 1)
             {
                 return;
             }
 
             endpoints.ServiceProvider.GetService<ILoggerFactory>()?
                 .CreateLogger("Papuma.Kernel.Dashboard")
-                .LogWarning(
-                    "Papuma dashboard mapped at '{Path}' without authorization. It exposes handler " +
-                    "names, lag, failures and error messages. Chain .RequireAuthorization() on " +
-                    "MapPapumaDashboard(...) or bind it to an internal-only endpoint.", path);
+                .LogError(
+                    "Papuma dashboard mapped at '{Path}' without protection. It exposes handler " +
+                    "names, lag, failures and error messages. Chain .RequireAuthorization() or " +
+                    ".RequireHost(...) on MapPapumaDashboard(...), configure an authorization " +
+                    "FallbackPolicy, or bind it to an internal-only endpoint.", path);
         });
 
         return group;
+    }
+
+    /// <summary>
+    /// Whether the endpoint carries a guard the host put in front of it: authorization
+    /// metadata (an explicit <c>AllowAnonymous</c> wins over it, as in the authorization
+    /// middleware), a host restriction, or an authorization fallback policy that applies
+    /// to endpoints without authorization metadata.
+    /// </summary>
+    private static bool IsProtected(IList<object> metadata, IServiceProvider services)
+    {
+        // RequireHost("*") restricts nothing.
+        if (metadata.OfType<IHostMetadata>().Any(h => h.Hosts.Any(host => host != "*")))
+        {
+            return true;
+        }
+
+        if (metadata.OfType<IAllowAnonymous>().Any())
+        {
+            return false;
+        }
+
+        if (metadata.OfType<IAuthorizeData>().Any()
+            || metadata.OfType<IAuthorizationRequirementData>().Any()
+            || metadata.OfType<AuthorizationPolicy>().Any())
+        {
+            return true;
+        }
+
+        // Endpoint conventions are synchronous; the default provider completes synchronously.
+        var provider = services.GetService<IAuthorizationPolicyProvider>();
+        return provider is not null && provider.GetFallbackPolicyAsync().GetAwaiter().GetResult() is not null;
     }
 
     /// <summary>

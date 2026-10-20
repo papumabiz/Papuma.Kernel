@@ -29,9 +29,18 @@ The `ClaimsSessionOptionsEnricher` extracts:
 
 | Field | Source |
 |-------|--------|
-| `ActorId` | `sub` or `NameIdentifier` claim |
-| `CausationType` | Endpoint display name (Minimal API route name or MVC action) |
+| `ActorId` | `NameIdentifier` or `sub` claim (at most 256 characters — a longer claim makes the enricher throw instead of storing a truncated identity) |
+| `CausationType` | The explicit endpoint name (Minimal API `.WithName("PlaceOrder")`) or, for MVC, `Controller.Action`; `null` for an endpoint without such a name |
 | `CausationId` | `HttpContext.TraceIdentifier` |
+
+The endpoint *display name* is deliberately not used: for Minimal APIs it is
+`HTTP: GET /orders/{id} => Handler`, for MVC `Ns.Controller.Action (Assembly)` — route
+templates and assembly names that would end up in stored data. Name the endpoints that
+should carry a causation type.
+
+Note that `GetSessionOptions()` returns empty options (no actor, no causation) when no
+enricher is registered — check that `AddPapumaSessionOptions<...>()` is in place if audit
+fields come back empty.
 
 ```csharp
 // Program.cs — registration

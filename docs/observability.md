@@ -151,7 +151,11 @@ page) if you outgrow the built-in page.
 
 Security: the dashboard exposes operational metadata (handler names, lag, error
 messages). Protect it like a health endpoint —
-`MapPapumaDashboard().RequireAuthorization(...)` or bind it internally.
+`MapPapumaDashboard().RequireAuthorization(...)`, `.RequireHost(...)`, an authorization
+`FallbackPolicy`, or bind it internally. Without any of the first three the kernel logs one
+error (category `Papuma.Kernel.Dashboard`) when the endpoint table is first built — in
+practice with the first request, not when the host starts — so do not rely on it as the
+only safeguard; it cannot see a reverse proxy.
 
 Independent of that, the page and `{path}/data` harden their own responses: every
 value is HTML-escaped before it reaches the DOM (error messages can quote tenant
@@ -259,7 +263,11 @@ Three layers, from most robust to most convenient:
    endpoints then return 404. The sample shows this pattern, activated by a
    `ManagementPort` setting.
 3. **Authorization.** `.RequireAuthorization(...)` on either builder. The
-   dashboard additionally logs a startup warning when mapped without it.
+   dashboard additionally logs one error when it is mapped without any protection
+   (`RequireAuthorization`, `RequireHost` or an authorization fallback policy) — on the
+   first request, not at host start.
 
-Health (`/health`) is usually kept public for load-balancer probes — it carries
-no detail beyond healthy/unhealthy and the lag summary.
+Health (`/health`) is usually kept public for load-balancer probes — with the default
+response writer it is just healthy/unhealthy. The lag check's *description* names the
+handlers over the threshold and their lag (`handler=lag`); a detailed response writer
+(for example a JSON/UI one) publishes that text, so keep such a writer off a public port.

@@ -12,7 +12,9 @@ using Microsoft.Extensions.Logging;
 using Papuma.Kernel.AspNetCore.Dashboard;
 using Papuma.Kernel.Changes;
 using Papuma.Kernel.Events;
+using Papuma.Kernel.Model;
 using Papuma.Kernel.Processing;
+using Papuma.Kernel.Store;
 using Papuma.Kernel.Tests.Infrastructure;
 
 namespace Papuma.Kernel.Tests.Diagnostics;
@@ -166,6 +168,10 @@ public sealed class DashboardSecurityTests
 
     private async Task<WebApplication> StartDashboardAsync()
     {
+        // The data endpoint reads the lag, which needs the kernel tables — a fresh database has none
+        // (the test used to pass only after other tests had created them).
+        await SchemaManager.EnsureSchemaAsync(_fixture.DataSource, new KernelModelBuilder().Build());
+
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Logging.ClearProviders();

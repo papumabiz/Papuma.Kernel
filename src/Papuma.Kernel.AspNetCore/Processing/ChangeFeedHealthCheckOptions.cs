@@ -10,7 +10,8 @@ public sealed class ChangeFeedHealthCheckOptions
 {
     /// <summary>
     /// Gets or sets the maximum tolerated lag — committed changes a handler has not
-    /// received yet (ADR-022) — before the health check reports unhealthy.
+    /// received yet (ADR-022) — before the health check reports unhealthy. Must be greater
+    /// than zero; the options are validated when the host starts.
     /// </summary>
     public long MaxAllowedLag { get; set; } = 1000;
 }

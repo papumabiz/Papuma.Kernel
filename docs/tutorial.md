@@ -134,6 +134,11 @@ public sealed class DemoScope : IScopeResolver
 }
 ```
 
+A production resolver is the tenant trust boundary: take the tenant from an *authenticated*
+claim (`context.User`), never from a header the caller can set, and throw — do not fall back
+to `ScopeContext.Platform()` — when there is none. `UseScopeResolution()` belongs after
+`UseAuthentication()`.
+
 Wire it up and add the create endpoint (in `Program.cs`, before `app.Run()`):
 
 ```csharp

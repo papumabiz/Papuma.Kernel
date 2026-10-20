@@ -1276,8 +1276,10 @@ layers).
 This is the same boundary as everywhere else in the kernel, one layer up: the
 library provides the *mechanism* (a route, and a builder to shape it), the
 application makes the *decision* (where it lives, who may reach it). The one
-nudge the library does allow itself is a fail-loud one — the dashboard logs a
-warning when mapped without authorization metadata (security review M2) — because
+nudge the library does allow itself is a fail-loud one — the dashboard logs an
+error when mapped without any protection (no `RequireAuthorization`, `RequireHost`
+or authorization fallback policy; security review M2, A-3), once, when the endpoint
+table is built (in practice the first request, not host start) — because
 a missing guard on an exposing endpoint is exactly the mistake worth shouting
 about. A warning respects the host's authority; opening a port behind its back
 would not.

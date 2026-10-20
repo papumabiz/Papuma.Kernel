@@ -44,6 +44,42 @@ public sealed class ScopeContextTests
     }
 
     [Fact]
+    public void Tenant_InvalidId_ReportsParamName_AndStillShowsAShortValue()
+    {
+        var ex = Assert.Throws<ArgumentException>(() => ScopeContext.Tenant("has space"));
+
+        Assert.Equal("tenantId", ex.ParamName);
+        Assert.Contains("has space", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("acme\r\n2026-01-01 INFO forged log line")]
+    [InlineData("acme\nforged")]
+    [InlineData("acme\u2028forged")]
+    [InlineData("acme\u2029forged")]
+    [InlineData("acme\u0000\u001b[31mforged")]
+    public void Tenant_InvalidId_MessageContainsNoControlCharacters(string tenantId)
+    {
+        var ex = Assert.Throws<ArgumentException>(() => ScopeContext.Tenant(tenantId));
+
+        Assert.DoesNotContain(ex.Message, char.IsControl);
+        Assert.DoesNotContain('\u2028', ex.Message);
+        Assert.DoesNotContain('\u2029', ex.Message);
+        Assert.Contains("forged", ex.Message); // replaced, not dropped
+    }
+
+    [Fact]
+    public void Tenant_InvalidId_MessageEchoesAtMostAShortPrefix()
+    {
+        var huge = new string('a', 100_000) + "!";
+
+        var ex = Assert.Throws<ArgumentException>(() => ScopeContext.Tenant(huge));
+
+        Assert.True(ex.Message.Length < 400, $"message has {ex.Message.Length} characters");
+        Assert.Contains("100001", ex.Message); // the length stays visible
+    }
+
+    [Fact]
     public void Tenant_RejectsNull()
     {
         Assert.Throws<ArgumentNullException>(() => ScopeContext.Tenant((string)null!));

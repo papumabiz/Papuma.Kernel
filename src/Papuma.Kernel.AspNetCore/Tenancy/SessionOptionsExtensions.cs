@@ -34,6 +34,11 @@ public static class SessionOptionsExtensions
     /// <see cref="ISessionOptionsEnricher"/>. Falls back to empty options when no enricher
     /// is registered.
     /// </summary>
+    /// <remarks>
+    /// The fallback is silent by design: a forgotten <c>AddPapumaSessionOptions&lt;...&gt;()</c>
+    /// shows up only as empty actor and causation fields on the stored records, so check the
+    /// registration if those come back empty.
+    /// </remarks>
     /// <param name="context">The current HTTP context.</param>
     /// <returns>The enriched session options.</returns>
     public static SessionOptions GetSessionOptions(this HttpContext context)

@@ -50,7 +50,9 @@ public sealed record ScopeContext
     /// for GUIDs to get one canonical form.
     /// </param>
     /// <exception cref="ArgumentException">
-    /// Thrown when <paramref name="tenantId"/> does not match the pattern above.
+    /// Thrown when <paramref name="tenantId"/> does not match the pattern above. The message
+    /// echoes at most the first 40 characters of the rejected value, with control characters
+    /// replaced, because the value is typically client input that ends up in logs.
     /// </exception>
     public static ScopeContext Tenant(string tenantId)
     {
@@ -59,11 +61,35 @@ public sealed record ScopeContext
         if (!ValidTenantPattern.IsMatch(tenantId))
         {
             throw new ArgumentException(
-                $"Invalid tenantId '{tenantId}'. Must match [A-Za-z0-9][A-Za-z0-9_-]{{1,100}}.",
+                $"Invalid tenantId '{Describe(tenantId)}'. Must match [A-Za-z0-9][A-Za-z0-9_-]{{1,100}}.",
                 nameof(tenantId));
         }
 
         return new ScopeContext(ScopeType.Tenant, tenantId);
+    }
+
+    // The rejected value usually comes straight from a request (header, claim) and ends up in
+    // an exception message and from there in logs: cut it short and neutralise line breaks and
+    // other control characters so it cannot forge log lines or flood them.
+    private static string Describe(string value)
+    {
+        const int MaxShown = 40;
+
+        var shown = value.AsSpan(0, Math.Min(value.Length, MaxShown));
+        if (value.Length > MaxShown && char.IsHighSurrogate(shown[^1]))
+        {
+            shown = shown[..^1];
+        }
+
+        var buffer = new char[shown.Length];
+        for (var i = 0; i < shown.Length; i++)
+        {
+            var c = shown[i];
+            buffer[i] = char.IsControl(c) || c is '\u2028' or '\u2029' ? '\uFFFD' : c;
+        }
+
+        var text = new string(buffer);
+        return value.Length > MaxShown ? $"{text}… ({value.Length} characters)" : text;
     }
 
     /// <summary>
