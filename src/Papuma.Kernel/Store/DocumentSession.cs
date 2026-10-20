@@ -1165,9 +1165,15 @@ public sealed partial class DocumentSession : IAsyncDisposable
 
     private void AddScopeParameters(NpgsqlCommand cmd, string documentType)
     {
+        AddScopeParameters(cmd);
+        cmd.Parameters.AddWithValue("type", documentType);
+    }
+
+    /// <summary>Binds the scope predicate parameters only, for statements that are not bound to a type.</summary>
+    private void AddScopeParameters(NpgsqlCommand cmd)
+    {
         cmd.Parameters.AddWithValue("scope", Scope.Scope.ToString());
         cmd.Parameters.AddWithValue("tenantId", Scope.TenantId ?? string.Empty);
-        cmd.Parameters.AddWithValue("type", documentType);
     }
 
     private static void AddJsonbParameter(NpgsqlCommand cmd, string name, JsonNode json)

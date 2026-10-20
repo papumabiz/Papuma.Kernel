@@ -27,7 +27,8 @@ internal sealed class KernelSchemaInitializer(
     KernelModel model,
     PapumaKernelOptions options,
     IEnumerable<ISchemaContributor> contributors,
-    IHashKeyProvider? hashKeys = null) : IHostedService
+    IHashKeyProvider? hashKeys = null,
+    ILogger<KernelSchemaInitializer>? logger = null) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -36,7 +37,7 @@ internal sealed class KernelSchemaInitializer(
 
         if (options.EnsureSchema)
         {
-            await SchemaManager.EnsureSchemaAsync(dataSource, model, cancellationToken);
+            await SchemaManager.EnsureSchemaAsync(dataSource, model, logger, cancellationToken);
         }
 
         if (hashKeys is not null)
@@ -102,7 +103,8 @@ internal sealed class EventRetentionHostedService(
         {
             try
             {
-                var deleted = await EventRetention.PurgeExpiredAsync(dataSource, model, stoppingToken);
+                var deleted = await EventRetention.PurgeExpiredAsync(
+                    dataSource, model, EventRetention.DefaultBatchSize, onBatchCommitted: null, stoppingToken, _logger);
                 if (deleted > 0)
                 {
                     _logger.LogInformation("Event retention purged {Deleted} expired events.", deleted);

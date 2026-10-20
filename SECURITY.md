@@ -50,6 +50,25 @@ These are the parts where a bug is a vulnerability rather than a defect:
   Content-Security-Policy plus `nosniff` / `no-store` headers; a rendering
   bypass of that escaping is in scope.
 
+## Database roles
+
+Row-level security is the second layer of tenant isolation (layer 1 is the explicit
+`scope`/`tenant_id` predicate in every statement). `FORCE ROW LEVEL SECURITY` subjects the table
+owner too, but three kinds of role are not bound by it:
+
+- **superusers** and roles with **`BYPASSRLS`** bypass every policy;
+- the **table owner** is subject to the policies, yet can `ALTER TABLE … DISABLE ROW LEVEL
+  SECURITY`, drop a policy, or `TRUNCATE` (`TRUNCATE` is not subject to RLS at all).
+
+So the application's runtime role must be **none of these**. With `EnsureSchema = true` the
+connecting role creates the schema and therefore owns it, which makes the runtime role the owner
+in the default setup: for production, run the schema step (`SchemaManager.EnsureSchemaAsync`, or
+your own migration) under a separate migration/owner role and run the application as a plain
+login role with DML grants on `papuma.*` (the way `Papuma.Kernel.Testing` sets up its
+application role). Also set `idle_in_transaction_session_timeout` on that role
+([architecture](docs/architecture.md#session--unit-of-work)). Isolation tests must not run as a
+superuser, which passes them whether or not isolation works.
+
 ## Out of scope
 
 - Findings that require an already-compromised database superuser.

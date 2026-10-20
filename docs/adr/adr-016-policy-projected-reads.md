@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-06-13) · Implemented (2026-06-13)
+Accepted (2026-06-13) · Implemented (2026-06-13) · Amended (2026-10-20: key-lookup limitation, §5)
 
 ## Context
 
@@ -82,6 +82,29 @@ query languages (ADR-009) — the kernel does not know them and cannot expose th
 generically. Application-specific projection tools are the consumer's to build;
 the kernel provides the pattern (a recipe), not the generic instrument. This is
 the same mechanism-vs-application boundary as everywhere else.
+
+### 5. Known limitation: a key lookup on a protected field is an existence oracle (review S-15)
+
+The masked read masks the **result**; the **lookup** compares the clear-text value. If a
+declared key is also a protected field — `Email` is `[UniqueKey]` *and* `[SensitiveData]`,
+the common case — an agent that may call `get_document_by_key` can probe arbitrary values:
+"no document" versus "a document (with `email` masked)" tells whether that address is a
+customer, without any protected value ever being returned. For a non-unique lookup key the
+multi-match error additionally reveals that more than one document carries the value
+(`LIMIT 2` + exception).
+
+This is accepted for now and documented rather than prevented: masking is data
+minimization, not authorization (see Consequences) — an agent allowed to look documents up by
+key is, by that permission, allowed to ask whether one exists. What follows for operators:
+
+- Expose a type to MCP (`ExposeToMcp()`) only if *finding* its documents by every declared key
+  is something the agent's principal may do; a key on a field that is protected in the
+  feed (`Redact`, `Hash`, `Reference`) is exactly the case to think about.
+- The tool surface stays scope-bound: the oracle never crosses tenants.
+
+Rejecting lookups by keys whose effective policy is not `Track` in the MCP path was
+considered. It changes what the content tools can do and is decided together with the
+MCP scope-binding work (WP-12); until then this section is the contract.
 
 ## Consequences
 

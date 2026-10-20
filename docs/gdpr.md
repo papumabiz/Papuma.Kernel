@@ -56,7 +56,9 @@ values went into the feed unprotected before: `RedactHistoryAsync` cleans the hi
 ## Export (Art. 15 access / Art. 20 portability)
 
 The application supplies the subject→data mapping (via its keys and projections);
-the kernel assembles in **one transaction** (consistent snapshot):
+the kernel assembles in **one repeatable-read, read-only transaction** (one consistent
+snapshot: state and history never come from two different moments, even while a writer
+commits):
 
 ```csharp
 JsonObject export = await GdprExport.ExportAsync(store, scope,
@@ -72,6 +74,23 @@ automatically**: diffs and event payloads are stored policy-applied — redacted
 values appear in the export only as change markers. The current document state,
 by contrast, is the stored truth in plain form (that is the point of an access
 request).
+
+**No identifiers of other people by default.** The metadata of a change or event also
+carries who caused it (`actorId`, a clerk), the causation (`causationId`, `causationType`),
+the trace context (`traceparent`) and, after a redaction, the free text of its `reason` and
+the redacting actor. These name or describe third parties and are not part of the data
+subject's right of access (Art. 15 (4)). The export therefore keeps an allow-list only: the
+`correlationId`, rollback markers (`isRollback`, `restoredVersion`), and of a redaction
+its time, paths and correlation id. An internal audit export that is *not* handed to the
+data subject opts in to the full metadata:
+
+```csharp
+var audit = await GdprExport.ExportAsync(store, scope, documents, events,
+    new GdprExportOptions { IncludeActorMetadata = true });
+```
+
+The state of a document can itself contain third-party data (a free-text note naming
+someone else): the export cannot know — review the result before delivery.
 
 ## Erasure (Art. 17) — the tenant pattern
 
@@ -123,6 +142,10 @@ diffs after the delete. Exactly this gap is closed by the redaction primitives:
   user id is selected with `userId.ToString()`. A JSON `null` or a missing field matches
   nothing. The same on PostgreSQL and SQLite (the engines run one shared case table).
 
+`RedactHistoryAsync` rejects an empty `paths` collection (`ArgumentException`): `null` means
+"everything", and an empty list that a caller built from nothing must not look like a
+successful erasure that touched zero changes.
+
 Both are **irreversible** and demand an audit reason; every rewritten row gets a
 `redaction` block in its metadata (when, why, actor, correlation). Consequence
 per ADR-008: rollback across redacted history fails typed
@@ -131,6 +154,19 @@ per ADR-008: rollback across redacted history fails typed
 This deliberately violates the append-only purity of the feed: **Art. 17 beats
 architectural aesthetics.** Redaction is not part of normal application flows —
 whoever needs it regularly has a policy omission (→ inventory review).
+
+## Actor ids must be pseudonyms
+
+The actor of a write is stored in `papuma.change.actor_id`, `papuma.event.actor_id`,
+`papuma.document.created_by` / `updated_by` and `metadata.actorId` (ADR-017). **The kernel
+has no redaction primitive for these**: `RedactHistoryAsync` rewrites diffs, `RedactEventsAsync`
+rewrites payloads — the actor columns and the audit block's `actorId` stay as written, for the
+life of the row. So put an **opaque, application-issued identifier** in `SessionOptions.ActorId`
+(a surrogate key such as `u-7f3a…`), never an e-mail address, a name or any other directly
+identifying value, and keep the mapping from the pseudonym to the person in an application
+table. Erasing that mapping is then the erasure of the actor: the history keeps an identifier
+that nobody can resolve any more. An actor id that is itself personal data cannot be erased
+without rewriting the feed by hand.
 
 ## Backups revive erased data
 

@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
+using System.Security.Cryptography;
 using System.Text;
+
+using Microsoft.Extensions.Logging;
 
 using Npgsql;
 
@@ -26,20 +29,41 @@ public static class SchemaManager
     /// Verifies the server version and applies the idempotent kernel schema
     /// (tables, indexes, RLS policies). When a <paramref name="model"/> is supplied,
     /// declared keys are materialized as partial expression indexes (ADR-006).
-    /// Safe to call repeatedly, e.g. on every startup.
+    /// Safe to call repeatedly, e.g. on every startup, and from several instances at once.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Starts are serialized by a transaction-scoped advisory lock, and the DDL runs only when it is
+    /// new to the database: the kernel schema script and the key indexes of a model are recorded in
+    /// <c>papuma.schema_state</c> by a content hash, so an unchanged restart takes no <c>ACCESS
+    /// EXCLUSIVE</c> lock on the kernel tables (review S-11, N-8). A different model, or a newer
+    /// kernel version, hashes differently and applies its DDL. The kernel's own objects are not
+    /// re-created behind your back: to force a re-apply (e.g. after dropping an index by hand),
+    /// delete the rows of <c>papuma.schema_state</c>.
+    /// </para>
+    /// </remarks>
     /// <param name="dataSource">The PostgreSQL data source.</param>
     /// <param name="model">The kernel model whose declared keys are materialized (optional).</param>
     /// <param name="ct">A cancellation token.</param>
     /// <exception cref="PostgresVersionNotSupportedException">
     /// Thrown when the connected server is older than PostgreSQL 18.
     /// </exception>
-    public static async Task EnsureSchemaAsync(
+    public static Task EnsureSchemaAsync(
         NpgsqlDataSource dataSource,
         KernelModel? model = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        EnsureSchemaAsync(dataSource, model, logger: null, ct);
+
+    internal static async Task EnsureSchemaAsync(
+        NpgsqlDataSource dataSource,
+        KernelModel? model,
+        ILogger? logger,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(dataSource);
+
+        // Built (and validated) before the database is touched: a bad model fails without a lock or any DDL.
+        var keyDdl = model is null ? string.Empty : BuildKeyIndexDdl(model);
 
         await using var conn = await dataSource.OpenConnectionAsync(ct);
 
@@ -50,25 +74,97 @@ public static class SchemaManager
             EnsureMinimumServerVersion(serverVersionNum);
         }
 
-        await using (var schemaCmd = conn.CreateCommand())
-        {
-            schemaCmd.CommandText = SchemaDdl.Script;
-            await schemaCmd.ExecuteNonQueryAsync(ct);
-        }
-
-        if (model is not null)
-        {
-            var keyDdl = BuildKeyIndexDdl(model);
-            if (keyDdl.Length > 0)
-            {
-                await using var keyCmd = conn.CreateCommand();
-                keyCmd.CommandText = keyDdl;
-                await keyCmd.ExecuteNonQueryAsync(ct);
-            }
-        }
-
-        await RepairFeedAfterLogicalRestoreAsync(conn, ct);
+        await ApplySchemaOnceAsync(conn, keyDdl, ct);
+        await RepairFeedAfterLogicalRestoreAsync(conn, logger, ct);
     }
+
+    private const string KernelComponent = "kernel";
+
+    private const string KeysComponent = "keys";
+
+    /// <summary>
+    /// Applies the kernel script and the key DDL under the schema lock, each only when its content
+    /// hash is not yet recorded in <c>papuma.schema_state</c> (one row per applied hash, so several
+    /// models sharing a database never mask one another).
+    /// </summary>
+    private static async Task ApplySchemaOnceAsync(NpgsqlConnection conn, string keyDdl, CancellationToken ct)
+    {
+        var kernelHash = ContentHash(SchemaDdl.Script);
+        var keysHash = keyDdl.Length == 0 ? null : ContentHash(keyDdl);
+
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        // Released with the transaction. Blocks parallel starts until the first one has applied and recorded
+        // its DDL; they then find it recorded and skip. Contributors take their own lock (ISchemaContributor).
+        await ExecuteAsync(conn, tx, "SELECT pg_advisory_xact_lock(hashtextextended('papuma.kernel.schema', 0))", ct);
+
+        var applied = await ReadAppliedAsync(conn, tx, ct);
+        var kernelDone = applied.Contains((KernelComponent, kernelHash));
+        var keysDone = keysHash is null || applied.Contains((KeysComponent, keysHash));
+        if (kernelDone && keysDone)
+        {
+            await tx.CommitAsync(ct); // nothing new: no DDL, so no ACCESS EXCLUSIVE lock
+            return;
+        }
+
+        // A database from before schema_state gets the table with the script, and is recorded below.
+        if (!kernelDone)
+        {
+            await ExecuteAsync(conn, tx, SchemaDdl.Script, ct);
+            await RecordAsync(conn, tx, KernelComponent, kernelHash, ct);
+        }
+
+        if (!keysDone)
+        {
+            await ExecuteAsync(conn, tx, keyDdl, ct);
+            await RecordAsync(conn, tx, KeysComponent, keysHash!, ct);
+        }
+
+        await tx.CommitAsync(ct);
+    }
+
+    private static async Task<HashSet<(string Component, string Hash)>> ReadAppliedAsync(
+        NpgsqlConnection conn, NpgsqlTransaction tx, CancellationToken ct)
+    {
+        var applied = new HashSet<(string, string)>();
+
+        await using var exists = new NpgsqlCommand("SELECT to_regclass('papuma.schema_state') IS NOT NULL", conn, tx);
+        if (!(bool)(await exists.ExecuteScalarAsync(ct))!)
+        {
+            return applied;
+        }
+
+        await using var read = new NpgsqlCommand("SELECT component, content_hash FROM papuma.schema_state", conn, tx);
+        await using var reader = await read.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            applied.Add((reader.GetString(0), reader.GetString(1)));
+        }
+
+        return applied;
+    }
+
+    private static async Task RecordAsync(
+        NpgsqlConnection conn, NpgsqlTransaction tx, string component, string hash, CancellationToken ct)
+    {
+        await using var cmd = new NpgsqlCommand("""
+            INSERT INTO papuma.schema_state (component, content_hash) VALUES (@component, @hash)
+            ON CONFLICT DO NOTHING
+            """, conn, tx);
+        cmd.Parameters.AddWithValue("component", component);
+        cmd.Parameters.AddWithValue("hash", hash);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task ExecuteAsync(NpgsqlConnection conn, NpgsqlTransaction tx, string sql, CancellationToken ct)
+    {
+        await using var cmd = new NpgsqlCommand(sql, conn, tx);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    // Line endings are normalized: the script is a raw string literal, which carries the source file's.
+    private static string ContentHash(string sql) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(sql.ReplaceLineEndings("\n"))));
 
     /// <summary>
     /// Records the hash key in use and verifies it against the key the database was initialized
@@ -121,7 +217,9 @@ public static class SchemaManager
                 "(PapumaKernelOptions.EnsureSchema) once with this version before starting with a hash key.", ex);
         }
 
-        HashKeyCheckValue.Verify(keyId, computed, stored!);
+        HashKeyCheckValue.Verify(keyId, computed, stored ?? throw new InvalidOperationException(
+            $"The check value for hash key id '{keyId}' is neither stored nor readable in papuma.hash_key_check " +
+            "(concurrently removed, or hidden from this database role)."));
     }
 
     /// <summary>
@@ -141,10 +239,11 @@ public static class SchemaManager
     {
         ArgumentNullException.ThrowIfNull(dataSource);
         await using var conn = await dataSource.OpenConnectionAsync(ct);
-        return await RepairFeedAfterLogicalRestoreAsync(conn, ct);
+        return await RepairFeedAfterLogicalRestoreAsync(conn, logger: null, ct);
     }
 
-    private static async Task<bool> RepairFeedAfterLogicalRestoreAsync(NpgsqlConnection conn, CancellationToken ct)
+    private static async Task<bool> RepairFeedAfterLogicalRestoreAsync(
+        NpgsqlConnection conn, ILogger? logger, CancellationToken ct)
     {
         await using var tx = await conn.BeginTransactionAsync(ct);
         await conn.SetAllScopesAsync(tx, ct); // FORCE RLS: without it the owner sees no rows
@@ -209,7 +308,7 @@ public static class SchemaManager
             var scopes = await ScopedMaintenance.ReadScopesAsync(conn, tx, $"""
                 SELECT DISTINCT scope, tenant_id FROM {table}
                 WHERE txid >= pg_snapshot_xmax(pg_current_snapshot())
-                """, bind: null, ct);
+                """, bind: null, ct, logger);
             await ScopedMaintenance.ExecutePerScopeAsync(conn, tx, scopes, $"""
                 UPDATE {table} SET txid = '2'::xid8
                 WHERE scope = @scope AND tenant_id = @tenantId

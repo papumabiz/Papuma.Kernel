@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
+using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
+
+using Microsoft.Extensions.Logging;
+
 using Npgsql;
 
 namespace Papuma.Kernel.Tenancy;
@@ -16,11 +21,13 @@ internal static class ScopedMaintenance
 {
     /// <summary>
     /// Returns the distinct scopes named by <paramref name="sql"/>, which must select
-    /// <c>scope, tenant_id</c>. Sets the <c>All</c> scope on the transaction first.
+    /// <c>scope, tenant_id</c>. Sets the <c>All</c> scope on the transaction first. A row whose
+    /// tenant id is outside the whitelist (written past the kernel) cannot be written under any
+    /// scope: it is skipped and logged, instead of failing the maintenance for every tenant.
     /// </summary>
     public static async Task<IReadOnlyList<ScopeContext>> ReadScopesAsync(
         NpgsqlConnection conn, NpgsqlTransaction tx, string sql,
-        Action<NpgsqlParameterCollection>? bind, CancellationToken ct)
+        Action<NpgsqlParameterCollection>? bind, CancellationToken ct, ILogger? logger = null)
     {
         await conn.SetAllScopesAsync(tx, ct);
 
@@ -33,7 +40,15 @@ internal static class ScopedMaintenance
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            scopes.Add(FromRow(reader.GetString(0), reader.GetString(1)));
+            var (scope, tenantId) = (reader.GetString(0), reader.GetString(1));
+            if (TryFromRow(scope, tenantId, out var parsed))
+            {
+                scopes.Add(parsed);
+            }
+            else
+            {
+                LogSkippedScope(logger, scope, tenantId);
+            }
         }
 
         return scopes;
@@ -65,7 +80,38 @@ internal static class ScopedMaintenance
         return affected;
     }
 
-    /// <summary>The scope of a stored row (<c>scope</c>, <c>tenant_id</c> columns).</summary>
-    public static ScopeContext FromRow(string scope, string tenantId) =>
-        scope == nameof(ScopeType.Tenant) ? ScopeContext.Tenant(tenantId) : ScopeContext.Platform();
+    /// <summary>
+    /// The scope of a stored row (<c>scope</c>, <c>tenant_id</c> columns); <c>false</c> for a tenant row
+    /// whose tenant id is not a valid one.
+    /// </summary>
+    public static bool TryFromRow(string scope, string tenantId, [NotNullWhen(true)] out ScopeContext? result)
+    {
+        if (scope != nameof(ScopeType.Tenant))
+        {
+            result = ScopeContext.Platform();
+            return true;
+        }
+
+        try
+        {
+            result = ScopeContext.Tenant(tenantId);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            result = null;
+            return false;
+        }
+    }
+
+    /// <summary>Logs a row that was skipped for its invalid scope.</summary>
+    public static void LogSkippedScope(ILogger? logger, string scope, string tenantId, string? what = null) =>
+        logger?.LogWarning(
+            "Skipping {What} stored under the invalid scope ({Scope}, tenant id {TenantId}): it cannot be written under " +
+            "row-level security. It was written past the kernel; correct or remove it.",
+            what ?? "rows", scope, Quote(tenantId));
+
+    // Escapes control characters and bounds the length: the value comes from the database, not from the kernel.
+    private static string Quote(string value) =>
+        JsonSerializer.Serialize(value.Length > 100 ? value[..100] + "..." : value);
 }

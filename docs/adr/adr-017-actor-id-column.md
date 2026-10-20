@@ -54,6 +54,21 @@ surface is needed — the same property now writes to both the column and the
 metadata JSONB (the latter for backward compatibility and because metadata
 carries additional context like `correlationId` and `traceparent`).
 
+### Actor ids must be pseudonyms
+
+The actor ends up in four columns and in the JSONB metadata (`actorId`, and `redaction.actorId`
+of a redaction's audit block), and **the kernel offers no redaction primitive for it**:
+`RedactHistoryAsync` rewrites diffs and `RedactEventsAsync` event payloads, neither touches
+`actor_id`, `created_by`, `updated_by` or the metadata. An actor id that is directly identifying
+personal data (an e-mail address, a name) can therefore not be erased through the kernel.
+The contract is: `SessionOptions.ActorId` carries an opaque, application-issued
+pseudonym; the mapping to the person lives in an application table, and erasing the mapping
+is the erasure of the actor. A redaction primitive for actors (`RedactActorAsync`) was
+considered and not added: it would have to rewrite append-only rows in four places and
+break the "actor of a version" audit guarantee; the pseudonym contract gets the same result
+without touching history. See `docs/gdpr.md`. The GDPR export leaves actor identifiers out
+by default for a related reason (review S-3, S-8).
+
 ### What does NOT change
 
 - The `actorId` key in the JSONB `metadata` column stays — it is part of the

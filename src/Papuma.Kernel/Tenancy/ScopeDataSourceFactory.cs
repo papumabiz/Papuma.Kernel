@@ -17,7 +17,16 @@ namespace Papuma.Kernel.Tenancy;
 /// Cache misses and eviction share a single lock so that the factory delegate is called at most once
 /// per tenant and eviction never disposes a data source that is about to be returned to a caller.
 /// </para>
+/// <para>
+/// Deprecated (review S-13): nothing in the kernel uses it. Eviction disposes a data source a caller may
+/// still hold (<see cref="ObjectDisposedException"/>), and a call after <see cref="Dispose"/> creates
+/// new data sources that nobody disposes.
+/// </para>
 /// </remarks>
+[Obsolete(
+    "Unused by the kernel and unsafe under load: LRU eviction disposes data sources that callers may still hold, " +
+    "and calls after Dispose create new ones. Create and own one NpgsqlDataSource per tenant database yourself. " +
+    "Will be removed in the next major version.")]
 public sealed class ScopeDataSourceFactory : IScopeDataSourceFactory, IDisposable
 {
     /// <summary>

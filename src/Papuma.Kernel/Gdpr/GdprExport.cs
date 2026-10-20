@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
+using System.Data;
 using System.Text.Json.Nodes;
 
 using Npgsql;
@@ -16,14 +17,22 @@ namespace Papuma.Kernel.Gdpr;
 
 /// <summary>
 /// Assembles a structured Art.-15/20 export (ADR-015): current state, change history
-/// and events of a data subject, as one JSON document read in a single transaction
-/// (consistent snapshot). The subject→data mapping is application knowledge — callers
-/// pass document refs and event selectors.
+/// and events of a data subject, as one JSON document read in a single repeatable-read,
+/// read-only transaction (one consistent snapshot, review S-2). The subject→data mapping is
+/// application knowledge — callers pass document refs and event selectors.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Policy minimization (ADR-007) applies automatically: diffs and event payloads are
 /// stored policy-applied, so redacted values appear only as change markers — also in
 /// the export. The current document state, however, is the stored truth in plain form.
+/// </para>
+/// <para>
+/// The change and event metadata is reduced to what concerns the data subject (review S-3):
+/// the correlation id, rollback markers, and the time and paths of a redaction. Actor, causation,
+/// trace context and free audit text name other people and stay out unless
+/// <see cref="GdprExportOptions.IncludeActorMetadata"/> is set.
+/// </para>
 /// </remarks>
 public static class GdprExport
 {
@@ -37,16 +46,37 @@ public static class GdprExport
     /// <param name="events">Optional event selectors (payload path = value).</param>
     /// <param name="ct">A cancellation token.</param>
     /// <exception cref="ArgumentException">A referenced document or event type is not registered.</exception>
-    public static async Task<JsonObject> ExportAsync(
+    public static Task<JsonObject> ExportAsync(
         DocumentStore store,
         ScopeContext scope,
         IReadOnlyCollection<DocumentRef> documents,
         IReadOnlyCollection<EventSelector>? events = null,
+        CancellationToken ct = default) =>
+        ExportAsync(store, scope, documents, events, new GdprExportOptions(), ct);
+
+    /// <summary>
+    /// Exports the given documents (state + history) and matching events of one scope
+    /// as a structured JSON object, with explicit <paramref name="options"/>.
+    /// </summary>
+    /// <param name="store">The document store.</param>
+    /// <param name="scope">The scope to export from (per-tenant execution, ADR-015).</param>
+    /// <param name="documents">The document references to export.</param>
+    /// <param name="events">Optional event selectors (payload path = value).</param>
+    /// <param name="options">The export options.</param>
+    /// <param name="ct">A cancellation token.</param>
+    /// <exception cref="ArgumentException">A referenced document or event type is not registered.</exception>
+    public static async Task<JsonObject> ExportAsync(
+        DocumentStore store,
+        ScopeContext scope,
+        IReadOnlyCollection<DocumentRef> documents,
+        IReadOnlyCollection<EventSelector>? events,
+        GdprExportOptions options,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(documents);
+        ArgumentNullException.ThrowIfNull(options);
 
         // Resolve all type names up front — typos fail fast, before any I/O.
         var documentTypes = store.Model.DocumentTypes.ToDictionary(m => m.Name, StringComparer.Ordinal);
@@ -70,7 +100,15 @@ public static class GdprExport
         }
 
         await using var conn = await store.DataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
+        // One snapshot for all N+1 queries; read-only, so the export can never write.
+        await using var tx = await conn.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
+        await using (var readOnly = conn.CreateCommand())
+        {
+            readOnly.Transaction = tx;
+            readOnly.CommandText = "SET TRANSACTION READ ONLY";
+            await readOnly.ExecuteNonQueryAsync(ct);
+        }
+
         await conn.SetScopeAsync(tx, scope, ct);
 
         var export = new JsonObject
@@ -83,11 +121,11 @@ public static class GdprExport
         var documentsJson = new JsonArray();
         foreach (var reference in documents)
         {
-            documentsJson.Add(await ExportDocumentAsync(conn, tx, scope, reference, ct));
+            documentsJson.Add(await ExportDocumentAsync(conn, tx, scope, reference, options, ct));
         }
 
         export["documents"] = documentsJson;
-        export["events"] = await ExportEventsAsync(conn, tx, scope, events ?? [], ct);
+        export["events"] = await ExportEventsAsync(conn, tx, scope, events ?? [], options, ct);
 
         await tx.RollbackAsync(ct); // read-only — nothing to commit
         return export;
@@ -95,7 +133,7 @@ public static class GdprExport
 
     private static async Task<JsonObject> ExportDocumentAsync(
         NpgsqlConnection conn, NpgsqlTransaction tx, ScopeContext scope, DocumentRef reference,
-        CancellationToken ct)
+        GdprExportOptions options, CancellationToken ct)
     {
         var json = new JsonObject
         {
@@ -151,7 +189,7 @@ public static class GdprExport
                     ["version"] = reader.GetInt64(0),
                     ["operation"] = ((ChangeOperation)reader.GetInt16(1)).ToString(),
                     ["diff"] = JsonNode.Parse(reader.GetString(2)),
-                    ["metadata"] = JsonNode.Parse(reader.GetString(3)),
+                    ["metadata"] = FilterMetadata((JsonObject)JsonNode.Parse(reader.GetString(3))!, options),
                     ["occurredAt"] = reader.GetFieldValue<DateTimeOffset>(4).ToString("O"),
                 });
             }
@@ -163,7 +201,7 @@ public static class GdprExport
 
     private static async Task<JsonArray> ExportEventsAsync(
         NpgsqlConnection conn, NpgsqlTransaction tx, ScopeContext scope,
-        IReadOnlyCollection<EventSelector> selectors, CancellationToken ct)
+        IReadOnlyCollection<EventSelector> selectors, GdprExportOptions options, CancellationToken ct)
     {
         var events = new JsonArray();
         var seenSeqs = new HashSet<long>(); // overlapping selectors must not duplicate events
@@ -201,13 +239,54 @@ public static class GdprExport
                 {
                     ["eventType"] = reader.GetString(1),
                     ["payload"] = JsonNode.Parse(reader.GetString(2)),
-                    ["metadata"] = JsonNode.Parse(reader.GetString(3)),
+                    ["metadata"] = FilterMetadata((JsonObject)JsonNode.Parse(reader.GetString(3))!, options),
                     ["occurredAt"] = reader.GetFieldValue<DateTimeOffset>(4).ToString("O"),
                 });
             }
         }
 
         return events;
+    }
+
+    private static readonly string[] SubjectRelevantMetadata = ["correlationId", "isRollback", "restoredVersion"];
+
+    private static readonly string[] SubjectRelevantRedactionMetadata = ["redactedAt", "correlationId", "paths"];
+
+    /// <summary>
+    /// Reduces change/event metadata to an allow-list: anything not named here — actor, causation,
+    /// trace context, free audit text, and fields a later version adds — stays out by default.
+    /// </summary>
+    internal static JsonObject FilterMetadata(JsonObject metadata, GdprExportOptions options)
+    {
+        if (options.IncludeActorMetadata)
+        {
+            return metadata;
+        }
+
+        var filtered = new JsonObject();
+        foreach (var key in SubjectRelevantMetadata)
+        {
+            if (metadata[key] is { } value)
+            {
+                filtered[key] = value.DeepClone();
+            }
+        }
+
+        if (metadata["redaction"] is JsonObject redaction)
+        {
+            var kept = new JsonObject();
+            foreach (var key in SubjectRelevantRedactionMetadata)
+            {
+                if (redaction[key] is { } value)
+                {
+                    kept[key] = value.DeepClone();
+                }
+            }
+
+            filtered["redaction"] = kept;
+        }
+
+        return filtered;
     }
 
     private static void AddIdentityParameters(NpgsqlCommand cmd, ScopeContext scope, DocumentRef reference)

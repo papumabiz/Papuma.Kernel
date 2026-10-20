@@ -34,10 +34,12 @@ public sealed partial class SqliteDocumentSession
     /// Dot-separated paths to redact, covering descendants (<c>address</c> covers
     /// <c>address.city</c>) and reaching an ancestor entry whose value carries the path
     /// (<c>address.city</c> redacts an <c>address</c> entry holding a <c>city</c>, as an insert
-    /// writes it). <c>null</c> redacts every entry of every change.
+    /// writes it). <c>null</c> redacts every entry of every change; an empty collection is
+    /// rejected, so a caller that built its list from nothing cannot mistake a no-op for an erasure.
     /// </param>
     /// <param name="ct">A cancellation token.</param>
     /// <returns>The number of change records that were rewritten.</returns>
+    /// <exception cref="ArgumentException"><paramref name="paths"/> is empty.</exception>
     public async Task<int> RedactHistoryAsync<T>(
         string id,
         string reason,
@@ -48,6 +50,12 @@ public sealed partial class SqliteDocumentSession
         var metadata = _model.GetRequired<T>();
         Validation.InputValidator.ValidateDocumentId(id);
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        if (paths is { Count: 0 })
+        {
+            throw new ArgumentException(
+                "At least one path is required. Pass null to redact every entry of every change.",
+                nameof(paths));
+        }
 
         using var activity = StartWriteActivity("redact", metadata.Name, id);
         try

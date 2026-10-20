@@ -251,6 +251,23 @@ public sealed class GdprToolingTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RedactHistory_RejectsAnEmptyPathList_InsteadOfSilentlyRedactingNothing()
+    {
+        var scope = NewTenant();
+        var userId = NewId();
+
+        await using var session = _store.OpenSession(scope);
+        await session.SaveAsync(new GdprUser(userId, "Harry", $"{userId}@x.de"), 0);
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(
+            () => session.RedactHistoryAsync<GdprUser>(userId, "erasure-1", paths: []));
+
+        Assert.Equal("paths", ex.ParamName);
+        var history = await session.GetHistoryAsync<GdprUser>(userId);
+        Assert.Equal(DiffEntryKind.Tracked, history[0].Diff.Entries["name"].Kind); // nothing was touched
+    }
+
+    [Fact]
     public async Task RedactHistory_OfANestedPath_ErasesItInsideWholeObjectEntries()
     {
         var scope = NewTenant();
@@ -366,7 +383,15 @@ public sealed class GdprToolingTests : IAsyncLifetime
 
         var subject = Assert.Single(events, e => (string?)e!["payload"]!["userId"] == userId);
         Assert.False(subject!["payload"]!.AsObject().ContainsKey("ip"));
-        Assert.Equal("erasure-request-4713", (string?)subject["metadata"]!["redaction"]!["reason"]);
+
+        // The free audit text names the requester: not in the default export (review S-3), only on request.
+        var redaction = subject["metadata"]!["redaction"]!.AsObject();
+        Assert.False(redaction.ContainsKey("reason"));
+        Assert.Equal("ip", (string?)redaction["paths"]!.AsArray()[0]);
+        var audit = await GdprExport.ExportAsync(_store, scope, [],
+            [new EventSelector(nameof(GdprLogin), "userId", userId)],
+            new GdprExportOptions { IncludeActorMetadata = true });
+        Assert.Equal("erasure-request-4713", (string?)audit["events"]![0]!["metadata"]!["redaction"]!["reason"]);
 
         var other = Assert.Single(events, e => (string?)e!["payload"]!["userId"] == otherId);
         Assert.Equal("10.0.0.2", (string?)other!["payload"]!["ip"]);

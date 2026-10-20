@@ -30,7 +30,9 @@ public sealed class PapumaKernelOptions
     /// <summary>
     /// Gets or sets whether <c>EnsureSchemaAsync</c> — and after it every registered
     /// <see cref="ISchemaContributor"/> — runs on startup (default: true). Turn it off when
-    /// schema changes are applied by a separate deployment step.
+    /// schema changes are applied by a separate deployment step. The role that applies the
+    /// schema owns the tables: in production, apply it under a separate owner role and run the
+    /// application as a role that is neither owner, superuser nor <c>BYPASSRLS</c> (<c>SECURITY.md</c>).
     /// </summary>
     public bool EnsureSchema { get; set; } = true;
 

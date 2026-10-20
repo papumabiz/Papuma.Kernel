@@ -248,6 +248,17 @@ await session.SaveAsync(address, expectedVersion: 0);   // one atomic commit
 await session.CommitAsync();
 ```
 
+The transaction also opens for a **read** (`LoadAsync`, `GetHistoryAsync`, …) and stays open
+until `CommitAsync` or dispose. A request-scoped session that only reads therefore sits
+"idle in transaction" between its last statement and the end of the request — holding its
+snapshot, its locks and a pooled connection, and blocking vacuum. Dispose sessions promptly
+(`await using`), and set `idle_in_transaction_session_timeout` on the application role as a
+safety net, e.g. `ALTER ROLE app_role SET idle_in_transaction_session_timeout = '60s'`; the
+server then terminates a session that was forgotten, instead of letting it pin the
+connection and the vacuum horizon (review S-18). Pick a value well above the longest
+legitimate pause inside a unit of work — a session whose connection was terminated fails
+on its next statement.
+
 Documents and ChangeRecords of all writes become visible atomically. Consumers
 see one ChangeRecord per document; a shared `correlationId` in the change
 metadata connects a session's writes at the domain level. The modeling rule of

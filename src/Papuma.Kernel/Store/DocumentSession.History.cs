@@ -59,10 +59,19 @@ public sealed partial class DocumentSession
         CancellationToken ct)
     {
         InputValidator.ValidateDocumentId(id);
-        if (fromVersion is < 1 || toVersion is < 1 || toVersion < fromVersion)
+        if (fromVersion is < 1)
         {
-            throw new ArgumentOutOfRangeException(nameof(fromVersion),
-                "Version bounds must be >= 1 and fromVersion <= toVersion.");
+            throw new ArgumentOutOfRangeException(nameof(fromVersion), fromVersion, "Version bounds must be >= 1.");
+        }
+
+        if (toVersion is < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(toVersion), toVersion, "Version bounds must be >= 1.");
+        }
+
+        if (toVersion < fromVersion)
+        {
+            throw new ArgumentOutOfRangeException(nameof(toVersion), toVersion, "toVersion must not be below fromVersion.");
         }
 
         var (conn, tx) = await EnsureTransactionAsync(ct);
@@ -151,8 +160,7 @@ public sealed partial class DocumentSession
         {
             TypedValue = limit,
         });
-        cmd.Parameters.AddWithValue("scope", Scope.Scope.ToString());
-        cmd.Parameters.AddWithValue("tenantId", Scope.TenantId ?? string.Empty);
+        AddScopeParameters(cmd);
         cmd.Parameters.AddWithValue("correlationId", correlationId.ToString("N"));
 
         var changes = new List<ChangeRecord>();

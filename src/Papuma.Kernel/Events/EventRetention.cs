@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
+using Microsoft.Extensions.Logging;
+
 using Npgsql;
 
 using Papuma.Kernel.Model;
@@ -53,7 +55,8 @@ public static class EventRetention
         KernelModel model,
         int batchSize,
         Action<int>? onBatchCommitted,
-        CancellationToken ct)
+        CancellationToken ct,
+        ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(dataSource);
         ArgumentNullException.ThrowIfNull(model);
@@ -67,7 +70,7 @@ public static class EventRetention
             {
                 ct.ThrowIfCancellationRequested();
 
-                var batch = await PurgeBatchAsync(conn, eventType, batchSize, ct);
+                var batch = await PurgeBatchAsync(conn, eventType, batchSize, logger, ct);
                 deleted += batch.Deleted;
                 if (batch.Deleted > 0)
                 {
@@ -88,7 +91,7 @@ public static class EventRetention
     }
 
     private static async Task<(int Selected, int Deleted)> PurgeBatchAsync(
-        NpgsqlConnection conn, EventTypeMetadata eventType, int batchSize, CancellationToken ct)
+        NpgsqlConnection conn, EventTypeMetadata eventType, int batchSize, ILogger? logger, CancellationToken ct)
     {
         await using var tx = await conn.BeginTransactionAsync(ct);
         await conn.SetAllScopesAsync(tx, ct);
@@ -125,7 +128,14 @@ public static class EventRetention
         var deleted = 0;
         foreach (var ((scope, tenantId), seqs) in seqsByScope)
         {
-            await conn.SetScopeAsync(tx, ScopedMaintenance.FromRow(scope, tenantId), ct);
+            if (!ScopedMaintenance.TryFromRow(scope, tenantId, out var rowScope))
+            {
+                // Selected, never deleted: the batch ends once nothing else is deletable (see PurgeExpiredAsync).
+                ScopedMaintenance.LogSkippedScope(logger, scope, tenantId, $"{seqs.Count} expired {eventType.Name} event(s)");
+                continue;
+            }
+
+            await conn.SetScopeAsync(tx, rowScope, ct);
 
             await using var delete = conn.CreateCommand();
             delete.Transaction = tx;

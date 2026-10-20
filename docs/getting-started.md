@@ -217,6 +217,20 @@ using var processor = new ChangeFeedProcessor(dataSource, [new UserProjection()]
 await processor.ProcessOnceAsync();
 ```
 
+`EnsureSchemaAsync` is safe to call from every instance at every start: parallel starts are
+serialized by an advisory lock, and the DDL runs only when it is new to the database — the kernel
+script and the key indexes of a model are recorded by content hash in `papuma.schema_state`. An
+unchanged restart takes no `ACCESS EXCLUSIVE` lock, so a rolling deploy does not queue behind
+long transactions. To force a re-apply (say, after dropping an index by hand), delete the rows of
+`papuma.schema_state`.
+
+**Roles in production.** The role that runs `EnsureSchemaAsync` creates the tables and owns them;
+an owner can disable row-level security or `TRUNCATE` them. Let a separate migration role
+(owner) run the schema step — `EnsureSchema = false` in the application — and run the application
+as a role that is neither owner, superuser nor `BYPASSRLS` ([SECURITY.md](https://github.com/papumabiz/Papuma.Kernel/blob/master/SECURITY.md#database-roles)).
+Set `idle_in_transaction_session_timeout` on that role
+([architecture](architecture.md#session--unit-of-work)).
+
 ### Integration tests: `Papuma.Kernel.Testing`
 
 The package sets up what a test database needs and runs feeds deterministically

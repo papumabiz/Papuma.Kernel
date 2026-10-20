@@ -37,10 +37,12 @@ public sealed partial class DocumentSession
     /// Dot-separated paths to redact, covering descendants (<c>address</c> covers
     /// <c>address.city</c>) and reaching an ancestor entry whose value carries the path
     /// (<c>address.city</c> redacts an <c>address</c> entry holding a <c>city</c>, as an insert
-    /// writes it). <c>null</c> redacts every entry of every change.
+    /// writes it). <c>null</c> redacts every entry of every change; an empty collection is
+    /// rejected, so a caller that built its list from nothing cannot mistake a no-op for an erasure.
     /// </param>
     /// <param name="ct">A cancellation token.</param>
     /// <returns>The number of change records that were rewritten.</returns>
+    /// <exception cref="ArgumentException"><paramref name="paths"/> is empty.</exception>
     public async Task<int> RedactHistoryAsync<T>(
         string id,
         string reason,
@@ -51,6 +53,12 @@ public sealed partial class DocumentSession
         var metadata = _model.GetRequired<T>();
         Validation.InputValidator.ValidateDocumentId(id);
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        if (paths is { Count: 0 })
+        {
+            throw new ArgumentException(
+                "At least one path is required. Pass null to redact every entry of every change.",
+                nameof(paths));
+        }
 
         using var activity = StartWriteActivity("redact", metadata.Name, id);
         try
@@ -88,11 +96,13 @@ public sealed partial class DocumentSession
                 {
                     await using var update = conn.CreateCommand();
                     update.Transaction = tx;
+                    // Explicit scope predicate (layer 1) next to RLS, like every other statement (review S-5).
                     update.CommandText = """
                         UPDATE papuma.change
                         SET diff = @diff, metadata = metadata || @audit
-                        WHERE seq = @seq
+                        WHERE seq = @seq AND scope = @scope AND tenant_id = @tenantId
                         """;
+                    AddScopeParameters(update);
                     update.Parameters.AddWithValue("seq", seq);
                     AddJsonbParameter(update, "diff", diff);
                     AddJsonbParameter(update, "audit", audit.DeepClone());
@@ -162,9 +172,7 @@ public sealed partial class DocumentSession
                         ORDER BY seq
                         FOR UPDATE
                         """;
-                    cmd.Parameters.AddWithValue("scope", Scope.Scope.ToString());
-                    cmd.Parameters.AddWithValue("tenantId", Scope.TenantId ?? string.Empty);
-                    cmd.Parameters.AddWithValue("type", metadata.Name);
+                    AddScopeParameters(cmd, metadata.Name);
                     cmd.Parameters.Add(new NpgsqlParameter("path", NpgsqlDbType.Array | NpgsqlDbType.Text)
                     {
                         Value = DiffPath.Split(selectorPath),
@@ -190,8 +198,9 @@ public sealed partial class DocumentSession
                     update.CommandText = """
                         UPDATE papuma.event
                         SET payload = @payload, metadata = metadata || @audit
-                        WHERE seq = @seq
+                        WHERE seq = @seq AND scope = @scope AND tenant_id = @tenantId
                         """;
+                    AddScopeParameters(update);
                     update.Parameters.AddWithValue("seq", seq);
                     AddJsonbParameter(update, "payload", payload);
                     AddJsonbParameter(update, "audit", audit.DeepClone());

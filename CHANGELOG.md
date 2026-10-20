@@ -39,6 +39,11 @@ Security:
   descendant is applied first now, so the hash covers what remains — the same result in every declaration
   order. **An event type with such a nested pair stores a different hash than before** (hashes of the same
   value in older events do not compare equal to new ones). No order ever stored clear text.
+- **Redaction updates carry the scope predicate themselves (review S-5).** The two `UPDATE`s of `RedactHistoryAsync`
+  and `RedactEventsAsync` addressed a row by `seq` alone and relied on row-level security for the tenant — the only
+  write statements that did. They carry `AND scope = @scope AND tenant_id = @tenantId` now, like every other
+  statement (layer 1 of the two-layer model). The `seq` always came from a scoped `SELECT … FOR UPDATE` in the same
+  transaction, so no cross-tenant write was reachable; this removes the sole reliance on layer 2.
 
 Fixed:
 
@@ -171,6 +176,38 @@ Fixed:
   chain (`Property`, `UniqueKey`, `LookupKey`, `PatchBuilder.Set/Remove/Increment`, `FieldChanged`) blamed
   `propertyExpression`, and the key lookups (`LoadByKeyAsync` & co.) blamed `keyExpression`. They report `MaxRetryDelay`, `name`, `property`
   and `key`. Only `ArgumentException.ParamName` changes; the exception types do not.
+- **The GDPR export is one consistent snapshot (review S-2).** `GdprExport.ExportAsync` documented a "consistent
+  snapshot" but ran its N+1 queries under READ COMMITTED, each with a snapshot of its own — an export could show
+  document version 5 next to history up to version 6 when a writer committed in between (reproduced). It runs in a
+  `REPEATABLE READ`, `READ ONLY` transaction now.
+- **Patch errors are recognized without the server's message language (review S-9).** A non-numeric `Increment` and a
+  patch path walking into an array were told apart from other `22P02` errors by English words in the message
+  (`"type numeric"`, `"path element"`); with `lc_messages` other than English the caller got a raw `PostgresException`
+  instead of `NonNumericIncrementException` / `PatchTargetMissingException`. The translation keys on the server
+  routine that raised the error (`numeric_in`, `setPathArray`) now; a test pins both against the real server.
+  Not tested against a translated server: the test image (`postgres:18-alpine`) ships no message catalogs.
+- **Parallel first starts no longer fail, and a restart no longer locks the kernel tables (review S-11, N-8).**
+  `SchemaManager.EnsureSchemaAsync` on an empty database from several instances at once failed with
+  `23505 duplicate key … pg_namespace_nspname_index` (reproduced); and every start — the schema script is full of
+  `ALTER TABLE …` — took `ACCESS EXCLUSIVE` locks on `papuma.document`, `change` and `event`, queueing behind any open
+  transaction and, behind that queued lock, all traffic of a rolling deploy (reproduced: an unchanged restart blocked
+  for as long as a reader's transaction stayed open). Starts are serialized by `pg_advisory_xact_lock`, and the DDL runs
+  only when it is new: the kernel script and the key indexes of a model are recorded by content hash in the new table
+  `papuma.schema_state` (created by the script; one row per applied hash, so several models sharing a database never
+  mask each other and a changed model or a newer kernel applies its DDL). **Behavior change:** an object of the
+  kernel schema that someone dropped by hand is no longer re-created at the next start — delete the rows of
+  `papuma.schema_state` to force a re-apply. The key DDL is built (and validated) before the database is touched, so
+  an invalid model now fails without any DDL. `ISchemaContributor`s are unaffected and keep their own lock.
+- **One row with a foreign tenant id no longer blocks cross-tenant maintenance (review S-14).** The startup repair after
+  a logical restore and event retention read the `(scope, tenant_id)` pairs of the affected rows and built a
+  `ScopeContext` for each; a row written past the kernel with a tenant id outside `[A-Za-z0-9][A-Za-z0-9_-]{1,100}`
+  threw `ArgumentException` and stopped the repair (so the host) and the retention for every tenant. Such rows are
+  skipped now and logged as a warning (`EventRetention` and the hosted schema step log; the public entry points
+  without a logger skip silently). They stay in place — no scope can delete or repair them.
+- **Smaller fixes in the PostgreSQL store (review S-20).** A hash-key check row that is neither stored nor readable
+  failed with a bare `ArgumentNullException`; it is an `InvalidOperationException` with an explanation now. The patch
+  error filter translates once instead of twice; the event append, correlation lookup and event redaction bind their
+  scope parameters through the shared helper.
 
 Breaking:
 
@@ -228,6 +265,20 @@ Breaking:
   them, and such an id would reach logs and `{Type}/{id}/{path}` references raw. Ids containing a control character
   (`char.IsControl`: U+0000–U+001F, U+007F–U+009F) now throw `ArgumentException` up front. Any other text stays legal,
   `/` and non-ASCII included. **A document that was saved under such an id can no longer be addressed by it.**
+- **The GDPR export leaves out identifiers of other people by default (review S-3).** The change and event `metadata`
+  of an export carried everything the session wrote — **before:** `correlationId`, `actorId` (the clerk),
+  `causationId`, `causationType`, `traceparent`, rollback markers, and for a redacted record the whole `redaction`
+  block (`redactedAt`, `reason` — free text, `actorId`, `correlationId`, `paths`). That names or describes third
+  parties, which Art. 15 (4) GDPR does not hand to the data subject. **After:** only `correlationId`, `isRollback`,
+  `restoredVersion` and, of a redaction, `redactedAt`, `correlationId` and `paths`; everything else, including keys a
+  later version adds, stays out. An export consumer that read `actorId`, `causationId`, `traceparent` or
+  `redaction.reason` from it no longer finds them: pass the new overload
+  `ExportAsync(store, scope, documents, events, new GdprExportOptions { IncludeActorMetadata = true })` for the
+  complete metadata (an internal audit export, not for the data subject). The existing overload is unchanged in
+  signature and now means the reduced export. Document state, diffs and event payloads are untouched.
+- **`RedactHistoryAsync` rejects an empty `paths` collection (review S-4).** `null` means "every entry of every change";
+  an empty collection redacted nothing and returned 0, indistinguishable from a successful erasure that found
+  nothing. It throws `ArgumentException` (`paths`) now, on both engines, like `RedactEventsAsync` always did.
 
 Changed:
 
@@ -274,6 +325,21 @@ Changed:
 
 - **Samples:** the NATS bridge moved out of `shop-minimal-api` into its own worker sample
   `shop-nats-bridge` (same database, separate process). The shop no longer depends on `NATS.Net`.
+- **`ScopeDataSourceFactory` is `[Obsolete]` (review S-13).** Nothing in the kernel uses it, it has no tests, and it is
+  unsafe under load: LRU eviction disposes a data source a caller may still hold (`ObjectDisposedException`), and a call
+  after `Dispose` creates data sources nobody disposes. Create and own one `NpgsqlDataSource` per tenant database
+  instead. A warning only (CS0618); removal in the next major version. `IScopeDataSourceFactory` stays.
+- **Guard clauses of the PostgreSQL session name the right argument (review S-10).** `PatchAsync` rejects an
+  `expectedVersion` below 1 with `ArgumentOutOfRangeException` (it used to fail later as a version conflict or
+  "not found"); `PatchWhereAsync` and `DeleteWhereAsync` reject a `null` value with `ArgumentNullException` (`value`)
+  before a transaction is opened (it was an `ArgumentException` after); `GetHistoryAsync` reports `toVersion` when it
+  is the bound that is wrong (it always blamed `fromVersion`).
+- **Documentation corrected and extended (review S-8, S-15, S-16, S-17, S-18).** Actor ids must be pseudonyms — the kernel
+  cannot redact them (ADR-017, `docs/gdpr.md`); a key lookup on a policy-protected field is an existence oracle
+  (ADR-016 §5); `SET LOCAL`/`set_config(…, true)` outside a transaction is lost, not leaked — RLS fails closed
+  (`ScopeConnectionExtensions`, pinned by a test); superusers, `BYPASSRLS` roles *and the table owner* are not bound by
+  RLS — run the application as a separate, non-owner role (`SECURITY.md`, `SchemaDdl`, getting started);
+  `idle_in_transaction_session_timeout` for sessions that only read (architecture).
 
 Added:
 

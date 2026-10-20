@@ -95,6 +95,24 @@ public sealed class HashKeyCheckTests(PostgresFixture fixture) : IAsyncLifetime
         Assert.Equal(HashV2.KeyCheck(MasterKey), await StoredAsync(keyId));
     }
 
+    [Fact]
+    public async Task ACheckRowThatIsNeitherStoredNorReadable_FailsWithAClearMessage()
+    {
+        // A trigger that swallows the insert stands in for a row that vanishes between insert and read.
+        await using var scratch = await ScratchPostgresDatabase.CreateAsync(fixture.Database);
+        await SchemaManager.EnsureSchemaAsync(scratch.DataSource);
+        await scratch.ExecuteAsync("""
+            CREATE FUNCTION papuma.swallow_insert() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NULL; END';
+            CREATE TRIGGER swallow BEFORE INSERT ON papuma.hash_key_check
+                FOR EACH ROW EXECUTE FUNCTION papuma.swallow_insert();
+            """);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => SchemaManager.EnsureHashKeyAsync(
+            scratch.DataSource, new MasterKeyHashKeyProvider(MasterKey, NewKeyId())));
+
+        Assert.Contains("hash_key_check", ex.Message, StringComparison.Ordinal);
+    }
+
     private static IHost Host(NpgsqlDataSource dataSource, byte[] key, string keyId, bool ensureSchema = true)
     {
         var builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder();

@@ -12,8 +12,13 @@ namespace Papuma.Kernel.Store;
 /// two-layer security model: explicit scope predicates in all kernel SQL (layer 1)
 /// plus Row Level Security policies reading <c>app.current_scope</c> /
 /// <c>app.current_tenant</c> (layer 2, see <see cref="Tenancy.ScopeConnectionExtensions"/>).
-/// <c>FORCE ROW LEVEL SECURITY</c> subjects the table owner as well; only superusers
-/// bypass RLS.
+/// <c>FORCE ROW LEVEL SECURITY</c> subjects the table owner as well, but not every role:
+/// superusers and roles with <c>BYPASSRLS</c> bypass RLS, and the table owner can still
+/// <c>ALTER TABLE … DISABLE ROW LEVEL SECURITY</c>, drop the policies or <c>TRUNCATE</c>
+/// (TRUNCATE is not subject to RLS). The application's runtime role must therefore be neither
+/// the owner nor a superuser nor <c>BYPASSRLS</c>; with <c>EnsureSchema</c> on, the role that
+/// created the schema is the owner, so use a separate migration role in production (review S-17,
+/// <c>SECURITY.md</c>).
 /// </para>
 /// <para>
 /// <c>papuma.checkpoint</c> and <c>papuma.failure</c> hold handler infrastructure
@@ -148,6 +153,18 @@ internal static class SchemaDdl
             kid             text        NOT NULL PRIMARY KEY,
             check_value     text        NOT NULL,
             created_at      timestamptz NOT NULL DEFAULT now()
+        );
+
+        -- ── Applied-DDL record: lets a restart skip DDL it already ran (review S-11, N-8) ──
+        -- One row per content hash of DDL that SchemaManager.EnsureSchemaAsync applied: the
+        -- kernel script itself ('kernel') and the key indexes of a model ('keys'). No tenant data, no RLS.
+        CREATE TABLE IF NOT EXISTS papuma.schema_state
+        (
+            component       text        NOT NULL,
+            content_hash    text        NOT NULL,
+            applied_at      timestamptz NOT NULL DEFAULT now(),
+
+            PRIMARY KEY (component, content_hash)
         );
 
         -- ── Row Level Security (layer 2 of the two-layer scope model) ─────────────

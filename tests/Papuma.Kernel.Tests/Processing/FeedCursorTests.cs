@@ -261,13 +261,15 @@ public sealed class FeedCursorTests : IAsyncLifetime
             await eventProcessor.DrainAsync();
         }
 
-        // Back to the pre-ADR-022 schema: a sequence checkpoint only.
+        // Back to the pre-ADR-022 schema: a sequence checkpoint only. Such a database has no record of
+        // applied DDL either (papuma.schema_state came later), so EnsureSchemaAsync must run the script.
         await db.ExecuteAsync("""
             ALTER TABLE papuma.checkpoint
                 DROP COLUMN base_seq, DROP COLUMN done_snapshot,
                 DROP COLUMN slice_snapshot, DROP COLUMN slice_seq;
             DROP INDEX papuma.ix_papuma_change_txid;
             DROP INDEX papuma.ix_papuma_event_txid;
+            DROP TABLE papuma.schema_state;
             """);
         var after = await WriteAsync(store, 2);
 

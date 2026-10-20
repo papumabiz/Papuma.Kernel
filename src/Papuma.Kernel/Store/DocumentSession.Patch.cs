@@ -33,6 +33,7 @@ public sealed partial class DocumentSession
     /// field-level last-writer-wins — correct for independent fields (ADR-012).
     /// </param>
     /// <param name="ct">A cancellation token.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="expectedVersion"/> is given and below 1 (stored versions start at 1).</exception>
     /// <exception cref="DocumentNotFoundException">The document does not exist.</exception>
     /// <exception cref="ConcurrencyException">The stored version does not match <paramref name="expectedVersion"/>.</exception>
     /// <exception cref="SchemaUpcastRequiredException">The document is stored with an older schema version.</exception>
@@ -46,6 +47,11 @@ public sealed partial class DocumentSession
         ArgumentNullException.ThrowIfNull(patch);
         var metadata = _model.GetRequired<T>();
         InputValidator.ValidateDocumentId(id);
+        if (expectedVersion is { } expected)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(expected, nameof(expectedVersion));
+        }
+
         var operations = CollectOperations(patch, metadata);
 
         using var activity = StartWriteActivity("patch", metadata.Name, id);
@@ -169,6 +175,7 @@ public sealed partial class DocumentSession
         where T : class
     {
         var keyMetadata = ResolveDeclaredKey(key);
+        ArgumentNullException.ThrowIfNull(value);
         return BulkPatchAsync(
             patch,
             "AND data #>> @keyPath = @keyValue",
@@ -216,6 +223,7 @@ public sealed partial class DocumentSession
         where T : class
     {
         var keyMetadata = ResolveDeclaredKey(key);
+        ArgumentNullException.ThrowIfNull(value);
         return BulkDeleteAsync<T>(
             "AND data #>> @keyPath = @keyValue",
             cmd =>
@@ -349,6 +357,12 @@ public sealed partial class DocumentSession
     /// object key. A set-based statement cannot say which document or field failed, so those
     /// stay unknown there. Returns <c>null</c> for every other error.
     /// </summary>
+    /// <remarks>
+    /// Both errors share <c>SqlState</c> 22P02, so they are told apart by the reporting server
+    /// routine (<c>numeric_in</c>, <c>setPathArray</c>) — never by the message text, which follows
+    /// the server's <c>lc_messages</c>. The routine names are PostgreSQL internals; a test pins
+    /// them against the real server (review S-9).
+    /// </remarks>
     internal static Exception? TranslatePatchError(PostgresException ex, string documentType, string? documentId)
     {
         if (ex.SqlState != PostgresErrorCodes.InvalidTextRepresentation)
@@ -356,14 +370,12 @@ public sealed partial class DocumentSession
             return null;
         }
 
-        if (ex.MessageText.Contains("type numeric", StringComparison.Ordinal))
+        return ex.Routine switch
         {
-            return new NonNumericIncrementException(documentType, documentId, fieldPath: null, ex);
-        }
-
-        return ex.MessageText.Contains("path element", StringComparison.Ordinal)
-            ? new PatchTargetMissingException(documentType, documentId, fieldPath: null, ex)
-            : null;
+            "numeric_in" => new NonNumericIncrementException(documentType, documentId, fieldPath: null, ex),
+            "setPathArray" => new PatchTargetMissingException(documentType, documentId, fieldPath: null, ex),
+            _ => null,
+        };
     }
 
     private static async Task<TResult> MapPatchErrorsAsync<TResult>(
@@ -371,13 +383,14 @@ public sealed partial class DocumentSession
         string documentType,
         string? documentId)
     {
+        Exception? translated = null;
         try
         {
             return await execute();
         }
-        catch (PostgresException ex) when (TranslatePatchError(ex, documentType, documentId) is not null)
+        catch (PostgresException ex) when ((translated = TranslatePatchError(ex, documentType, documentId)) is not null)
         {
-            throw TranslatePatchError(ex, documentType, documentId)!;
+            throw translated;
         }
     }
 

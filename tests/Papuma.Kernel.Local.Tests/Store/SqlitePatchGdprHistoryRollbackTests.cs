@@ -137,6 +137,21 @@ public sealed class SqlitePatchGdprHistoryRollbackTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RedactHistoryAsync_RejectsAnEmptyPathList_InsteadOfSilentlyRedactingNothing()
+    {
+        await using var session = _store.OpenSession(NewTenant());
+        var id = NewId();
+        await session.SaveAsync(new Counter(id, "secret-name"), 0);
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(
+            () => session.RedactHistoryAsync<Counter>(id, "erasure", paths: []));
+
+        Assert.Equal("paths", ex.ParamName);
+        var history = await session.GetHistoryAsync<Counter>(id);
+        Assert.Equal(DiffEntryKind.Tracked, history[0].Diff.Entries["name"].Kind); // nothing was touched
+    }
+
+    [Fact]
     public async Task LoadMaskedAsync_ReturnsProjectedJson()
     {
         await using var session = _store.OpenSession(NewTenant());

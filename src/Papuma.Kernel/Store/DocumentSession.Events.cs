@@ -48,9 +48,7 @@ public sealed partial class DocumentSession
                 VALUES (@scope, @tenantId, @type, @payload, @actorId, @metadata)
                 RETURNING seq
                 """;
-            cmd.Parameters.AddWithValue("scope", Scope.Scope.ToString());
-            cmd.Parameters.AddWithValue("tenantId", Scope.TenantId ?? string.Empty);
-            cmd.Parameters.AddWithValue("type", metadata.Name);
+            AddScopeParameters(cmd, metadata.Name);
             AddJsonbParameter(cmd, "payload", payload);
             cmd.Parameters.AddWithValue("actorId", ActorId);
             AddJsonbParameter(cmd, "metadata", BuildChangeMetadata(null));

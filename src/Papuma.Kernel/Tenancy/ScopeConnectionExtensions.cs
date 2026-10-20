@@ -35,9 +35,11 @@ public static class ScopeConnectionExtensions
     /// <para>
     /// <b>Invariant:</b> This method must always be called <em>after</em>
     /// <c>BeginTransactionAsync</c> and <em>before</em> any data-access statement.
-    /// Calling it outside a transaction causes <c>SET LOCAL</c> to behave like
-    /// <c>SET</c> (session-level), which can leak the scope to the next caller that
-    /// reuses the same pooled connection.
+    /// Outside a transaction a transaction-local setting lasts only until the end of its
+    /// statement (<c>SET LOCAL</c> merely warns) — it does not turn into a session-level one, so
+    /// the scope is lost rather than leaked to the next caller of a pooled connection, and the
+    /// RLS policies fail closed. The <c>transaction</c> parameter is required nevertheless: a
+    /// scope that silently vanishes before the data-access statement is a bug, not a safe state.
     /// </para>
     /// <para>
     /// <b>Background workers that read across scopes</b> (<c>ScopeFilter.All()</c>) call
@@ -55,8 +57,8 @@ public static class ScopeConnectionExtensions
     /// <param name="transaction">
     /// The active transaction the scope is confined to. Required — the scope GUCs are
     /// transaction-local (<c>set_config(..., true)</c>); without a transaction they would
-    /// silently degrade to session level and leak across pooled connections (security
-    /// review M4). Passing the transaction makes that invariant impossible to violate.
+    /// expire with the setting statement and the following statements would see no scope
+    /// (fail closed, security review M4, S-16). Passing the transaction makes that impossible.
     /// </param>
     /// <param name="scope">The scope context to apply.</param>
     /// <param name="ct">A cancellation token.</param>
@@ -107,8 +109,8 @@ public static class ScopeConnectionExtensions
     /// <param name="connection">The open PostgreSQL connection.</param>
     /// <param name="transaction">
     /// The active transaction the scope is confined to. Required for the same reason as
-    /// <see cref="SetScopeAsync"/>: <c>SET LOCAL</c> outside a transaction silently
-    /// degrades to session level (security review M4).
+    /// <see cref="SetScopeAsync"/>: <c>SET LOCAL</c> outside a transaction is a no-op that
+    /// leaves the following statements without a scope (fail closed, security review M4, S-16).
     /// </param>
     /// <param name="ct">A cancellation token.</param>
     public static async Task SetAllScopesAsync(
