@@ -83,6 +83,31 @@ Privacy note: spans tag document *ids* and the tenant, never contents; diffs in
 `GetHistoryAsync` are policy-applied — sensitive values do not reach the
 observability pipeline either (ADR-007).
 
+## What the feed workers do when something breaks
+
+The run loops of all four processors (PostgreSQL and SQLite, change and event feed) follow
+the same rules:
+
+- **A handler failure is a failure entry, not a stop.** That includes an
+  `OperationCanceledException` / `TaskCanceledException` the handler raises on its own (an
+  `HttpClient` timeout): it is recorded in `papuma.failure` and retried with backoff like any
+  other exception. Only cancellation of the token passed to `RunAsync` (host shutdown) ends
+  the loop.
+- **A fault outside the handler backs off.** If a cycle fails for a reason that is not a
+  handler exception — database unreachable, a batch that cannot be loaded, a checkpoint that
+  cannot be written — the loop waits `PollInterval × 2^(n−1)` (at most 30 s, never less than
+  the poll interval) before the next cycle and logs the first failure and then every power of
+  two at error level (`Change feed processing failed for <handler> …`). It never retries at once.
+- **Handlers are isolated within a cycle.** A fault in one handler's batch does not keep the
+  handlers after it from running; `ProcessOnceAsync` still throws afterwards so a caller or
+  test notices (the original exception for one fault, an `AggregateException` for several).
+  A row that cannot be mapped is reported as `InvalidDataException` naming the sequence number
+  and the handler.
+- **A worker that ends by itself stops the host.** If the hosted service's loop returns
+  without a shutdown request, it throws, so `BackgroundServiceExceptionBehavior` (default:
+  stop the host) applies instead of leaving every projection frozen behind a service that
+  "completed successfully".
+
 ## The embedded dashboard: a first look without infrastructure
 
 Before Prometheus/Grafana exist (and for a quick glance afterwards), the

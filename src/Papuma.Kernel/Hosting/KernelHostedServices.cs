@@ -66,7 +66,7 @@ internal sealed class KernelSchemaInitializer(
 internal sealed class ChangeFeedHostedService(ChangeFeedProcessor processor) : BackgroundService
 {
     protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
-        processor.RunAsync(stoppingToken);
+        FeedLoop.RunHostedAsync("Change feed", processor.HasHandlers, processor.RunAsync, stoppingToken);
 }
 
 /// <summary>
@@ -75,7 +75,7 @@ internal sealed class ChangeFeedHostedService(ChangeFeedProcessor processor) : B
 internal sealed class EventFeedHostedService(EventFeedProcessor processor) : BackgroundService
 {
     protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
-        processor.RunAsync(stoppingToken);
+        FeedLoop.RunHostedAsync("Event feed", processor.HasHandlers, processor.RunAsync, stoppingToken);
 }
 
 /// <summary>

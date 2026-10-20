@@ -71,7 +71,7 @@ internal sealed class SqliteKernelSchemaInitializer(
 internal sealed class SqliteChangeFeedHostedService(SqliteChangeFeedProcessor processor) : BackgroundService
 {
     protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
-        processor.RunAsync(stoppingToken);
+        FeedLoop.RunHostedAsync("SQLite change feed", processor.HasHandlers, processor.RunAsync, stoppingToken);
 }
 
 /// <summary>
@@ -80,7 +80,7 @@ internal sealed class SqliteChangeFeedHostedService(SqliteChangeFeedProcessor pr
 internal sealed class SqliteEventFeedHostedService(SqliteEventFeedProcessor processor) : BackgroundService
 {
     protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
-        processor.RunAsync(stoppingToken);
+        FeedLoop.RunHostedAsync("SQLite event feed", processor.HasHandlers, processor.RunAsync, stoppingToken);
 }
 
 /// <summary>

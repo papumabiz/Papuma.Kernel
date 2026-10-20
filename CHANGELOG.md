@@ -13,6 +13,28 @@ Security:
   `MapPapumaDashboard(path)` now validates `path` (absolute, letters/digits/`_`/`-` segments) and throws
   `ArgumentException` for `/` and other values — `/` used to map the application root.
 
+Fixed:
+
+- **A handler timeout no longer stops the feed (review P-1, L-1).** An `OperationCanceledException` raised by
+  a handler itself — typically the `TaskCanceledException` of an `HttpClient` timeout — was treated as
+  shutdown: `RunAsync` returned, the hosted service "completed successfully", and every projection stood
+  still with no failure entry, no retry and only an information-level "stopped" line. Only cancellation of
+  the token passed to `RunAsync` ends the loop now; any other cancellation is recorded as a failure and
+  retried. All four processors (PostgreSQL/SQLite, change/event feed).
+- **No more busy loop when the database is unavailable (P-2, L-2).** A failing cycle skipped the idle wait,
+  so an unreachable PostgreSQL server or an unopenable SQLite file made the worker spin — thousands of log
+  lines per second and a reconnect storm. After a faulted cycle the worker now waits
+  `PollInterval × 2^(n−1)` (cap 30 s) and logs the first failure, then every power of two. The SQLite lag
+  query no longer takes the write lock.
+- **One handler's broken batch no longer blocks the others (N-6, P-10).** A fault while loading or mapping
+  one handler's batch aborted the whole cycle, leaving every later handler stuck. Handlers are isolated now;
+  `ProcessOnceAsync` still reports the fault afterwards (the original exception, or an `AggregateException`
+  for several). Unmappable rows raise an `InvalidDataException` naming the sequence number and handler. The
+  trace span of a failed handler carries the sanitized error text, like the failure table (P-19).
+- **A feed worker that ends by itself now stops the host.** If the loop returns without a shutdown request
+  the hosted service throws, so `BackgroundServiceExceptionBehavior` applies instead of a silently finished
+  service.
+
 Breaking:
 
 - **The `Hash` policy is keyed (ADR-025): a model with `[TrackHash]` / `StoreAsHash()` needs a hash

@@ -90,6 +90,9 @@ public sealed class EventFeedProcessor : IDisposable
     /// <summary>Disposes the per-instance lag gauge.</summary>
     public void Dispose() => _meter.Dispose();
 
+    /// <summary>Gets a value indicating whether there is anything for <see cref="RunAsync"/> to run.</summary>
+    internal bool HasHandlers => _handlers.Count > 0;
+
     private IEnumerable<Measurement<long>> ObserveLag()
     {
         foreach (var (handler, lag) in _lagByHandler)
@@ -117,62 +120,132 @@ public sealed class EventFeedProcessor : IDisposable
 
         _logger.LogInformation("Event feed processor started ({HandlerCount} handlers).", _handlers.Count);
 
+        var faultedCycles = 0;
         while (!ct.IsCancellationRequested)
         {
-            int processed;
+            FeedCycleResult cycle;
             try
             {
-                processed = await ProcessOnceAsync(ct);
+                cycle = await RunCycleAsync(ct);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                break;
+                break; // shutdown — and only shutdown: any other OCE is a fault, never a stop
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Event feed processing cycle failed.");
-                processed = 0;
+                cycle = FeedCycleResult.Failed(ex);
             }
 
-            if (processed == 0)
+            if (cycle.HasFaults)
             {
-                try
+                faultedCycles++;
+                LogFaults(cycle.Faults, faultedCycles);
+            }
+            else
+            {
+                faultedCycles = 0;
+            }
+
+            if (cycle.Processed > 0)
+            {
+                continue; // more may be waiting
+            }
+
+            try
+            {
+                if (cycle.HasFaults)
                 {
-                    await GetLagAsync(ct); // gauge freshness ≈ poll interval
+                    // Never retry a failing cycle at once: a database that is down must not be
+                    // answered with a connect storm and a log flood.
+                    await Task.Delay(FeedLoop.BackoffDelay(_options.PollInterval, faultedCycles), ct);
+                }
+                else
+                {
+                    await TryRefreshLagCacheAsync(ct); // gauge freshness ≈ poll interval
                     await listen.WaitAsync(_options.PollInterval, ct);
                 }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Lag refresh failed; continuing.");
-                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                break;
             }
         }
 
         _logger.LogInformation("Event feed processor stopped.");
     }
 
+    private void LogFaults(IReadOnlyList<FeedFault> faults, int consecutiveFaultedCycles)
+    {
+        foreach (var fault in faults)
+        {
+            if (FeedLoop.ShouldLog(consecutiveFaultedCycles))
+            {
+                _logger.LogError(fault.Error,
+                    "Event feed processing failed for {Handler} (cycle {Cycle} in a row); backing off.",
+                    fault.Handler ?? "<all handlers>", consecutiveFaultedCycles);
+            }
+            else
+            {
+                _logger.LogDebug(fault.Error,
+                    "Event feed processing still failing for {Handler} (cycle {Cycle} in a row).",
+                    fault.Handler ?? "<all handlers>", consecutiveFaultedCycles);
+            }
+        }
+    }
+
+    private async Task TryRefreshLagCacheAsync(CancellationToken ct)
+    {
+        try
+        {
+            await GetLagAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Lag refresh failed; continuing.");
+        }
+    }
+
     /// <summary>
     /// Runs one processing cycle over all handlers and returns the number of delivered events.
     /// </summary>
     /// <param name="ct">A cancellation token.</param>
+    /// <exception cref="AggregateException">More than one handler's batch faulted (the others still ran).</exception>
     public async Task<int> ProcessOnceAsync(CancellationToken ct = default)
+    {
+        var cycle = await RunCycleAsync(ct);
+        FeedLoop.ThrowIfFaulted(cycle.Faults);
+        return cycle.Processed;
+    }
+
+    // A fault in one handler's batch (an unmappable row, a failed checkpoint write) must not
+    // keep the handlers after it from running: each one is isolated, the faults are reported.
+    private async Task<FeedCycleResult> RunCycleAsync(CancellationToken ct)
     {
         await EnsureRegisteredAsync(ct);
 
         var stopwatch = Stopwatch.StartNew();
         var total = 0;
+        List<FeedFault>? faults = null;
         foreach (var handler in _handlers)
         {
-            total += await ProcessHandlerBatchAsync(handler, ct);
+            try
+            {
+                total += await ProcessHandlerBatchAsync(handler, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                (faults ??= []).Add(new FeedFault(handler.Name, ex));
+            }
         }
 
         KernelDiagnostics.CycleDuration.Record(stopwatch.Elapsed.TotalMilliseconds,
             new KeyValuePair<string, object?>("papuma.feed", FeedTag));
-        return total;
+        return new FeedCycleResult(total, faults ?? []);
     }
 
     /// <summary>
@@ -380,13 +453,13 @@ public sealed class EventFeedProcessor : IDisposable
             {
                 await handler.HandleAsync(item.Record, ct);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                throw;
+                throw; // shutdown; an OCE the handler raised on its own (HttpClient timeout) is a failure below
             }
             catch (Exception ex)
             {
-                activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+                activity?.SetStatus(ActivityStatusCode.Error, FeedDiagnostics.SanitizeError(ex));
                 KernelDiagnostics.FeedFailures.Add(1,
                     new KeyValuePair<string, object?>("papuma.feed", FeedTag),
                     new KeyValuePair<string, object?>("papuma.handler", handler.Name));
@@ -457,24 +530,33 @@ public sealed class EventFeedProcessor : IDisposable
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            var scopeKind = reader.GetString(1);
-            var scope = scopeKind == nameof(ScopeType.Tenant)
-                ? ScopeContext.Tenant(reader.GetString(2))
-                : ScopeContext.Platform();
+            var seq = reader.GetInt64(0);
+            try
+            {
+                var scopeKind = reader.GetString(1);
+                var scope = scopeKind == nameof(ScopeType.Tenant)
+                    ? ScopeContext.Tenant(reader.GetString(2))
+                    : ScopeContext.Platform();
 
-            var record = new EventRecord(
-                Seq: reader.GetInt64(0),
-                Scope: scope,
-                EventType: reader.GetString(3),
-                Payload: (JsonObject)JsonNode.Parse(reader.GetString(4))!,
-                ActorId: reader.GetString(5),
-                Metadata: (JsonObject)JsonNode.Parse(reader.GetString(6))!,
-                OccurredAt: reader.GetFieldValue<DateTimeOffset>(7));
+                var record = new EventRecord(
+                    Seq: seq,
+                    Scope: scope,
+                    EventType: reader.GetString(3),
+                    Payload: (JsonObject)JsonNode.Parse(reader.GetString(4))!,
+                    ActorId: reader.GetString(5),
+                    Metadata: (JsonObject)JsonNode.Parse(reader.GetString(6))!,
+                    OccurredAt: reader.GetFieldValue<DateTimeOffset>(7));
 
-            batch.Add(new BatchItem(
-                record,
-                reader.GetInt32(8),
-                reader.GetBoolean(9)));
+                batch.Add(new BatchItem(
+                    record,
+                    reader.GetInt32(8),
+                    reader.GetBoolean(9)));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new InvalidDataException(
+                    $"Event row seq {seq} could not be mapped to an EventRecord for handler {checkpointKey}: {ex.Message}", ex);
+            }
         }
 
         return batch;
