@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
-using System.Collections.Concurrent;
-using System.Diagnostics;
-using System.Diagnostics.Metrics;
 using System.Text.Json.Nodes;
 
 using Microsoft.Extensions.Logging;
@@ -11,7 +8,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 using Npgsql;
 
-using Papuma.Kernel.Diagnostics;
 using Papuma.Kernel.Processing;
 using Papuma.Kernel.Tenancy;
 
@@ -31,21 +27,7 @@ namespace Papuma.Kernel.Events;
 /// </remarks>
 public sealed class EventFeedProcessor : IDisposable
 {
-    private const string CheckpointPrefix = "event:";
-    private const string FeedTag = "event";
-
-    private readonly NpgsqlDataSource _dataSource;
-    private readonly IReadOnlyList<IEventHandler> _handlers;
-    private readonly ChangeFeedProcessorOptions _options;
-    private readonly ILogger _logger;
-
-    // Per-instance meter (same name as the shared one) so the observable lag gauge can
-    // be disposed with the processor (phase 11); see ChangeFeedProcessor.
-    private readonly Meter _meter;
-    private readonly ConcurrentDictionary<string, long> _lagByHandler = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, int?> _projectionVersions;
-    private readonly ConcurrentDictionary<string, bool> _pauseLogged = new(StringComparer.Ordinal);
-    private bool _registered;
+    private readonly EventFeedEngine _engine;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="EventFeedProcessor"/> class.
@@ -64,198 +46,28 @@ public sealed class EventFeedProcessor : IDisposable
         ChangeFeedProcessorOptions? options = null,
         ILogger<EventFeedProcessor>? logger = null)
     {
-        ArgumentNullException.ThrowIfNull(dataSource);
-        ArgumentNullException.ThrowIfNull(handlers);
-
-        _dataSource = dataSource;
-        _handlers = handlers.ToList();
-        _options = options ?? new ChangeFeedProcessorOptions();
-        _options.Validate();
-        _logger = logger ?? NullLogger<EventFeedProcessor>.Instance;
-
-        foreach (var handler in _handlers)
-        {
-            FeedHandlerNames.Validate(handler.Name, handler.GetType(), nameof(handlers));
-        }
-
-        var duplicate = _handlers.GroupBy(h => h.Name, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1);
-        if (duplicate is not null)
-        {
-            throw new ArgumentException($"Handler name '{duplicate.Key}' is registered more than once.", nameof(handlers));
-        }
-
-        _projectionVersions = _handlers.ToDictionary(
-            h => h.Name, h => HandlerKind.Validate(h, h.Name), StringComparer.Ordinal);
-
-        _meter = new Meter(KernelDiagnostics.SourceName);
-        _meter.CreateObservableGauge(
-            "papuma.feed.lag",
-            ObserveLag,
-            unit: "{record}",
-            description: "Committed records not yet delivered, per handler (ADR-022). " +
-                         "Refreshed by GetLagAsync and the idle moments of the run loop.");
+        _engine = new EventFeedEngine(
+            dataSource, handlers, options, logger ?? NullLogger<EventFeedProcessor>.Instance);
     }
 
     /// <summary>Disposes the per-instance lag gauge.</summary>
-    public void Dispose() => _meter.Dispose();
+    public void Dispose() => _engine.Dispose();
 
     /// <summary>Gets a value indicating whether there is anything for <see cref="RunAsync"/> to run.</summary>
-    internal bool HasHandlers => _handlers.Count > 0;
-
-    private IEnumerable<Measurement<long>> ObserveLag()
-    {
-        foreach (var (handler, lag) in _lagByHandler)
-        {
-            yield return new Measurement<long>(lag,
-                new KeyValuePair<string, object?>("papuma.feed", FeedTag),
-                new KeyValuePair<string, object?>("papuma.handler", handler));
-        }
-    }
+    internal bool HasHandlers => _engine.HasHandlers;
 
     /// <summary>
     /// Runs the processing loop until cancellation (NOTIFY wakeup, polling as truth — ADR-010).
     /// </summary>
     /// <param name="ct">The cancellation token stopping the loop.</param>
-    public async Task RunAsync(CancellationToken ct)
-    {
-        if (_handlers.Count == 0)
-        {
-            _logger.LogInformation("Event feed processor idle — no handlers registered.");
-            return;
-        }
-
-        await using var listen = new ListenConnection(_dataSource, _logger);
-        await listen.TryOpenAsync(ct);
-
-        _logger.LogInformation("Event feed processor started ({HandlerCount} handlers).", _handlers.Count);
-
-        var faultedCycles = 0;
-        while (!ct.IsCancellationRequested)
-        {
-            FeedCycleResult cycle;
-            try
-            {
-                cycle = await RunCycleAsync(ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                break; // shutdown — and only shutdown: any other OCE is a fault, never a stop
-            }
-            catch (Exception ex)
-            {
-                cycle = FeedCycleResult.Failed(ex);
-            }
-
-            if (cycle.HasFaults)
-            {
-                faultedCycles++;
-                LogFaults(cycle.Faults, faultedCycles);
-            }
-            else
-            {
-                faultedCycles = 0;
-            }
-
-            if (cycle.Processed > 0)
-            {
-                continue; // more may be waiting
-            }
-
-            try
-            {
-                if (cycle.HasFaults)
-                {
-                    // Never retry a failing cycle at once: a database that is down must not be
-                    // answered with a connect storm and a log flood.
-                    await Task.Delay(FeedLoop.BackoffDelay(_options.PollInterval, faultedCycles), ct);
-                }
-                else
-                {
-                    await TryRefreshLagCacheAsync(ct); // gauge freshness ≈ poll interval
-                    await listen.WaitAsync(_options.PollInterval, ct);
-                }
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                break;
-            }
-        }
-
-        _logger.LogInformation("Event feed processor stopped.");
-    }
-
-    private void LogFaults(IReadOnlyList<FeedFault> faults, int consecutiveFaultedCycles)
-    {
-        foreach (var fault in faults)
-        {
-            if (FeedLoop.ShouldLog(consecutiveFaultedCycles))
-            {
-                _logger.LogError(fault.Error,
-                    "Event feed processing failed for {Handler} (cycle {Cycle} in a row); backing off.",
-                    fault.Handler ?? "<all handlers>", consecutiveFaultedCycles);
-            }
-            else
-            {
-                _logger.LogDebug(fault.Error,
-                    "Event feed processing still failing for {Handler} (cycle {Cycle} in a row).",
-                    fault.Handler ?? "<all handlers>", consecutiveFaultedCycles);
-            }
-        }
-    }
-
-    private async Task TryRefreshLagCacheAsync(CancellationToken ct)
-    {
-        try
-        {
-            await GetLagAsync(ct);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            _logger.LogWarning(ex, "Lag refresh failed; continuing.");
-        }
-    }
+    public Task RunAsync(CancellationToken ct) => _engine.RunAsync(ct);
 
     /// <summary>
     /// Runs one processing cycle over all handlers and returns the number of delivered events.
     /// </summary>
     /// <param name="ct">A cancellation token.</param>
     /// <exception cref="AggregateException">More than one handler's batch faulted (the others still ran).</exception>
-    public async Task<int> ProcessOnceAsync(CancellationToken ct = default)
-    {
-        var cycle = await RunCycleAsync(ct);
-        FeedLoop.ThrowIfFaulted(cycle.Faults);
-        return cycle.Processed;
-    }
-
-    // A fault in one handler's batch (an unmappable row, a failed checkpoint write) must not
-    // keep the handlers after it from running: each one is isolated, the faults are reported.
-    private async Task<FeedCycleResult> RunCycleAsync(CancellationToken ct)
-    {
-        await EnsureRegisteredAsync(ct);
-
-        var stopwatch = Stopwatch.StartNew();
-        var total = 0;
-        List<FeedFault>? faults = null;
-        foreach (var handler in _handlers)
-        {
-            try
-            {
-                total += await ProcessHandlerBatchAsync(handler, ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                (faults ??= []).Add(new FeedFault(handler.Name, ex));
-            }
-        }
-
-        KernelDiagnostics.CycleDuration.Record(stopwatch.Elapsed.TotalMilliseconds,
-            new KeyValuePair<string, object?>("papuma.feed", FeedTag));
-        return new FeedCycleResult(total, faults ?? []);
-    }
+    public Task<int> ProcessOnceAsync(CancellationToken ct = default) => _engine.ProcessOnceAsync(ct);
 
     /// <summary>
     /// Returns the persisted failure entries (retrying and poison) of this processor's
@@ -263,7 +75,7 @@ public sealed class EventFeedProcessor : IDisposable
     /// </summary>
     /// <param name="ct">A cancellation token.</param>
     public Task<IReadOnlyList<FeedFailure>> GetFailuresAsync(CancellationToken ct = default) =>
-        PostgresFeedDiagnostics.GetFailuresAsync(_dataSource, _handlers.Select(h => h.Name), CheckpointPrefix, ct);
+        _engine.GetFailuresAsync(ct);
 
     /// <summary>
     /// Removes a failure entry so the next cycle retries the event immediately —
@@ -274,23 +86,8 @@ public sealed class EventFeedProcessor : IDisposable
     /// <param name="ct">A cancellation token.</param>
     /// <returns><c>true</c> when a failure entry existed and was removed.</returns>
     /// <exception cref="ArgumentException">No handler of that name runs in this processor.</exception>
-    public async Task<bool> RetryFailureAsync(string handlerName, long seq, CancellationToken ct = default)
-    {
-        EnsureKnownHandler(handlerName);
-        return await PostgresFeedDiagnostics.RetryFailureAsync(_dataSource, handlerName, CheckpointPrefix, seq, ct);
-    }
-
-    // The checkpoint and failure tables are shared by both feeds and keyed by name only: an
-    // unchecked name would let a typo create an orphan checkpoint row.
-    private void EnsureKnownHandler(string handlerName)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(handlerName);
-        if (!_projectionVersions.ContainsKey(handlerName))
-        {
-            throw new ArgumentException(
-                $"No handler named '{handlerName}' runs in this event feed processor.", nameof(handlerName));
-        }
-    }
+    public Task<bool> RetryFailureAsync(string handlerName, long seq, CancellationToken ct = default) =>
+        _engine.RetryFailureAsync(handlerName, seq, ct);
 
     /// <summary>
     /// Resets a handler's checkpoint to 0 and clears its failure entries — full replay
@@ -300,15 +97,8 @@ public sealed class EventFeedProcessor : IDisposable
     /// <param name="handlerName">The handler name (without the internal prefix).</param>
     /// <param name="ct">A cancellation token.</param>
     /// <exception cref="ArgumentException">No handler of that name runs in this processor.</exception>
-    public async Task ResetCheckpointAsync(string handlerName, CancellationToken ct = default)
-    {
-        EnsureKnownHandler(handlerName);
-
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await ProjectionLifecycle.ResetCursorAsync(conn, tx, CheckpointPrefix + handlerName, version: null, ct);
-        await tx.CommitAsync(ct);
-    }
+    public Task ResetCheckpointAsync(string handlerName, CancellationToken ct = default) =>
+        _engine.ResetCheckpointAsync(handlerName, ct);
 
     /// <summary>
     /// Rebuilds every projection (<see cref="IProjection"/>) this processor runs: empties
@@ -318,21 +108,7 @@ public sealed class EventFeedProcessor : IDisposable
     /// </summary>
     /// <param name="ct">A cancellation token.</param>
     /// <returns>The number of projections reset.</returns>
-    public async Task<int> ResetProjectionsAsync(CancellationToken ct = default)
-    {
-        await EnsureRegisteredAsync(ct);
-
-        var reset = 0;
-        foreach (var handler in _handlers)
-        {
-            if (handler is IProjection && await ResetProjectionAsync(handler.Name, ct))
-            {
-                reset++;
-            }
-        }
-
-        return reset;
-    }
+    public Task<int> ResetProjectionsAsync(CancellationToken ct = default) => _engine.ResetProjectionsAsync(ct);
 
     /// <summary>
     /// Rebuilds one projection: empties its target via <see cref="IProjection.ResetAsync"/>,
@@ -342,21 +118,8 @@ public sealed class EventFeedProcessor : IDisposable
     /// <param name="ct">A cancellation token.</param>
     /// <returns><c>false</c> when a newer instance owns the projection (higher stored version).</returns>
     /// <exception cref="ArgumentException">No handler of that name, or it is not a projection.</exception>
-    public async Task<bool> ResetProjectionAsync(string handlerName, CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(handlerName);
-        var handler = _handlers.FirstOrDefault(h => h.Name == handlerName)
-            ?? throw new ArgumentException($"No handler named {handlerName} runs in this processor.", nameof(handlerName));
-        if (handler is not IProjection projection || _projectionVersions[handlerName] is not int declared)
-        {
-            throw new ArgumentException(
-                $"Handler {handlerName} is not a projection (IProjection) — resetting it would repeat its effects.",
-                nameof(handlerName));
-        }
-
-        await EnsureRegisteredAsync(ct);
-        return await ProjectionLifecycle.ResetProjectionAsync(_dataSource, CheckpointPrefix + handlerName, projection, declared, _logger, ct);
-    }
+    public Task<bool> ResetProjectionAsync(string handlerName, CancellationToken ct = default) =>
+        _engine.ResetProjectionAsync(handlerName, ct);
 
     /// <summary>
     /// Returns a lag snapshot per handler: committed events not yet delivered (ADR-022).
@@ -365,303 +128,57 @@ public sealed class EventFeedProcessor : IDisposable
     /// trigger a rebuild. A handler that has not been registered yet shows the whole backlog.
     /// </summary>
     /// <param name="ct">A cancellation token.</param>
-    public async Task<IReadOnlyList<ChangeFeedLagSnapshot>> GetLagAsync(CancellationToken ct = default)
+    public Task<IReadOnlyList<ChangeFeedLagSnapshot>> GetLagAsync(CancellationToken ct = default) =>
+        _engine.GetLagAsync(ct);
+
+    /// <summary>What the event feed adds to the shared engine: its table, key space and row mapping.</summary>
+    private sealed class EventFeedEngine(
+        NpgsqlDataSource dataSource,
+        IEnumerable<IEventHandler> handlers,
+        ChangeFeedProcessorOptions? options,
+        ILogger logger)
+        : PostgresFeedEngine<IEventHandler, EventRecord>(dataSource, handlers, options, logger, nameof(handlers))
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await conn.SetAllScopesAsync(tx, ct);
+        protected override string FeedTag => "event";
 
-        long latestSeq;
-        await using (var headCmd = conn.CreateCommand())
-        {
-            headCmd.Transaction = tx;
-            headCmd.CommandText = "SELECT COALESCE(MAX(seq), 0) FROM papuma.event";
-            latestSeq = (long)(await headCmd.ExecuteScalarAsync(ct))!;
-        }
+        protected override string FeedName => "Event";
 
-        // Lag = committed rows not yet delivered (ADR-022), counted — a seq difference has
-        // no meaning once delivery follows causal order.
-        var snapshots = new List<ChangeFeedLagSnapshot>(_handlers.Count);
-        foreach (var handler in _handlers)
-        {
-            var cursor = await SnapshotCursor.ReadOrInitialAsync(conn, tx, CheckpointPrefix + handler.Name, ct);
-            var lag = await cursor.CountUndeliveredAsync(conn, tx, "papuma.event", ct);
+        protected override string Table => "papuma.event";
 
-            var declared = _projectionVersions[handler.Name];
-            snapshots.Add(new ChangeFeedLagSnapshot(handler.Name, cursor.LastSeq, latestSeq, lag)
-            {
-                ProjectionVersion = declared,
-                Paused = declared is int d && cursor.ProjectionVersion > d,
-            });
-            _lagByHandler[handler.Name] = lag; // feeds the observable gauge
-        }
+        protected override string CheckpointPrefix => "event:";
 
-        return snapshots;
-    }
+        protected override string Alias => "e";
 
-    private async Task<int> ProcessHandlerBatchAsync(IEventHandler handler, CancellationToken ct)
-    {
-        var key = CheckpointPrefix + handler.Name;
-
-        await using var conn = await _dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await conn.SetAllScopesAsync(tx, ct);
-
-        // Leader coordination: skip the handler when another processor holds its checkpoint.
-        var locked = await SnapshotCursor.LockAsync(conn, tx, key, ct);
-        if (locked is null)
-        {
-            return 0; // locked by another instance (or not yet registered)
-        }
-
-        if (IsPaused(handler, locked.ProjectionVersion))
-        {
-            await tx.CommitAsync(ct);
-            return 0;
-        }
-
-        var cursor = await locked.WithSliceAsync(conn, tx, "papuma.event", ct);
-        var batch = cursor.SliceSnapshot is null ? [] : await LoadBatchAsync(conn, tx, key, cursor, ct);
-        if (batch.Count == 0 && locked.SliceSnapshot is not null)
-        {
-            // The slice in progress has run dry, so it is complete — go straight on with a
-            // fresh one: a drained slice must not make the cycle look idle while newer
-            // commits wait.
-            cursor = await cursor.After(cursor.SliceSeq, 0, sliceCompleted: true).WithSliceAsync(conn, tx, "papuma.event", ct);
-            batch = cursor.SliceSnapshot is null ? [] : await LoadBatchAsync(conn, tx, key, cursor, ct);
-        }
-
-        if (batch.Count == 0)
-        {
-            // Nothing to deliver. Keep a completed slice; drop an empty fresh one — the next
-            // cycle takes a newer snapshot anyway, and an idle cycle then writes nothing.
-            var idle = cursor with { SliceSnapshot = null, SliceSeq = 0 };
-            if (idle != locked)
-            {
-                await idle.SaveAsync(conn, tx, key, ct);
-            }
-
-            await tx.CommitAsync(ct);
-            return 0;
-        }
-
-        var processed = 0;
-        var position = cursor.SliceSeq;
-        var highest = 0L;
-        var stopped = false;
-        foreach (var item in batch)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            if (item.Attempts >= _options.MaxAttempts)
-            {
-                _logger.LogError(
-                    "Event handler {Handler} skips poison event seq {Seq} after {Attempts} attempts.",
-                    handler.Name, item.Record.Seq, item.Attempts);
-                KernelDiagnostics.FeedPoisoned.Add(1,
-                    new KeyValuePair<string, object?>("papuma.feed", FeedTag),
-                    new KeyValuePair<string, object?>("papuma.handler", handler.Name));
-                position = item.Record.Seq;
-                highest = Math.Max(highest, item.Record.Seq);
-                continue;
-            }
-
-            if (item.RetryPending)
-            {
-                stopped = true;
-                break; // stop-the-line (ADR-009)
-            }
-
-            // Handler span links to the originating write's trace (metadata traceparent).
-            using var activity = FeedDiagnostics.StartHandlerActivity(
-                FeedTag, handler.Name, item.Record.Seq, item.Record.Metadata);
-            var stopwatch = Stopwatch.StartNew();
-            try
-            {
-                await handler.HandleAsync(item.Record, ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw; // shutdown; an OCE the handler raised on its own (HttpClient timeout) is a failure below
-            }
-            catch (Exception ex)
-            {
-                activity?.SetStatus(ActivityStatusCode.Error, FeedDiagnostics.SanitizeError(ex));
-                KernelDiagnostics.FeedFailures.Add(1,
-                    new KeyValuePair<string, object?>("papuma.feed", FeedTag),
-                    new KeyValuePair<string, object?>("papuma.handler", handler.Name));
-                var attempts = await RegisterFailureAsync(conn, tx, key, item.Record.Seq, ex, ct);
-                _logger.LogWarning(ex,
-                    "Event handler {Handler} failed on event seq {Seq} (attempt {Attempts}/{MaxAttempts}).",
-                    handler.Name, item.Record.Seq, attempts, _options.MaxAttempts);
-                stopped = true;
-                break;
-            }
-
-            KernelDiagnostics.HandlerDuration.Record(stopwatch.Elapsed.TotalMilliseconds,
-                new KeyValuePair<string, object?>("papuma.feed", FeedTag),
-                new KeyValuePair<string, object?>("papuma.handler", handler.Name));
-            KernelDiagnostics.FeedProcessed.Add(1,
-                new KeyValuePair<string, object?>("papuma.feed", FeedTag),
-                new KeyValuePair<string, object?>("papuma.handler", handler.Name));
-
-            if (item.Attempts > 0)
-            {
-                await ClearFailureAsync(conn, tx, key, item.Record.Seq, ct);
-            }
-
-            position = item.Record.Seq;
-            highest = Math.Max(highest, item.Record.Seq);
-            processed++;
-        }
-
-        // A batch that came back short without stopping the line has emptied the slice.
-        var sliceCompleted = !stopped && batch.Count < _options.BatchSize;
-        var next = cursor.After(position, highest, sliceCompleted);
-        if (next != locked)
-        {
-            await next.SaveAsync(conn, tx, key, ct);
-        }
-
-        await tx.CommitAsync(ct);
-        return processed;
-    }
-
-    // RetryPending is decided by the database clock that also set next_retry_at — comparing it
-    // with the application's clock would shift every retry by the clock skew between hosts.
-    private sealed record BatchItem(EventRecord Record, int Attempts, bool RetryPending);
-
-    private async Task<IReadOnlyList<BatchItem>> LoadBatchAsync(
-        NpgsqlConnection conn, NpgsqlTransaction tx, string checkpointKey, SnapshotCursor cursor, CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        // The next rows of the cursor's slice: transactions committed since the done
-        // snapshot, whole, in seq order (ADR-022).
-        var slice = cursor.SlicePredicate(cmd, "e");
-        cmd.CommandText = $"""
-            SELECT e.seq, e.scope, e.tenant_id, e.event_type, e.payload::text, e.actor_id,
-                   e.metadata::text, e.occurred_at, COALESCE(f.attempts, 0),
-                   COALESCE(f.next_retry_at > now(), false) AS retry_pending
-            FROM papuma.event e
-            LEFT JOIN papuma.failure f
-                   ON f.handler_name = @name AND f.seq = e.seq
-            WHERE {slice}
-            ORDER BY e.seq
-            LIMIT @batchSize
+        protected override string RecordColumns => """
+            e.seq, e.scope, e.tenant_id, e.event_type, e.payload::text, e.actor_id,
+            e.metadata::text, e.occurred_at
             """;
-        cmd.Parameters.AddWithValue("name", checkpointKey);
-        cmd.Parameters.AddWithValue("batchSize", _options.BatchSize);
 
-        var batch = new List<BatchItem>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+        protected override int RecordColumnCount => 8;
+
+        protected override string NameOf(IEventHandler handler) => handler.Name;
+
+        protected override Task HandleAsync(IEventHandler handler, EventRecord record, CancellationToken ct) =>
+            handler.HandleAsync(record, ct);
+
+        protected override long SeqOf(EventRecord record) => record.Seq;
+
+        protected override JsonObject MetadataOf(EventRecord record) => record.Metadata;
+
+        protected override EventRecord Map(NpgsqlDataReader reader)
         {
-            var seq = reader.GetInt64(0);
-            try
-            {
-                var scopeKind = reader.GetString(1);
-                var scope = scopeKind == nameof(ScopeType.Tenant)
-                    ? ScopeContext.Tenant(reader.GetString(2))
-                    : ScopeContext.Platform();
+            var scope = reader.GetString(1) == nameof(ScopeType.Tenant)
+                ? ScopeContext.Tenant(reader.GetString(2))
+                : ScopeContext.Platform();
 
-                var record = new EventRecord(
-                    Seq: seq,
-                    Scope: scope,
-                    EventType: reader.GetString(3),
-                    Payload: (JsonObject)JsonNode.Parse(reader.GetString(4))!,
-                    ActorId: reader.GetString(5),
-                    Metadata: (JsonObject)JsonNode.Parse(reader.GetString(6))!,
-                    OccurredAt: reader.GetFieldValue<DateTimeOffset>(7));
-
-                batch.Add(new BatchItem(
-                    record,
-                    reader.GetInt32(8),
-                    reader.GetBoolean(9)));
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                throw new InvalidDataException(
-                    $"Event row seq {seq} could not be mapped to an EventRecord for handler {checkpointKey}: {ex.Message}", ex);
-            }
+            return new EventRecord(
+                Seq: reader.GetInt64(0),
+                Scope: scope,
+                EventType: reader.GetString(3),
+                Payload: (JsonObject)JsonNode.Parse(reader.GetString(4))!,
+                ActorId: reader.GetString(5),
+                Metadata: (JsonObject)JsonNode.Parse(reader.GetString(6))!,
+                OccurredAt: reader.GetFieldValue<DateTimeOffset>(7));
         }
-
-        return batch;
-    }
-
-    private async Task<int> RegisterFailureAsync(
-        NpgsqlConnection conn, NpgsqlTransaction tx, string checkpointKey, long seq, Exception ex, CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = """
-            INSERT INTO papuma.failure (handler_name, seq, attempts, last_error, next_retry_at)
-            VALUES (@name, @seq, 1, @error,
-                    now() + LEAST(@baseDelay, @maxDelay) * INTERVAL '1 second')
-            ON CONFLICT (handler_name, seq)
-            DO UPDATE SET
-                attempts = papuma.failure.attempts + 1,
-                last_error = EXCLUDED.last_error,
-                next_retry_at = now() + LEAST(
-                    @baseDelay * POWER(2, papuma.failure.attempts),
-                    @maxDelay) * INTERVAL '1 second',
-                updated_at = now()
-            RETURNING attempts
-            """;
-        cmd.Parameters.AddWithValue("name", checkpointKey);
-        cmd.Parameters.AddWithValue("seq", seq);
-        cmd.Parameters.AddWithValue("error", FeedDiagnostics.SanitizeError(ex));
-        cmd.Parameters.AddWithValue("baseDelay", _options.BaseRetryDelay.TotalSeconds);
-        cmd.Parameters.AddWithValue("maxDelay", _options.MaxRetryDelay.TotalSeconds);
-
-        return (int)(await cmd.ExecuteScalarAsync(ct))!;
-    }
-
-    private static async Task ClearFailureAsync(
-        NpgsqlConnection conn, NpgsqlTransaction tx, string checkpointKey, long seq, CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = "DELETE FROM papuma.failure WHERE handler_name = @name AND seq = @seq";
-        cmd.Parameters.AddWithValue("name", checkpointKey);
-        cmd.Parameters.AddWithValue("seq", seq);
-        await cmd.ExecuteNonQueryAsync(ct);
-    }
-
-    private async Task EnsureRegisteredAsync(CancellationToken ct)
-    {
-        if (_registered)
-        {
-            return;
-        }
-
-        // Before the first delivery: new checkpoints, and projection versions reconciled
-        // (record, rebuild once, or pause for a newer instance — ADR-024).
-        foreach (var handler in _handlers)
-        {
-            await ProjectionLifecycle.RegisterAsync(
-                _dataSource, CheckpointPrefix + handler.Name, "papuma.event", handler, _projectionVersions[handler.Name], _logger, ct);
-        }
-
-        _registered = true;
-    }
-
-    // An instance declaring a lower version than the stored one runs older code: it must
-    // not write the old shape into the target a newer instance rebuilt (ADR-024).
-    private bool IsPaused(IEventHandler handler, int? storedVersion)
-    {
-        if (_projectionVersions[handler.Name] is not int declared || storedVersion is not int stored || stored <= declared)
-        {
-            return false;
-        }
-
-        if (_pauseLogged.TryAdd(handler.Name, true))
-        {
-            _logger.LogWarning(
-                "Projection {Handler} is at version {Stored}, this instance declares {Declared} — paused until this instance is replaced.",
-                handler.Name, stored, declared);
-        }
-
-        return true;
     }
 }
