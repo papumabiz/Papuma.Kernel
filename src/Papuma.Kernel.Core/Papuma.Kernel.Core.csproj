@@ -10,6 +10,7 @@
     <InternalsVisibleTo Include="Papuma.Kernel.Core.Tests" />
     <InternalsVisibleTo Include="Papuma.Kernel.Local" />
     <InternalsVisibleTo Include="Papuma.Kernel.Local.Tests" />
+    <InternalsVisibleTo Include="Papuma.Kernel.Benchmarks" />
   </ItemGroup>
 
 </Project>

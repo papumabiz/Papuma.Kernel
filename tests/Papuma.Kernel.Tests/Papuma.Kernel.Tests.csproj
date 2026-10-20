@@ -24,6 +24,7 @@
     <!-- The patch vector loader and the JSON generator are shared with Papuma.Kernel.Core.Tests, which owns them. -->
     <Compile Include="..\Papuma.Kernel.Core.Tests\Spec\PatchVectors.cs" Link="Spec\PatchVectors.cs" />
     <Compile Include="..\Papuma.Kernel.Core.Tests\Robustness\JsonGenerator.cs" Link="Robustness\JsonGenerator.cs" />
+    <Compile Include="..\Papuma.Kernel.Core.Tests\Changes\DiffComparison.cs" Link="Changes\DiffComparison.cs" />
     <Compile Include="..\Papuma.Kernel.Core.Tests\Robustness\SessionModelRunner.cs" Link="Robustness\SessionModelRunner.cs" />
     <Compile Include="..\Papuma.Kernel.Core.Tests\Robustness\ConcurrencyRunner.cs" Link="Robustness\ConcurrencyRunner.cs" />
   </ItemGroup>

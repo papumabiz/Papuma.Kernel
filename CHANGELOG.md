@@ -29,6 +29,11 @@ Changed:
 
 Added:
 
+- Evaluation (internal, not used by the sessions): `Utf8JsonDiffEngine`, the diff computed on UTF-8 text without
+  a node tree, with differential tests against `JsonDiffEngine`, PostgreSQL `jsonb` integration tests and
+  end-to-end pipeline benchmarks (`-- diffpipeline`, `diffmemory`, `diffcold`). Results and the open semantic
+  decisions (empty keys, depth limit, duplicate keys): `docs/analyses/utf8-diff-prototype-validation.md`.
+
 - Test coverage: concurrent writers (optimistic versions and unconditional increments on one document) lose no update and leave no gap in the version numbers, on both engines. `concepts.md` now states that rollback never restores `DoNotTrack` fields.
 
 - **`NonNumericIncrementException`** and **`PatchTargetMissingException`** (`Papuma.Kernel.Core`):

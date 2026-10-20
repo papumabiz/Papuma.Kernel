@@ -26,6 +26,24 @@ Observations:
 - **Inserts allocate roughly double** (every leaf becomes a diff entry with a
   cloned value).
 
+## Diff pipeline: current engine vs the UTF-8 prototype
+
+```bash
+dotnet run --project benchmarks/Papuma.Kernel.Benchmarks -c Release -- diffverify     # same semantics, all scenarios
+dotnet run --project benchmarks/Papuma.Kernel.Benchmarks -c Release -- diffpipeline   # end to end + phases (~1 h)
+dotnet run --project benchmarks/Papuma.Kernel.Benchmarks -c Release -- diffpipeline --filter "*Pipeline*"
+dotnet run --project benchmarks/Papuma.Kernel.Benchmarks -c Release -- diffmemory     # allocated / pooled / retained
+dotnet run --project benchmarks/Papuma.Kernel.Benchmarks -c Release -- diffcold       # first call in a fresh process
+```
+
+Unlike the table above, these measure the **whole write-path diff**: parse both states, diff, materialize
+the public `DocumentDiff`, write the feed as UTF-8 — the same inputs and outputs for the current engine and
+for `Utf8JsonDiffEngine` (verified in every setup), 12 representative scenarios in `jsonb` text form and 5
+adversarial ones. They run in-process and pin themselves to one P-core: BenchmarkDotNet's generated project
+cannot be built while stale worktree copies of this project exist under `.claude/` or `.kilo/`.
+Results, method and the limits of the comparison (2026-10-20):
+[docs/analyses/utf8-diff-prototype-validation.md](../../docs/analyses/utf8-diff-prototype-validation.md#6-benchmarks).
+
 ## The resulting limit recommendation (documented in ADR-004)
 
 - **≤ ~1,000 leaf fields: a non-topic.** The diff costs well under 0.5 ms —
