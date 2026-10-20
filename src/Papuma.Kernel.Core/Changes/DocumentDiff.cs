@@ -12,8 +12,8 @@ namespace Papuma.Kernel.Changes;
 /// </summary>
 /// <remarks>
 /// Arrays are treated as atomic leaf values: any difference produces one entry for the
-/// array path with the full old and new array. An empty object key cannot be named by a
-/// path and is rejected.
+/// array path with the full old and new array. An empty object key is an empty path segment
+/// (docs/spec/changes.md §2): <c>""</c> at the top, <c>a.</c> below <c>a</c>.
 /// </remarks>
 public sealed class DocumentDiff
 {
@@ -91,6 +91,12 @@ public sealed class DocumentDiff
     /// Deserializes a diff from its JSONB wire format (see <see cref="ToJson"/>).
     /// </summary>
     /// <param name="json">The wire-format JSON object.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="json"/> is <c>null</c>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="json"/> is not a well-formed diff: an entry that is not an object, a <c>ref</c> that is not a
+    /// non-empty string, a <c>hash</c> that is neither a string nor <c>null</c>, or an entry with neither
+    /// <c>old</c> nor <c>new</c> nor a policy marker.
+    /// </exception>
     public static DocumentDiff FromJson(JsonObject json)
     {
         ArgumentNullException.ThrowIfNull(json);
@@ -103,15 +109,31 @@ public sealed class DocumentDiff
                 throw new ArgumentException($"Diff entry at '{path}' is not an object.", nameof(json));
             }
 
-            if (entryJson.ContainsKey("ref"))
+            if (entryJson.TryGetPropertyValue("ref", out var reference))
             {
-                entries[path] = DiffEntry.ReferenceEntry((string)entryJson["ref"]!);
+                if (reference is not JsonValue refValue
+                    || !refValue.TryGetValue<string>(out var referenceText)
+                    || string.IsNullOrWhiteSpace(referenceText))
+                {
+                    throw new ArgumentException(
+                        $"Diff entry at '{path}': 'ref' must be a non-empty string.", nameof(json));
+                }
+
+                entries[path] = DiffEntry.ReferenceEntry(referenceText);
                 continue;
             }
 
-            if (entryJson.ContainsKey("hash"))
+            if (entryJson.TryGetPropertyValue("hash", out var hash))
             {
-                entries[path] = DiffEntry.HashedEntry((string?)entryJson["hash"]);
+                // A missing or JSON null hash is the shape of a remove-side entry (changes.md); anything else must be text.
+                string? hashText = null;
+                if (hash is not null && (hash is not JsonValue hashValue || !hashValue.TryGetValue(out hashText)))
+                {
+                    throw new ArgumentException(
+                        $"Diff entry at '{path}': 'hash' must be a string or null.", nameof(json));
+                }
+
+                entries[path] = DiffEntry.HashedEntry(hashText);
                 continue;
             }
 

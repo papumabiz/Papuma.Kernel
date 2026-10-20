@@ -22,6 +22,9 @@ namespace Papuma.Kernel.Store;
 /// missing or non-object parent throw <see cref="PatchTargetMissingException"/> (parents are
 /// never created or replaced); <c>Increment</c> on a value that is not absent, null or a
 /// number throws <see cref="NonNumericIncrementException"/> instead of overwriting it;
+/// <c>Increment</c> computes in <see cref="decimal"/>, so a stored number or a result beyond ±7.9e28 or 28
+/// significant digits throws <see cref="PatchValueOutOfRangeException"/> instead of rounding or overflowing
+/// (PostgreSQL's <c>numeric</c> has no such limit — a documented divergence);
 /// <c>Remove</c> of something absent is a no-op.
 /// </remarks>
 internal static class JsonPatchApplier
@@ -82,21 +85,76 @@ internal static class JsonPatchApplier
     {
         var key = op.PathSegments[^1];
         var current = 0m;
-        if (parent[key] is { } existing
-            && !(existing is JsonValue value
-                 && value.GetValueKind() == JsonValueKind.Number
-                 && decimal.TryParse(value.ToJsonString(), NumberStyles.Float, CultureInfo.InvariantCulture, out current)))
+        if (parent[key] is { } existing)
         {
             // A JSON number only: strings, booleans, objects and arrays are never coerced.
-            if (strictNumbers)
+            if (existing is not JsonValue value || value.GetValueKind() != JsonValueKind.Number)
             {
-                throw new NonNumericIncrementException(documentType, documentId, DiffPath.Join(op.PathSegments));
+                if (strictNumbers)
+                {
+                    throw new NonNumericIncrementException(documentType, documentId, DiffPath.Join(op.PathSegments));
+                }
             }
+            else if (!TryReadExactDecimal(value.ToJsonString(), out current))
+            {
+                // A number, but beyond what decimal holds exactly (1e30, 29 significant digits): never rounded
+                // silently (review C-4). PostgreSQL has already done the arithmetic (strictNumbers: false).
+                if (strictNumbers)
+                {
+                    throw new PatchValueOutOfRangeException(documentType, documentId, DiffPath.Join(op.PathSegments));
+                }
 
-            current = 0m;
+                current = 0m;
+            }
         }
 
-        parent[key] = JsonValue.Create(current + op.IncrementBy);
+        if (TryAddExactly(current, op.IncrementBy, out var result))
+        {
+            parent[key] = JsonValue.Create(result);
+        }
+        else if (strictNumbers)
+        {
+            throw new PatchValueOutOfRangeException(documentType, documentId, DiffPath.Join(op.PathSegments));
+        }
+        else
+        {
+            parent[key] = JsonValue.Create(0m); // only the path structure matters here; the SQL result is authoritative
+        }
+    }
+
+    // decimal addition throws on overflow, but rounds to 28 digits without complaint: check the sum is exact.
+    private static bool TryAddExactly(decimal current, long by, out decimal result)
+    {
+        try
+        {
+            result = current + by;
+            return result - by == current;
+        }
+        catch (OverflowException)
+        {
+            result = 0m;
+            return false;
+        }
+    }
+
+    // True when the number's text is represented exactly: decimal.TryParse fails beyond ±7.9e28 and rounds
+    // beyond 28 digits (also toward zero for 1e-30), so the value is compared back by its canonical text.
+    private static bool TryReadExactDecimal(string text, out decimal value)
+    {
+        if (!decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value))
+        {
+            return false;
+        }
+
+        try
+        {
+            return CanonicalJson.NormalizeNumber(text)
+                == CanonicalJson.NormalizeNumber(value.ToString(CultureInfo.InvariantCulture));
+        }
+        catch (CanonicalJsonException)
+        {
+            return false; // longer than the canonical form allows: certainly not a decimal
+        }
     }
 
     private static JsonObject RequireParent(

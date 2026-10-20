@@ -26,7 +26,7 @@ internal static class PolicyProjector
     /// </summary>
     /// <param name="document">The raw (upcast) document.</param>
     /// <param name="metadata">The document type metadata carrying the policies.</param>
-    /// <param name="hashKeys">The hash key provider, or <c>null</c> for the legacy v1 hash (ADR-025).</param>
+    /// <param name="hashKeys">The hash key provider (ADR-025). May be <c>null</c> only for a model without a <c>Hash</c> policy: hashing without a provider throws <see cref="InvalidOperationException"/> — there is no unkeyed hash.</param>
     /// <param name="scope">The scope of the read — it must be the scope the feed hash was written under.</param>
     public static JsonObject Apply(
         JsonObject document,

@@ -243,6 +243,57 @@
       "after": { "count": 9223372036854775808 }
     },
     {
+      "name": "increment-near-the-top-of-the-decimal-range-stays-exact",
+      "before": { "count": 79228162514264337593543950334 },
+      "ops": [{ "op": "increment", "path": ["count"], "by": 1 }],
+      "after": { "count": 79228162514264337593543950335 }
+    },
+    {
+      "name": "increment-a-stored-number-beyond-the-decimal-range-fails",
+      "before": { "count": 1e30 },
+      "ops": [{ "op": "increment", "path": ["count"], "by": 1 }],
+      "error": "out-of-range",
+      "knownDivergence": {
+        "postgres": { "after": { "count": 1000000000000000000000000000001 } }
+      }
+    },
+    {
+      "name": "increment-whose-result-overflows-the-decimal-range-fails",
+      "before": { "count": 79228162514264337593543950335 },
+      "ops": [{ "op": "increment", "path": ["count"], "by": 1 }],
+      "error": "out-of-range",
+      "knownDivergence": {
+        "postgres": { "after": { "count": 79228162514264337593543950336 } }
+      }
+    },
+    {
+      "name": "increment-below-the-bottom-of-the-decimal-range-fails",
+      "before": { "count": -79228162514264337593543950335 },
+      "ops": [{ "op": "increment", "path": ["count"], "by": -1 }],
+      "error": "out-of-range",
+      "knownDivergence": {
+        "postgres": { "after": { "count": -79228162514264337593543950336 } }
+      }
+    },
+    {
+      "name": "increment-that-would-need-more-than-28-digits-fails",
+      "before": { "price": 0.1234567890123456789012345678 },
+      "ops": [{ "op": "increment", "path": ["price"], "by": 9223372036854775807 }],
+      "error": "out-of-range",
+      "knownDivergence": {
+        "postgres": { "after": { "price": 9223372036854775807.1234567890123456789012345678 } }
+      }
+    },
+    {
+      "name": "increment-a-stored-number-with-more-than-28-digits-fails",
+      "before": { "price": 0.12345678901234567890123456789 },
+      "ops": [{ "op": "increment", "path": ["price"], "by": 1 }],
+      "error": "out-of-range",
+      "knownDivergence": {
+        "postgres": { "after": { "price": 1.12345678901234567890123456789 } }
+      }
+    },
+    {
       "name": "increment-nested-field",
       "before": { "stats": { "logins": 1 } },
       "ops": [{ "op": "increment", "path": ["stats", "logins"], "by": 1 }],

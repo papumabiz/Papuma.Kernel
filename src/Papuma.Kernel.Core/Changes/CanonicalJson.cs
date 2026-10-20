@@ -10,11 +10,11 @@ namespace Papuma.Kernel.Changes;
 /// <summary>
 /// Thrown when a value has no canonical form and therefore cannot be hashed by the keyed
 /// <c>Hash</c> policy (ADR-025): a number whose canonical text would be longer than 1024
-/// characters, a malformed number, or a string with an unpaired surrogate. The write is rolled back.
+/// characters, a malformed number, a string with an unpaired surrogate, or a value that has no JSON form. The write is rolled back.
 /// </summary>
 public sealed class CanonicalJsonException : Exception
 {
-    /// <summary>Gets the stable error code (<c>number-too-large</c>, <c>invalid-number</c>, <c>invalid-string</c>).</summary>
+    /// <summary>Gets the stable error code (<c>number-too-large</c>, <c>invalid-number</c>, <c>invalid-string</c>, <c>invalid-value</c>, <c>too-deep</c>).</summary>
     public string Code { get; }
 
     internal CanonicalJsonException(string code, string message)
@@ -103,7 +103,15 @@ internal static class CanonicalJson
                 switch (value.GetValueKind())
                 {
                     case JsonValueKind.String:
-                        AppendString(builder, value.GetValue<string>());
+                        if (value.TryGetValue<string>(out var text))
+                        {
+                            AppendString(builder, text);
+                        }
+                        else
+                        {
+                            Append(builder, Reparse(value)); // JsonValue.Create(guid): a string kind with a non-string payload
+                        }
+
                         break;
                     case JsonValueKind.Number:
                         builder.Append(NormalizeNumber(value.ToJsonString()));
@@ -114,12 +122,34 @@ internal static class CanonicalJson
                     case JsonValueKind.False:
                         builder.Append("false");
                         break;
-                    default:
+                    case JsonValueKind.Null:
                         builder.Append("null");
                         break;
+                    case JsonValueKind.Object:
+                    case JsonValueKind.Array:
+                        Append(builder, Reparse(value)); // JsonValue.Create(poco): a container hiding in a leaf node
+                        break;
+                    default:
+                        throw new CanonicalJsonException(
+                            "invalid-value", "A JSON value has no JSON form (kind Undefined) and cannot be canonicalized.");
                 }
 
                 break;
+        }
+    }
+
+    // A JsonValue built from a CLR object is canonicalized by what it serializes to. The parse (default depth
+    // limit 64) yields plain JsonObject/JsonArray/JsonValue nodes, so this cannot recurse into itself.
+    private static JsonNode? Reparse(JsonValue value)
+    {
+        try
+        {
+            return JsonNode.Parse(value.ToJsonString());
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            throw new CanonicalJsonException(
+                "invalid-value", $"A JSON value of CLR type {value.GetType().Name} cannot be serialized to canonical JSON.");
         }
     }
 

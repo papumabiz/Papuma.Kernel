@@ -34,6 +34,11 @@ public sealed class PatchVectorInProcessTests
             PatchVectors.Assert(vector, Engine, after: null, error: "not-numeric");
             return;
         }
+        catch (PatchValueOutOfRangeException)
+        {
+            PatchVectors.Assert(vector, Engine, after: null, error: "out-of-range");
+            return;
+        }
         catch (PatchTargetMissingException)
         {
             PatchVectors.Assert(vector, Engine, after: null, error: "parent-missing");

@@ -15,7 +15,7 @@ namespace Papuma.Kernel.Events;
 /// <param name="Seq">The global event log sequence number (separate from the change feed).</param>
 /// <param name="Scope">The scope the event belongs to.</param>
 /// <param name="EventType">The logical event type name.</param>
-/// <param name="Payload">The policy-applied payload (redacted fields are absent, hashed fields are hex strings).</param>
+/// <param name="Payload">The policy-applied payload (redacted fields are absent, hashed fields are keyed-hash strings of the form <c>v2:&lt;keyId&gt;:&lt;hex&gt;</c>, ADR-025).</param>
 /// <param name="ActorId">The actor who appended this event (ADR-017); empty when not provided.</param>
 /// <param name="Metadata">Correlation/causation metadata of the appending session.</param>
 /// <param name="OccurredAt">When the event was recorded.</param>
@@ -30,7 +30,8 @@ public sealed record EventRecord(
 {
     /// <summary>
     /// Deserializes the payload to the event CLR type. Redacted fields come back as
-    /// their defaults, hashed fields as hex strings — consumers must not expect the
+    /// their defaults, hashed fields as the <c>v2:&lt;keyId&gt;:&lt;hex&gt;</c> hash string (which usually does not
+    /// deserialize into the original property type) — consumers must not expect the
     /// original values of policy-protected fields (ADR-013).
     /// </summary>
     /// <typeparam name="T">The event CLR type.</typeparam>

@@ -93,4 +93,50 @@ public sealed class RedactionEngineTests
 
         Assert.Equal("""{"address.city":{"changed":true},"address.street":{"changed":true},"name":{"new":"x"}}""", diff.ToJsonString());
     }
+
+    // ── Review C-15: every erasure path is checked before anything is rewritten ──
+
+    [Fact]
+    public void AnInvalidPath_IsRejected_EvenWhenNoEntryWouldMatchIt()
+    {
+        var diff = Diff("""{"name":{"new":"Harry"}}""");
+
+        var ex = Assert.Throws<ArgumentException>(() => RedactionEngine.RedactDiffEntries(diff, ["address.stre\\et\\"]));
+
+        Assert.Equal("paths", ex.ParamName);
+        Assert.Equal("""{"name":{"new":"Harry"}}""", diff.ToJsonString());
+    }
+
+    [Fact]
+    public void AnInvalidLaterPath_LeavesTheDiffUntouched()
+    {
+        // "a" is erased by the first path; the bad second path used to throw only once entry "b" was reached.
+        var diff = Diff("""{"a":{"new":1},"b":{"new":{"c":2}}}""");
+        var before = diff.ToJsonString();
+
+        Assert.Throws<ArgumentException>(() => RedactionEngine.RedactDiffEntries(diff, ["a", "b.c\\x"]));
+
+        Assert.Equal(before, diff.ToJsonString());
+    }
+
+    [Fact]
+    public void AnInvalidPayloadPath_LeavesThePayloadUntouched()
+    {
+        var payload = Diff("""{"email":"x@y.z","name":"Harry"}""");
+        var before = payload.ToJsonString();
+
+        var ex = Assert.Throws<ArgumentException>(() => RedactionEngine.RemovePayloadPaths(payload, ["email", "na\\me\\"]));
+
+        Assert.Equal("paths", ex.ParamName);
+        Assert.Equal(before, payload.ToJsonString());
+    }
+
+    [Fact]
+    public void ValidEscapedPaths_AreAccepted()
+    {
+        var diff = Diff("""{"a\\.b":{"new":1}}""");
+
+        Assert.True(RedactionEngine.RedactDiffEntries(diff, ["a\\.b"]));
+        Assert.True(RedactionEngine.RedactDiffEntries(Diff("""{"x":{"new":1}}"""), null));
+    }
 }

@@ -294,7 +294,7 @@ public sealed class PolicyDiscoveryTests
         var ex = Assert.Throws<ArgumentException>(
             () => new KernelModelBuilder().Document<DocIgnored>(d => d.Property(x => x.Hidden).Redact()));
 
-        Assert.Equal("propertyExpression", ex.ParamName);
+        Assert.Equal("property", ex.ParamName);
         Assert.Contains("[JsonIgnore]", ex.Message, StringComparison.Ordinal);
         Assert.Contains("DocIgnored.Hidden", ex.Message, StringComparison.Ordinal);
     }
@@ -305,7 +305,7 @@ public sealed class PolicyDiscoveryTests
         var ex = Assert.Throws<ArgumentException>(
             () => new KernelModelBuilder().Document<DocIgnored>(d => d.UniqueKey(x => x.Hidden)));
 
-        Assert.Equal("keyExpression", ex.ParamName);
+        Assert.Equal("property", ex.ParamName);
     }
 
     [Fact]

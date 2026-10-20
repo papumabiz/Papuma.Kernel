@@ -31,6 +31,10 @@ internal static class HashKeyCheckValue
     /// <summary>Throws <see cref="HashKeyMismatchException"/> when the stored value differs from the computed one.</summary>
     public static void Verify(string keyId, string computed, string stored)
     {
+        ArgumentNullException.ThrowIfNull(keyId);
+        ArgumentNullException.ThrowIfNull(computed);
+        ArgumentNullException.ThrowIfNull(stored);
+
         var equal = CryptographicOperations.FixedTimeEquals(
             Encoding.ASCII.GetBytes(computed), Encoding.ASCII.GetBytes(stored));
         if (!equal)

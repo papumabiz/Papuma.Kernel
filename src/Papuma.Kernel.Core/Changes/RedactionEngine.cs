@@ -18,8 +18,13 @@ internal static class RedactionEngine
     /// <c>{"changed": true}</c>. Returns whether anything changed — already-redacted
     /// entries make the operation idempotent.
     /// </summary>
+    /// <exception cref="ArgumentException">An erasure path is malformed; nothing has been rewritten.</exception>
     public static bool RedactDiffEntries(JsonObject diff, IReadOnlyCollection<string>? paths)
     {
+        // All paths first: a malformed one must neither be skipped silently (no entry to compare it with) nor
+        // surface after earlier entries were already rewritten (review C-15).
+        ValidatePaths(paths);
+
         var changed = false;
         foreach (var entryPath in diff.Select(e => e.Key).ToList())
         {
@@ -49,8 +54,11 @@ internal static class RedactionEngine
     /// Removes payload fields at the given dot-separated paths. Returns whether anything
     /// was actually removed (missing paths are a no-op, not an error — idempotent).
     /// </summary>
+    /// <exception cref="ArgumentException">A path is malformed; nothing has been removed.</exception>
     public static bool RemovePayloadPaths(JsonObject payload, IReadOnlyCollection<string> paths)
     {
+        ValidatePaths(paths);
+
         var changed = false;
         foreach (var path in paths)
         {
@@ -68,6 +76,26 @@ internal static class RedactionEngine
         }
 
         return changed;
+    }
+
+    private static void ValidatePaths(IReadOnlyCollection<string>? paths)
+    {
+        if (paths is null)
+        {
+            return;
+        }
+
+        foreach (var path in paths)
+        {
+            try
+            {
+                DiffPath.Split(path);
+            }
+            catch (ArgumentException ex) when (ex is not ArgumentNullException)
+            {
+                throw new ArgumentException(ex.Message, nameof(paths), ex);
+            }
+        }
     }
 
     // Whether the entry at entryPath is a strict ancestor of erasedPath and its old or new value holds the field.

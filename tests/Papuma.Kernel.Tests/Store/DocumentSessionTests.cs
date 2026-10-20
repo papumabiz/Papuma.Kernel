@@ -268,4 +268,42 @@ public sealed class DocumentSessionTests : IAsyncLifetime
         cmd.Parameters.Add(new NpgsqlParameter("diff", NpgsqlDbType.Jsonb) { Value = "{}" });
         await cmd.ExecuteNonQueryAsync();
     }
+
+    // Review C-10: control characters (NUL included) are refused up front, not by the database.
+    [Theory]
+    [InlineData("a\0b")]
+    [InlineData("a\nb")]
+    [InlineData("a\tb")]
+    [InlineData("a\u007Fb")]
+    public async Task ADocumentIdWithControlCharacters_IsRejected_OnEveryEntryPoint(string id)
+    {
+        await using var session = _store.OpenSession(NewTenant());
+
+        await Assert.ThrowsAsync<ArgumentException>(() => session.LoadAsync<UserDoc>(id));
+        await Assert.ThrowsAsync<ArgumentException>(() => session.SaveAsync(new UserDoc(id, "Harry"), expectedVersion: 0));
+        await Assert.ThrowsAsync<ArgumentException>(() => session.DeleteAsync<UserDoc>(id, expectedVersion: 1));
+    }
+
+    [Fact]
+    public async Task ADocumentIdWithASlashAndUnicode_StillRoundTrips()
+    {
+        await using var session = _store.OpenSession(NewTenant());
+        var id = "Müller/" + NewId();
+
+        await session.SaveAsync(new UserDoc(id, "Harry"), expectedVersion: 0);
+
+        Assert.Equal("Harry", (await session.LoadAsync<UserDoc>(id))!.Document.Name);
+    }
+
+    // Review Q-4: the blamed parameter is the caller's own.
+    [Fact]
+    public async Task LoadByKey_WithAnExpressionThatIsNotAPropertyChain_BlamesKey()
+    {
+        await using var session = _store.OpenSession(NewTenant());
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(
+            () => session.LoadByKeyAsync<UserDoc>(x => x.Name.ToUpperInvariant(), "x"));
+
+        Assert.Equal("key", ex.ParamName);
+    }
 }

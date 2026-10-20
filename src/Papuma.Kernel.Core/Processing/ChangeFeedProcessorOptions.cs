@@ -43,10 +43,14 @@ public sealed class ChangeFeedProcessorOptions
             throw new ArgumentOutOfRangeException(nameof(PollInterval), "PollInterval must be positive.");
         }
 
-        if (BaseRetryDelay < TimeSpan.Zero || MaxRetryDelay < BaseRetryDelay)
+        if (BaseRetryDelay < TimeSpan.Zero)
         {
-            throw new ArgumentOutOfRangeException(nameof(BaseRetryDelay),
-                "Retry delays must be non-negative and MaxRetryDelay >= BaseRetryDelay.");
+            throw new ArgumentOutOfRangeException(nameof(BaseRetryDelay), "BaseRetryDelay must not be negative.");
+        }
+
+        if (MaxRetryDelay < BaseRetryDelay)
+        {
+            throw new ArgumentOutOfRangeException(nameof(MaxRetryDelay), "MaxRetryDelay must be >= BaseRetryDelay.");
         }
     }
 }

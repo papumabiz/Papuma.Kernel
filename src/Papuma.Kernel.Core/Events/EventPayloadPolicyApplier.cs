@@ -29,9 +29,8 @@ internal static class EventPayloadPolicyApplier
 
         var hash = new HashContext(hashKeys, scope, metadata.Name);
         var result = payload.DeepClone().AsObject();
-        foreach (var (path, policy) in metadata.Policies)
+        foreach (var (segments, policy) in metadata.PoliciesDeepestFirst)
         {
-            var segments = DiffPath.Split(path);
             var parent = NavigateToParent(result, segments);
             var field = segments[^1];
             if (parent is null || !parent.ContainsKey(field))

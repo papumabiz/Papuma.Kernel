@@ -19,10 +19,12 @@ internal static class JsonPathResolver
     /// Resolves a property access chain (e.g. <c>x => x.Address.City</c>) to a
     /// dot-separated JSON path (<c>address.city</c>).
     /// </summary>
-    public static string Resolve(LambdaExpression propertyExpression)
+    /// <param name="propertyExpression">The expression.</param>
+    /// <param name="parameterName">The caller's parameter that held the expression, blamed in an <see cref="ArgumentException"/>.</param>
+    public static string Resolve(LambdaExpression propertyExpression, string parameterName)
     {
-        ArgumentNullException.ThrowIfNull(propertyExpression);
-        return ResolveChain(propertyExpression.Body, nameof(propertyExpression));
+        ArgumentNullException.ThrowIfNull(propertyExpression, parameterName);
+        return ResolveChain(propertyExpression.Body, parameterName);
     }
 
     /// <summary>
@@ -31,38 +33,40 @@ internal static class JsonPathResolver
     /// composite key (ADR-020). Returns the paths comma-separated in declaration order —
     /// the form of <see cref="KeyMetadata.Path"/>.
     /// </summary>
-    public static string ResolveKey(LambdaExpression keyExpression)
+    /// <param name="keyExpression">The expression.</param>
+    /// <param name="parameterName">The caller's parameter that held the expression, blamed in an <see cref="ArgumentException"/>.</param>
+    public static string ResolveKey(LambdaExpression keyExpression, string parameterName)
     {
-        ArgumentNullException.ThrowIfNull(keyExpression);
+        ArgumentNullException.ThrowIfNull(keyExpression, parameterName);
 
         if (Unwrap(keyExpression.Body) is not NewExpression composite)
         {
-            return EnsureNoSeparator(ResolveChain(keyExpression.Body, nameof(keyExpression)));
+            return EnsureNoSeparator(ResolveChain(keyExpression.Body, parameterName), parameterName);
         }
 
         if (composite.Arguments.Count == 0)
         {
-            throw new ArgumentException("A composite key needs at least one property.", nameof(keyExpression));
+            throw new ArgumentException("A composite key needs at least one property.", parameterName);
         }
 
         var paths = composite.Arguments
-            .Select(a => EnsureNoSeparator(ResolveChain(a, nameof(keyExpression))))
+            .Select(a => EnsureNoSeparator(ResolveChain(a, parameterName), parameterName))
             .ToList();
         var duplicate = paths.GroupBy(p => p, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1);
         if (duplicate is not null)
         {
             throw new ArgumentException(
-                $"Composite key lists '{duplicate.Key}' more than once.", nameof(keyExpression));
+                $"Composite key lists '{duplicate.Key}' more than once.", parameterName);
         }
 
         return string.Join(KeyMetadata.ComponentSeparator, paths);
     }
 
-    private static string EnsureNoSeparator(string path) =>
+    private static string EnsureNoSeparator(string path, string parameterName) =>
         path.Contains(KeyMetadata.ComponentSeparator)
             ? throw new ArgumentException(
                 $"Key path '{path}' contains '{KeyMetadata.ComponentSeparator}', which separates composite key components.",
-                "keyExpression")
+                parameterName)
             : path;
 
     private static string ResolveChain(Expression body, string parameterName)

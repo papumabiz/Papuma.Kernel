@@ -18,7 +18,7 @@ are not addressable.
 |---|---|
 | `set(path, value)` | The field at `path` becomes `value` (any JSON value, including `null`). Replaces an existing value of any type; adds the field if absent. The parent object must exist (§2). |
 | `remove(path)` | The field at `path` is deleted. Removing an absent field, or a field below an absent parent, is a no-op. |
-| `increment(path, by)` | The field becomes its numeric value plus `by`. An absent field or JSON `null` counts as `0`. `by` is a signed 64-bit integer; the result is exact (no overflow at 64 bits, no binary floating point). |
+| `increment(path, by)` | The field becomes its numeric value plus `by`. An absent field or JSON `null` counts as `0`. `by` is a signed 64-bit integer; the result is exact (no overflow at 64 bits, no binary floating point). An engine that cannot represent the stored value or the result exactly fails (`out-of-range`, §2) instead of rounding. |
 
 ### Order
 
@@ -41,6 +41,12 @@ accumulate. (Both engines conform; see §3 for why this is pinned.)
   (`not-numeric`; `NonNumericIncrementException` in the .NET kernels) and the whole
   patch is rolled back. It MUST NOT overwrite or coerce the value — a numeric string
   such as `"5"` is not a number.
+- `increment` whose stored number or result an engine **cannot represent exactly** **fails**
+  (`out-of-range`; `PatchValueOutOfRangeException` in the SQLite kernel) and the whole patch is rolled
+  back. It MUST NOT round, truncate or wrap silently. The in-process engine computes in a 28-digit
+  `decimal`: a number beyond ±79228162514264337593543950335 (`1e30`), a result that crosses that limit, and a
+  stored number or sum that needs more than 28 significant digits are out of range. An engine whose
+  arithmetic has no such limit (PostgreSQL `numeric`) never reports it — see §5.
 - A patch whose **result** would nest deeper than 64 levels (changes.md §2.5) — a deep
   value set far down, each fine on its own — **fails** (`too-deep`;
   `DocumentTooDeepException` in the .NET kernels) and the whole patch is rolled back. A
@@ -77,10 +83,10 @@ Causes: PostgreSQL's `increment` read `data #>> path` from the stored column ins
 the expression built so far; SQLite's `JsonPatchApplier` created missing parents for
 every `set`/`increment` and treated any non-number as `0`.
 
-A vector case may still carry a `knownDivergence` object (`{ "<engine>": { "after": … } }`)
-to pin a result an engine produces *temporarily* instead of the target. The runners
-assert the pinned value, so a later fix turns the test red until the vector is updated.
-None is in use.
+A vector case may carry a `knownDivergence` object (`{ "<engine>": { "after": … } }`)
+to pin a result an engine produces instead of the target — temporarily, or, for the range
+cases of §5, by design. The runners assert the pinned value, so a later change turns the
+test red until the vector is updated. In use only for the `increment` range cases (engine `postgres`).
 
 ## 4. Decisions taken
 
@@ -97,7 +103,13 @@ None is in use.
 
 ## 5. Open points
 
-- Range of `increment` results: the in-process applier computes in `decimal`; a stored
-  number beyond `decimal` range is reported as non-numeric by SQLite, while
-  PostgreSQL's `numeric` has no such limit. Unobserved in practice; see
+- Range of `increment` results — **a documented divergence, kept on purpose.** The in-process
+  applier computes in `decimal` and rejects what it cannot represent exactly with `out-of-range` (§2;
+  before 2026-10-20 it reported a number such as `1e30` as `not-numeric`, threw a raw `OverflowException`
+  beyond ±7.9e28 and rounded beyond 28 digits). PostgreSQL's `numeric` has no such limit and simply
+  computes the exact result. The vectors `increment-near-the-top-of-the-decimal-range-stays-exact`
+  (both engines) and the five `increment-…-fails` range cases (target `out-of-range`,
+  PostgreSQL pinned in `knownDivergence`) pin both sides, so a change on either engine turns a test red.
+  An implementation with arbitrary-precision arithmetic may follow PostgreSQL; one with `decimal` or
+  `double` MUST follow the in-process rule and never round silently. See also
   [changes.md](changes.md#7-open-points-not-normative-yet).

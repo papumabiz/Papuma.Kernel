@@ -33,7 +33,7 @@ public sealed class PatchBuilder<T> where T : class
     {
         ArgumentNullException.ThrowIfNull(property);
 
-        var path = DiffPath.Split(JsonPathResolver.Resolve(property));
+        var path = DiffPath.Split(JsonPathResolver.Resolve(property, nameof(property)));
         var node = DocumentJson.Serialize(value, documentType: null, documentId: null, $"cannot be set as '{DiffPath.Join(path)}'");
         Operations.Add(new PatchOperation(PatchOperationKind.Set, path, node, IncrementBy: 0));
         return this;
@@ -46,7 +46,7 @@ public sealed class PatchBuilder<T> where T : class
     {
         ArgumentNullException.ThrowIfNull(property);
 
-        var path = DiffPath.Split(JsonPathResolver.Resolve(property));
+        var path = DiffPath.Split(JsonPathResolver.Resolve(property, nameof(property)));
         Operations.Add(new PatchOperation(PatchOperationKind.Remove, path, Value: null, IncrementBy: 0));
         return this;
     }
@@ -62,7 +62,7 @@ public sealed class PatchBuilder<T> where T : class
     {
         ArgumentNullException.ThrowIfNull(property);
 
-        var path = DiffPath.Split(JsonPathResolver.Resolve(property));
+        var path = DiffPath.Split(JsonPathResolver.Resolve(property, nameof(property)));
         Operations.Add(new PatchOperation(PatchOperationKind.Increment, path, Value: null, IncrementBy: by));
         return this;
     }

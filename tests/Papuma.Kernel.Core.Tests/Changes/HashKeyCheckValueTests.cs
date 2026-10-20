@@ -61,4 +61,12 @@ public sealed class HashKeyCheckValueTests
     {
         Assert.Throws<HashKeyMismatchException>(() => HashKeyCheckValue.Verify("k1", VectorCheckValue, "abc"));
     }
+
+    [Fact]
+    public void Verify_GuardsItsArguments()
+    {
+        Assert.Equal("keyId", Assert.Throws<ArgumentNullException>(() => HashKeyCheckValue.Verify(null!, VectorCheckValue, VectorCheckValue)).ParamName);
+        Assert.Equal("computed", Assert.Throws<ArgumentNullException>(() => HashKeyCheckValue.Verify("k1", null!, VectorCheckValue)).ParamName);
+        Assert.Equal("stored", Assert.Throws<ArgumentNullException>(() => HashKeyCheckValue.Verify("k1", VectorCheckValue, null!)).ParamName);
+    }
 }

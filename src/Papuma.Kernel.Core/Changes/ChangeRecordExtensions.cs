@@ -25,6 +25,6 @@ public static class ChangeRecordExtensions
     {
         ArgumentNullException.ThrowIfNull(change);
         ArgumentNullException.ThrowIfNull(property);
-        return change.FieldChanged(JsonPathResolver.Resolve(property));
+        return change.FieldChanged(JsonPathResolver.Resolve(property, nameof(property)));
     }
 }

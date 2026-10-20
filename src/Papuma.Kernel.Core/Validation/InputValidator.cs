@@ -10,8 +10,9 @@ namespace Papuma.Kernel.Validation;
 /// </summary>
 public static class InputValidator
 {
+    // \z, not $: a trailing newline must not pass.
     private static readonly Regex ValidDocumentTypePattern = new(
-        "^[A-Za-z][A-Za-z0-9_]{1,100}$",
+        @"^[A-Za-z][A-Za-z0-9_]{1,100}\z",
         RegexOptions.Compiled,
         TimeSpan.FromMilliseconds(100));
 
@@ -68,18 +69,30 @@ public static class InputValidator
     /// </summary>
     /// <param name="documentType">The document type name to validate.</param>
     /// <exception cref="ArgumentException">Thrown when the document type name is invalid.</exception>
-    public static void ValidateDocumentType(string documentType)
+    public static void ValidateDocumentType(string documentType) =>
+        ValidateTypeName(documentType, nameof(documentType));
+
+    /// <summary>
+    /// Validates a logical type name (document or event) and blames <paramref name="parameterName"/> — the
+    /// parameter the caller actually passed it in (review Q-4).
+    /// </summary>
+    /// <param name="name">The type name to validate.</param>
+    /// <param name="parameterName">The name of the caller's parameter that held <paramref name="name"/>.</param>
+    /// <exception cref="ArgumentException">The name does not match the pattern.</exception>
+    internal static void ValidateTypeName(string name, string parameterName)
     {
-        if (documentType is null || !ValidDocumentTypePattern.IsMatch(documentType))
+        if (name is null || !ValidDocumentTypePattern.IsMatch(name))
         {
             throw new ArgumentException(
-                $"Invalid documentType '{documentType}'. Must match [A-Za-z][A-Za-z0-9_]{{1,100}}.",
-                nameof(documentType));
+                $"Invalid {parameterName} '{name}'. Must match [A-Za-z][A-Za-z0-9_]{{1,100}}.",
+                parameterName);
         }
     }
 
     /// <summary>
-    /// Validates a document identifier.
+    /// Validates a document identifier: not empty or blank, at most 200 characters, and free of control
+    /// characters (NUL, line breaks, tabs, DEL, the C1 range). Any other text is legal, including <c>/</c>:
+    /// the kernel itself never parses a <c>{Type}/{id}/{path}</c> reference back into its parts.
     /// </summary>
     /// <param name="documentId">The document identifier to validate.</param>
     /// <exception cref="ArgumentException">Thrown when the document identifier is invalid.</exception>
@@ -90,6 +103,17 @@ public static class InputValidator
             throw new ArgumentException(
                 "documentId must not be empty and max 200 characters.",
                 nameof(documentId));
+        }
+
+        // PostgreSQL rejects NUL in text only at the wire; others would reach logs, references and URLs raw (review C-10).
+        foreach (var ch in documentId)
+        {
+            if (char.IsControl(ch))
+            {
+                throw new ArgumentException(
+                    $"documentId must not contain control characters (found U+{(int)ch:X4}).",
+                    nameof(documentId));
+            }
         }
     }
 }

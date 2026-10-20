@@ -31,7 +31,12 @@ internal static partial class FeedDiagnostics
         message = message.ReplaceLineEndings(" ").Trim();
         if (message.Length > MaxStoredErrorLength)
         {
-            message = message[..MaxStoredErrorLength] + "…";
+            // Never cut a surrogate pair in half: a lone surrogate is not valid text for the database (review C-12).
+            var length = char.IsLowSurrogate(message[MaxStoredErrorLength])
+                && char.IsHighSurrogate(message[MaxStoredErrorLength - 1])
+                    ? MaxStoredErrorLength - 1
+                    : MaxStoredErrorLength;
+            message = message[..length] + "…";
         }
 
         return $"{ex.GetType().Name}: {message}";

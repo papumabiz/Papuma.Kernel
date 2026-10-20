@@ -190,7 +190,7 @@ public sealed class KernelModelBuilder
         /// <param name="name">The logical name.</param>
         public EventTypeBuilder<T> Named(string name)
         {
-            InputValidator.ValidateDocumentType(name);
+            InputValidator.ValidateTypeName(name, nameof(name));
             _name = name;
             return this;
         }
@@ -201,7 +201,7 @@ public sealed class KernelModelBuilder
         public EventPropertyPolicyBuilder Property(Expression<Func<T, object?>> property)
         {
             ArgumentNullException.ThrowIfNull(property);
-            return new EventPropertyPolicyBuilder(this, JsonPathResolver.Resolve(property));
+            return new EventPropertyPolicyBuilder(this, JsonPathResolver.Resolve(property, nameof(property)));
         }
 
         /// <summary>
@@ -324,7 +324,7 @@ public sealed class KernelModelBuilder
         /// <param name="name">The logical name.</param>
         public DocumentTypeBuilder<T> Named(string name)
         {
-            InputValidator.ValidateDocumentType(name);
+            InputValidator.ValidateTypeName(name, nameof(name));
             _name = name;
             return this;
         }
@@ -379,7 +379,7 @@ public sealed class KernelModelBuilder
         public PropertyPolicyBuilder Property(Expression<Func<T, object?>> property)
         {
             ArgumentNullException.ThrowIfNull(property);
-            return new PropertyPolicyBuilder(this, JsonPathResolver.Resolve(property));
+            return new PropertyPolicyBuilder(this, JsonPathResolver.Resolve(property, nameof(property)));
         }
 
         /// <summary>
@@ -391,7 +391,7 @@ public sealed class KernelModelBuilder
         public DocumentTypeBuilder<T> UniqueKey(Expression<Func<T, object?>> property)
         {
             ArgumentNullException.ThrowIfNull(property);
-            _keyOverrides[JsonPathResolver.ResolveKey(property)] = true;
+            _keyOverrides[JsonPathResolver.ResolveKey(property, nameof(property))] = true;
             return this;
         }
 
@@ -403,7 +403,7 @@ public sealed class KernelModelBuilder
         public DocumentTypeBuilder<T> LookupKey(Expression<Func<T, object?>> property)
         {
             ArgumentNullException.ThrowIfNull(property);
-            _keyOverrides[JsonPathResolver.ResolveKey(property)] = false;
+            _keyOverrides[JsonPathResolver.ResolveKey(property, nameof(property))] = false;
             return this;
         }
 

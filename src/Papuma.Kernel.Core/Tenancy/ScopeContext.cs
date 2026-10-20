@@ -13,8 +13,9 @@ public sealed record ScopeContext
     // A whitelist, not an SQL-safety requirement: tenant ids only ever reach SQL as
     // parameters. It admits GUID strings ("D"/"N") and keeps ids free of whitespace
     // and punctuation that would make them awkward in logs, URLs and connection strings.
+    // \z, not $: a trailing newline must not pass (it would be a second, phantom tenant).
     private static readonly Regex ValidTenantPattern = new(
-        "^[A-Za-z0-9][A-Za-z0-9_-]{1,100}$",
+        @"^[A-Za-z0-9][A-Za-z0-9_-]{1,100}\z",
         RegexOptions.Compiled,
         TimeSpan.FromMilliseconds(100));
 
@@ -44,8 +45,8 @@ public sealed record ScopeContext
     /// </summary>
     /// <param name="tenantId">
     /// The tenant identifier: a letter or digit followed by 1–100 letters, digits,
-    /// underscores or dashes (<c>^[A-Za-z0-9][A-Za-z0-9_-]{1,100}$</c>). GUID strings
-    /// match; ids are compared case-sensitively, so prefer <see cref="Tenant(Guid)"/>
+    /// underscores or dashes (<c>^[A-Za-z0-9][A-Za-z0-9_-]{1,100}$</c>, matched against the whole string:
+    /// a trailing newline is rejected). GUID strings match; ids are compared case-sensitively, so prefer <see cref="Tenant(Guid)"/>
     /// for GUIDs to get one canonical form.
     /// </param>
     /// <exception cref="ArgumentException">

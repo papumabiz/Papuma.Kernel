@@ -1237,7 +1237,7 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(key);
         var metadata = _model.GetRequired<T>();
-        var path = JsonPathResolver.ResolveKey(key);
+        var path = JsonPathResolver.ResolveKey(key, nameof(key));
 
         var declared = metadata.Keys.FirstOrDefault(k => k.Path == path)
             ?? throw new ArgumentException(

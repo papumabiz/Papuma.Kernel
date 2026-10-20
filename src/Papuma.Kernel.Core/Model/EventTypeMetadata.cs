@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
+using Papuma.Kernel.Changes;
+
 namespace Papuma.Kernel.Model;
 
 /// <summary>
@@ -32,6 +34,13 @@ public sealed class EventTypeMetadata
     /// </summary>
     public TimeSpan? Retention { get; }
 
+    /// <summary>
+    /// The policies as path segments, deepest path first, equal depths in ordinal path order. A policy on a path and
+    /// one on a descendant (<c>address</c> hashed, <c>address.street</c> redacted) give one result in every
+    /// declaration order: the descendant acts first, so the hash covers what remains (review C-3).
+    /// </summary>
+    internal IReadOnlyList<(string[] Segments, FieldPolicy Policy)> PoliciesDeepestFirst { get; }
+
     internal EventTypeMetadata(
         string name,
         Type clrType,
@@ -42,5 +51,13 @@ public sealed class EventTypeMetadata
         ClrType = clrType;
         Policies = policies;
         Retention = retention;
+        PoliciesDeepestFirst =
+        [
+            .. policies
+                .Select(p => (Path: p.Key, Segments: DiffPath.Split(p.Key), p.Value))
+                .OrderByDescending(p => p.Segments.Length)
+                .ThenBy(p => p.Path, StringComparer.Ordinal)
+                .Select(p => (p.Segments, p.Value)),
+        ];
     }
 }

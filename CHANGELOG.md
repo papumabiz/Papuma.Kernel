@@ -28,6 +28,18 @@ Security:
   `MapPapumaDashboard(path)` now validates `path` (absolute, letters/digits/`_`/`-` segments) and throws
   `ArgumentException` for `/` and other values — `/` used to map the application root.
 
+- **A trailing newline no longer passes the tenant-id and type-name whitelists (review C-2).** The patterns ended
+  in `$`, which .NET also matches before a final `\n`: `ScopeContext.Tenant("acme\n")` was a second, phantom
+  tenant with its own hash keys (a claim or header with a trailing newline), and `"Order\n"` was a valid type
+  or event name. Both patterns end in `\z` now and throw `ArgumentException`. **A tenant id or type name that
+  carried a trailing newline is refused from now on** — it never matched the documented pattern.
+- **Event payload policies are applied deepest path first (review C-3).** With `address` hashed and
+  `address.street` redacted on the same event type, the stored hash depended on the order the two policies
+  entered the dictionary (attribute vs. fluent, `Track()` resets): the street was in the hash or not. The
+  descendant is applied first now, so the hash covers what remains — the same result in every declaration
+  order. **An event type with such a nested pair stores a different hash than before** (hashes of the same
+  value in older events do not compare equal to new ones). No order ever stored clear text.
+
 Fixed:
 
 - **Event retention deletes in batches (review P-8, L-11).** `EventRetention.PurgeExpiredAsync` (PostgreSQL) removed
@@ -123,6 +135,43 @@ Fixed:
   the hosted service throws, so `BackgroundServiceExceptionBehavior` applies instead of a silently finished
   service.
 
+- **`Increment` outside the `decimal` range fails typed instead of lying or overflowing (review C-4).** The
+  in-process engine (SQLite, and PostgreSQL's re-check of the targets) computed in `decimal`: a stored number such
+  as `1e30` was reported as `NonNumericIncrementException` although it is a number, a sum beyond ±7.9e28 threw a
+  raw `OverflowException` — on **PostgreSQL too**, where the `UPDATE` had succeeded and the exception came
+  from the re-check afterwards — and a sum or stored number with more than 28 significant digits was silently
+  rounded. SQLite now throws the new `PatchValueOutOfRangeException` (`DocumentType`, `DocumentId`, `FieldPath`)
+  for all of these and rolls the patch back; PostgreSQL computes in `numeric` and simply succeeds, no exception.
+  That divergence between the engines at the extremes stays documented (docs/spec/patch.md §5); the cases are
+  pinned in `docs/spec/vectors/patch.json` with `knownDivergence` for PostgreSQL. **A SQLite patch that
+  incremented such a number now throws `PatchValueOutOfRangeException` (it used to throw
+  `NonNumericIncrementException` or `OverflowException`, or round).**
+- **`CanonicalJson` no longer turns hand-built `JsonValue`s into `null` or fails on them (review C-6).**
+  `JsonValue.Create(guid)` threw `InvalidOperationException`, `JsonValue.Create(poco)` was canonicalized — and
+  hashed by the `Hash` policy — as `null`, silently. Such nodes are canonicalized by what they serialize to now; a
+  value with no JSON form throws `CanonicalJsonException` (code `invalid-value`). Nodes produced by parsing or by
+  the kernel are unaffected.
+- **`DocumentDiff.FromJson` rejects malformed wire data with `ArgumentException` (review C-7).** A `ref` that
+  was not a string, a `hash` that was a number or object, or an empty `ref` surfaced as
+  `InvalidOperationException` or `ArgumentNullException` from deep inside; all are `ArgumentException(…, "json")`
+  now. The wire format is unchanged, in particular a hashed entry without a hash is still written
+  `{"changed": true}`.
+- **GDPR erasure paths are validated before anything is rewritten (review C-15).** `RedactHistoryAsync` and
+  `RedactEventsAsync` split their paths while looping over the rows: a malformed path (`a\x`, a trailing `\`)
+  was skipped silently when no entry could be compared with it — the call reported 0 rewritten rows — or threw
+  only after earlier rows had been prepared. Every path is checked first and a malformed one throws
+  `ArgumentException` (parameter `paths`) before any row is touched. (Nothing was ever persisted half-way: the
+  exception came before the `UPDATE`s.)
+- **Failure-table error text never ends in half a surrogate pair (review C-12).** `last_error` was cut at 200 UTF-16
+  units; an emoji at the boundary left a lone surrogate, which is not valid text for the database. The cut moves
+  one unit back instead.
+- **Argument exceptions name the parameter the caller passed (review C-11, Q-4).**
+  `ChangeFeedProcessorOptions` reported a too-small `MaxRetryDelay` as a `BaseRetryDelay` error;
+  `.Named("…")` on a document or event type blamed `documentType`; a property expression that is not a property
+  chain (`Property`, `UniqueKey`, `LookupKey`, `PatchBuilder.Set/Remove/Increment`, `FieldChanged`) blamed
+  `propertyExpression`, and the key lookups (`LoadByKeyAsync` & co.) blamed `keyExpression`. They report `MaxRetryDelay`, `name`, `property`
+  and `key`. Only `ArgumentException.ParamName` changes; the exception types do not.
+
 Breaking:
 
 - **MCP tools: record lists come back as `{ "records": [...], "truncated": false }` and are capped (review M-3).**
@@ -172,6 +221,13 @@ Breaking:
   consumer that compared hashes across records must now compare only hashes of the same form. To rotate,
   configure a new `HashKeyId` with the new key; a wrong key under an existing id fails at startup with
   `HashKeyMismatchException`.
+
+- **Document ids may not contain control characters (review C-10).** `InputValidator.ValidateDocumentId` — used by
+  every load, save, delete, patch, history, masked-read and GDPR entry point of **both** the PostgreSQL and the SQLite
+  kernel — accepted NUL, line breaks, tabs and the like; PostgreSQL refused NUL only on the wire, SQLite stored
+  them, and such an id would reach logs and `{Type}/{id}/{path}` references raw. Ids containing a control character
+  (`char.IsControl`: U+0000–U+001F, U+007F–U+009F) now throw `ArgumentException` up front. Any other text stays legal,
+  `/` and non-ASCII included. **A document that was saved under such an id can no longer be addressed by it.**
 
 Changed:
 
