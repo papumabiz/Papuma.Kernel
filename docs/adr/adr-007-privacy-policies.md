@@ -42,6 +42,29 @@ opt-in resolution instead of invisible magic.
        .Property(x => x.LastLoginIp).DoNotTrack();
    ```
 
+   **Attributes must not be silently ignored** (amendment, review 2026-10-20). The model is
+   checked when it is built, and a declaration that cannot take effect is an error:
+
+   - *Structs.* A policy attribute on a member of a user-defined struct (also `Nullable<struct>`)
+     applies like one on a class member — the serializer writes both as JSON objects, so the
+     member has a path. Framework structs (`DateTimeOffset`, `Guid`, …) and structs with their
+     own JSON converter are leaves. The fluent path `x => x.Maybe!.Value.Street` skips the
+     `Value` of a `Nullable<T>`.
+   - *Collections.* A collection (`List<T>`, `T[]`, `Dictionary<,>`, …) is one atomic value in the
+     diff (ADR-004): there is no path for "the street of element 2". A policy attribute on a
+     member of its element type therefore **cannot** act per element, and `Build()` refuses the
+     model. The decision belongs on the collection property: an attribute or fluent policy on it
+     (the whole value is then redacted, hashed, …), or an explicit `.Property(x => x.Homes).Track()`
+     that says the elements are stored as they are. A policy on an ancestor decides it too. Per-element
+     policies would need element paths in the wire format — a decision for its own ADR.
+   - *One attribute per property.* `[SensitiveData]` together with `[TrackHash]` (or any two of the
+     four) is an error. It used to be resolved by an undocumented precedence — and the winner was not
+     the strongest protection: a hash still allows equality correlation. Fluent configuration still
+     overrides an attribute.
+   - *Never-serialized members.* A fluent policy or key on a `[JsonIgnore]` property (without a
+     condition) is refused; so is a `[UniqueKey]`/`[LookupKey]` attribute on an event property
+     (events have no keys, ADR-013).
+
 3. **Policies act when the diff is produced**, in the same transaction as the save
    (ADR-003). There is no downstream scrubbing process for new changes.
 4. **References never resolve automatically.** Change handlers that need the value

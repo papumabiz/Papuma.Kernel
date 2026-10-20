@@ -79,6 +79,24 @@ internal static class JsonPathResolver
                     parameterName);
             }
 
+            if (IsNullableValue(property))
+            {
+                // x => x.Address.Value.Street on a Nullable<struct>: "Value" is the unwrapping the C# compiler
+                // asks for, not a JSON property — the serializer writes the struct's own members at this level
+                // (review N-9). Taking it as a segment gave "address.value.street": a policy that matches nothing.
+                current = Unwrap(member.Expression!);
+                continue;
+            }
+
+            if (IsIgnored(property))
+            {
+                throw new ArgumentException(
+                    $"{property.DeclaringType?.Name}.{property.Name} is never serialized ([JsonIgnore]), so it has no " +
+                    "JSON path: a policy or key declared on it would silently do nothing. Remove the declaration, or " +
+                    "remove [JsonIgnore] if the property belongs in the document (review C-19).",
+                    parameterName);
+            }
+
             segments.Push(JsonNameOf(property));
             current = Unwrap(member.Expression!);
         }
@@ -121,6 +139,11 @@ internal static class JsonPathResolver
             ?? KernelJson.Options.PropertyNamingPolicy?.ConvertName(property.Name)
             ?? property.Name;
     }
+
+    private static bool IsNullableValue(PropertyInfo property) =>
+        property.Name == "Value"
+        && property.DeclaringType is { IsGenericType: true } declaring
+        && declaring.GetGenericTypeDefinition() == typeof(Nullable<>);
 
     // Strips the boxing a lambda to object introduces: C# emits Convert, F# emits a call to
     // Operators.Box (`fun x -> box x.Email`). Matched by name so Core needs no FSharp.Core.

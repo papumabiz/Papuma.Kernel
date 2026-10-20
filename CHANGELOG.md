@@ -4,6 +4,21 @@
 
 Security:
 
+- **Policy attributes on structs and on elements of collections are no longer silently ignored (review C-1).**
+  `[SensitiveData]`, `[TrackHash]`, `[TrackReference]` and `[DoNotTrack]` were only honoured on members of
+  *classes*. On a member of a **struct** (`record struct Address([property: SensitiveData] string Street, …)`,
+  also as `Address?`) and on a member of a collection's **element type** (`List<Address>`) the model built without
+  a word and the value went into the change feed, the event payloads and masked reads in clear text — checked
+  with a real session: `"street":"SECRET-1"` in the stored diff.
+  *Structs* are now scanned like classes: the policy takes effect, **a projection that relied on the
+  unprotected value in the feed no longer sees it**. *Collections* cannot carry per-element policies (a collection
+  is one atomic diff value, ADR-004), so `Build()` now throws `InvalidOperationException` naming the property path
+  and the annotated member — **an application whose model had such an attribute stops at startup until it decides:**
+  put the policy on the collection property itself (`[SensitiveData] List<Address> Homes`, or
+  `.Property(x => x.Homes).Redact()`), or state `.Property(x => x.Homes).Track()` if the elements are meant to
+  be stored as they are. Data written before the fix stays in the feed as it was: review it with
+  `DataInventory.Build(model)` and clean up with `RedactHistoryAsync` (docs/gdpr.md). The data inventory uses the
+  same type view as the scan now, so it lists the struct members it protects. Details: ADR-007 (amendment).
 - **Dashboard: stored XSS fixed (review A-1).** The embedded dashboard rendered handler names, exception
   messages and metric series names into `innerHTML` unescaped, so text a tenant could get into an exception
   message ran as script in the operator's browser — also behind `RequireAuthorization()`. Every dynamic value
@@ -82,6 +97,13 @@ Fixed:
 
 Breaking:
 
+- **Model checks for declarations that did nothing (review C-16, C-19, C-20, N-9).** `Build()` and the fluent API
+  now refuse what used to be dropped silently: more than one policy attribute on a property (the undocumented
+  precedence let `[TrackHash]` win over `[SensitiveData]` — a hash allows equality correlation, so it was not
+  the stronger protection); a fluent policy or key on a `[JsonIgnore]` property (`ArgumentException`, it has no JSON
+  path); a `[UniqueKey]`/`[LookupKey]` attribute on an event property (events have no keys). A fluent path through a
+  `Nullable<struct>` (`x => x.Maybe!.Value.Street`) no longer yields the phantom path `maybe.value.street` that
+  matched nothing. Fluent configuration still overrides attributes.
 - **Feed handler names are validated (review P-6, Q-3).** A handler's `Name` is its identity in the shared
   `checkpoint` and `failure` tables, where the event feed stores its handlers as `event:<name>` — and nothing
   checked it: a change handler called `event:orders` shared one cursor and one failure list with the event

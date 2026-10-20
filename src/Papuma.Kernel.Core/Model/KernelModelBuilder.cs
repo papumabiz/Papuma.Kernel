@@ -196,8 +196,18 @@ public sealed class KernelModelBuilder
             InputValidator.ValidateDocumentType(name);
 
             var policies = new Dictionary<string, FieldPolicy>(StringComparer.Ordinal);
-            var ignoredKeys = new Dictionary<string, bool>(StringComparer.Ordinal);
-            ScanType(clrType, prefix: null, policies, ignoredKeys, visited: []);
+            var attributeKeys = new Dictionary<string, bool>(StringComparer.Ordinal);
+            var collections = new List<(string Path, Type Element)>();
+            ScanType(clrType, prefix: null, policies, attributeKeys, collections, visited: []);
+
+            // Events have no keys (ADR-013): a [UniqueKey]/[LookupKey] used to be dropped without a word.
+            if (attributeKeys.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Event type {name}: property '{attributeKeys.Keys.First()}' declares a key ([UniqueKey]/[LookupKey]), " +
+                    "but events have no keys — they are immutable facts, looked up by their payload through " +
+                    "RedactEventsAsync or a projection (ADR-013). Remove the attribute (review C-20).");
+            }
 
             foreach (var (path, policy) in _policyOverrides)
             {
@@ -210,6 +220,8 @@ public sealed class KernelModelBuilder
                     policies[path] = policy;
                 }
             }
+
+            EnsureNoSilentElementPolicies("Event", name, collections, policies, _policyOverrides);
 
             // Reference has no source location for events — the event IS the record (ADR-013).
             var reference = policies.FirstOrDefault(p => p.Value == FieldPolicy.Reference);
@@ -400,7 +412,8 @@ public sealed class KernelModelBuilder
             // 1. Attribute defaults, scanned recursively into nested POCO types.
             var policies = new Dictionary<string, FieldPolicy>(StringComparer.Ordinal);
             var keys = new Dictionary<string, bool>(StringComparer.Ordinal);
-            ScanType(clrType, prefix: null, policies, keys, visited: []);
+            var collections = new List<(string Path, Type Element)>();
+            ScanType(clrType, prefix: null, policies, keys, collections, visited: []);
 
             // 2. Fluent overrides win.
             foreach (var (path, policy) in _policyOverrides)
@@ -414,6 +427,8 @@ public sealed class KernelModelBuilder
                     policies[path] = policy;
                 }
             }
+
+            EnsureNoSilentElementPolicies("Document", name, collections, policies, _policyOverrides);
 
             foreach (var (path, unique) in _keyOverrides)
             {
@@ -512,11 +527,17 @@ public sealed class KernelModelBuilder
         }
     }
 
+    /// <summary>
+    /// Scans a type for attribute defaults, descending into nested objects (classes and structs) and recording
+    /// every collection property whose element type carries policy attributes — those cannot take effect
+    /// (a collection is one atomic diff value, ADR-004) and are reported by <see cref="EnsureNoSilentElementPolicies"/>.
+    /// </summary>
     private static void ScanType(
         Type type,
         string? prefix,
         Dictionary<string, FieldPolicy> policies,
         Dictionary<string, bool> keys,
+        List<(string Path, Type Element)> collections,
         HashSet<Type> visited)
     {
         if (!visited.Add(type))
@@ -534,10 +555,10 @@ public sealed class KernelModelBuilder
             var jsonName = JsonPathResolver.JsonNameOf(property);
             var path = DiffPath.Append(prefix, jsonName);
 
-            var policy = PolicyFromAttributes(property);
+            var policy = PolicyAttributeReader.Of(property); // throws for more than one attribute (review C-16)
             if (policy is not null)
             {
-                policies[path] = policy.Value;
+                policies[path] = policy.Value.Policy;
             }
 
             if (property.GetCustomAttribute<UniqueKeyAttribute>() is not null)
@@ -549,50 +570,74 @@ public sealed class KernelModelBuilder
                 keys[path] = false;
             }
 
-            if (IsNestedPocoType(property.PropertyType))
+            if (ModelTypeShape.NestedTypeOf(property.PropertyType) is { } nested)
             {
-                ScanType(property.PropertyType, path, policies, keys, visited);
+                // Classes and structs alike: the serializer writes both as JSON objects, so a policy attribute
+                // on a struct member has a path (review C-1).
+                ScanType(nested, path, policies, keys, collections, visited);
+            }
+            else if (ModelTypeShape.ElementTypeOf(property.PropertyType) is { } element)
+            {
+                collections.Add((path, element));
             }
         }
 
         visited.Remove(type);
     }
 
-    private static FieldPolicy? PolicyFromAttributes(PropertyInfo property)
+    /// <summary>
+    /// Fails when a collection's element type carries policy attributes that cannot take effect. A collection is
+    /// tracked as one atomic value (ADR-004): its diff entry has no path for "the street of element 2", so
+    /// <c>[SensitiveData]</c> on <c>Address.Street</c> did nothing for a <c>List&lt;Address&gt;</c> — silently, with the
+    /// street in clear text in the feed (review C-1). The way out is one decision on the collection property: a policy
+    /// on it (attribute or fluent), or an explicit <c>Track()</c> that says the elements are stored as they are.
+    /// </summary>
+    private static void EnsureNoSilentElementPolicies(
+        string kind,
+        string typeName,
+        IReadOnlyList<(string Path, Type Element)> collections,
+        IReadOnlyDictionary<string, FieldPolicy> policies,
+        IReadOnlyDictionary<string, FieldPolicy> fluentOverrides)
     {
-        if (property.GetCustomAttribute<DoNotTrackAttribute>() is not null)
+        foreach (var (path, element) in collections)
         {
-            return FieldPolicy.DoNotTrack;
-        }
+            var beneath = ModelTypeShape.PolicyAttributesBeneath(element);
+            if (beneath.Count == 0 || IsDecided(path, policies, fluentOverrides))
+            {
+                continue;
+            }
 
-        if (property.GetCustomAttribute<TrackHashAttribute>() is not null)
-        {
-            return FieldPolicy.Hash;
+            throw new InvalidOperationException(
+                $"{kind} type {typeName}: property '{path}' is a collection of {element.Name}, whose members carry " +
+                $"privacy policy attributes ({string.Join(", ", beneath)}). A collection is tracked as one atomic value " +
+                "(ADR-004), so these attributes cannot take effect per element and the values would reach the change " +
+                "feed in clear text. Declare the policy on the collection property itself — an attribute on it or " +
+                $".Property(x => x.…).Redact() — or state that the elements are stored as they are with " +
+                ".Property(x => x.…).Track().");
         }
-
-        if (property.GetCustomAttribute<TrackReferenceAttribute>() is not null)
-        {
-            return FieldPolicy.Reference;
-        }
-
-        if (property.GetCustomAttribute<SensitiveDataAttribute>() is not null)
-        {
-            return FieldPolicy.Redact;
-        }
-
-        return null;
     }
 
-    private static bool IsNestedPocoType(Type type)
+    // A path is decided when it, or an ancestor, has a policy (attribute or fluent) or an explicit fluent Track().
+    private static bool IsDecided(
+        string path,
+        IReadOnlyDictionary<string, FieldPolicy> policies,
+        IReadOnlyDictionary<string, FieldPolicy> fluentOverrides)
     {
-        if (!type.IsClass || type == typeof(string))
+        var current = path;
+        while (true)
         {
-            return false;
-        }
+            if (policies.ContainsKey(current) || fluentOverrides.ContainsKey(current))
+            {
+                return true;
+            }
 
-        // Collections and dictionaries are atomic diff values (ADR-004) — policies on
-        // their element types cannot be applied per element and are not scanned.
-        return !typeof(IEnumerable).IsAssignableFrom(type);
+            if (!DiffPath.TryGetParent(current, out var parent))
+            {
+                return false;
+            }
+
+            current = parent;
+        }
     }
 
     /// <summary>

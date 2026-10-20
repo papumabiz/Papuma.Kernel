@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
-using System.Collections;
 using System.Reflection;
 
 using Papuma.Kernel.Changes;
@@ -84,9 +83,11 @@ public static class DataInventory
             var jsonName = JsonPathResolver.JsonNameOf(property);
             var path = DiffPath.Append(prefix, jsonName);
 
-            if (IsNestedPocoType(property.PropertyType))
+            // The same view as the metamodel scan (ModelTypeShape): classes and structs are traversed, so the
+            // inventory shows the paths a policy on a struct member protects (review C-1, S-20).
+            if (ModelTypeShape.NestedTypeOf(property.PropertyType) is { } nested)
             {
-                Walk(property.PropertyType, path, policies, fields, visited);
+                Walk(nested, path, policies, fields, visited);
             }
             else
             {
@@ -121,14 +122,4 @@ public static class DataInventory
         }
     }
 
-    private static bool IsNestedPocoType(Type type)
-    {
-        if (!type.IsClass || type == typeof(string))
-        {
-            return false;
-        }
-
-        // Collections are atomic diff values (ADR-004) — they appear as one leaf path.
-        return !typeof(IEnumerable).IsAssignableFrom(type);
-    }
 }

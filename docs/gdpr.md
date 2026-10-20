@@ -40,7 +40,18 @@ File.WriteAllText("art30-inventory.json", report.ToJson().ToJsonString());
 
 The report lists, per document type, all leaf paths with their effective policy
 (attribute defaults, fluent overrides and inheritance resolved), keys and schema
-version; per event type, the payload paths and the retention.
+version; per event type, the payload paths and the retention. Members of nested objects
+(classes and structs) are listed as paths of their own; a collection is one path, because
+it is tracked as one value.
+
+**Policies must be able to act where they are declared.** The model refuses what would do
+nothing: a policy attribute on a member of a collection's element type (`List<Address>` with
+`[SensitiveData]` on `Address.Street`) fails at startup, because a collection is one atomic
+value and has no path for "the street of element 2". Declare the policy on the collection
+property (`[SensitiveData] List<Address> Homes`, or `.Property(x => x.Homes).Redact()`), or
+say `.Track()` if the elements are meant to be stored as they are. More than one policy
+attribute on one property is refused as well. If a model once had such a declaration, its
+values went into the feed unprotected before: `RedactHistoryAsync` cleans the history up.
 
 ## Export (Art. 15 access / Art. 20 portability)
 
