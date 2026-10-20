@@ -19,8 +19,7 @@ namespace Papuma.Kernel.Changes;
 /// other side becomes one added or removed entry carrying its whole value.</item>
 /// <item>Both documents must be JSON objects (<see cref="ArgumentException"/>), parse with at most
 /// <see cref="JsonLimits.MaxDepth"/> levels and without duplicate property names (<see cref="JsonException"/>).</item>
-/// <item>An empty property name anywhere in either document is rejected (<see cref="NotSupportedException"/>),
-/// whether or not its subtree changed — the outcome never depends on which parts happen to be equal.</item>
+/// <item>An empty property name is an ordinary key with an empty path segment (spec changes.md §2.1).</item>
 /// <item>The result owns copies of the changed values and never refers to the input buffers, which may be
 /// reused or released as soon as the call returns.</item>
 /// </list>
@@ -108,30 +107,12 @@ internal static class Utf8JsonDiffEngine
                     $"A document must be a JSON object, not {document.RootElement.ValueKind}.", paramName);
             }
 
-            RejectEmptyPropertyNames(document.RootElement);
             return document;
         }
         catch
         {
             document.Dispose();
             throw;
-        }
-    }
-
-    // One forward scan over the raw text: a property name whose raw (escaped) form is empty is the empty
-    // key — an escape sequence always spells at least one character.
-    private static void RejectEmptyPropertyNames(JsonElement root)
-    {
-        var reader = new Utf8JsonReader(
-            JsonMarshal.GetRawUtf8Value(root),
-            new JsonReaderOptions { MaxDepth = JsonLimits.MaxDepth });
-        while (reader.Read())
-        {
-            if (reader.TokenType == JsonTokenType.PropertyName && reader.ValueSpan.IsEmpty)
-            {
-                throw new NotSupportedException(
-                    "An object key is empty and cannot be represented as a diff path. Empty keys are not supported in diffed documents.");
-            }
         }
     }
 

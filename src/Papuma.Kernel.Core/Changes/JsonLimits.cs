@@ -6,16 +6,17 @@ using System.Text.Json.Nodes;
 namespace Papuma.Kernel.Changes;
 
 /// <summary>
-/// The structural limit of the JSON the diff, canonical and policy engines walk recursively. The
-/// serializer already stops documents at 64 levels, so no document built from a POCO or parsed from text
-/// gets near this; the limit exists for a <see cref="JsonNode"/> graph built by other means, where a
-/// recursive walk would otherwise end in a stack overflow — which cannot be caught and takes the process
-/// with it. The check itself is iterative.
+/// The one structural limit of a document, everywhere: 64 levels of nested objects and arrays, the root
+/// object counting as the first. It is what <c>System.Text.Json</c> enforces by default when the sessions
+/// serialize a document and parse a stored one, so the engines (diff, canonical, policy projection, the UTF-8
+/// prototype) accept exactly what the stores can write and read. For a <see cref="JsonNode"/> graph built by
+/// other means the check keeps a recursive walk from ending in a stack overflow, which cannot be caught. The
+/// check itself is iterative.
 /// </summary>
 internal static class JsonLimits
 {
-    /// <summary>The deepest nesting of objects and arrays the engines accept, twice the serializer's default.</summary>
-    public const int MaxDepth = 128;
+    /// <summary>The deepest nesting of objects and arrays a document may have; the serializer's and parser's default.</summary>
+    public const int MaxDepth = 64;
 
     /// <summary>Returns whether <paramref name="root"/> nests objects or arrays deeper than <see cref="MaxDepth"/>.</summary>
     public static bool ExceedsMaxDepth(JsonNode? root)

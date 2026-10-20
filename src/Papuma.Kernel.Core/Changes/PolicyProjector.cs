@@ -46,11 +46,11 @@ internal static class PolicyProjector
             return clone;
         }
 
-        MaskObject(clone, prefix: string.Empty, metadata, new HashContext(hashKeys, scope, metadata.Name));
+        MaskObject(clone, prefix: null, metadata, new HashContext(hashKeys, scope, metadata.Name));
         return clone;
     }
 
-    private static void MaskObject(JsonObject obj, string prefix, DocumentTypeMetadata metadata, HashContext hash)
+    private static void MaskObject(JsonObject obj, string? prefix, DocumentTypeMetadata metadata, HashContext hash)
     {
         foreach (var key in obj.Select(p => p.Key).ToList())
         {

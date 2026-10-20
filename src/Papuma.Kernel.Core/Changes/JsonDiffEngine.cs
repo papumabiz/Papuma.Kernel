@@ -24,7 +24,7 @@ public static class JsonDiffEngine
     {
         EnsureDepth(before, after);
         var entries = new SortedDictionary<string, DiffEntry>(StringComparer.Ordinal);
-        DiffObject(before, after, prefix: string.Empty, entries);
+        DiffObject(before, after, prefix: null, entries);
         return new DocumentDiff(entries);
     }
 
@@ -55,7 +55,7 @@ public static class JsonDiffEngine
     private static void DiffObject(
         JsonObject? before,
         JsonObject? after,
-        string prefix,
+        string? prefix,
         SortedDictionary<string, DiffEntry> entries)
     {
         var keys = new SortedSet<string>(StringComparer.Ordinal);
@@ -77,15 +77,9 @@ public static class JsonDiffEngine
 
         foreach (var key in keys)
         {
-            if (key.Length == 0)
-            {
-                // A path has no way to name an empty key; fail loudly instead of emitting an ambiguous path.
-                throw new NotSupportedException(
-                    "An object key is empty and cannot be represented as a diff path. Empty keys are not supported in diffed documents.");
-            }
-
             // A '.' or '\' inside a key is escaped (DiffPath), so a dictionary key such as
-            // "feature.enabled" is one segment and the path stays unambiguous.
+            // "feature.enabled" is one segment and the path stays unambiguous; an empty key is an empty
+            // segment ("" at the top, "a." below a).
             var path = DiffPath.Append(prefix, key);
             var hasOld = before?.ContainsKey(key) ?? false;
             var hasNew = after?.ContainsKey(key) ?? false;

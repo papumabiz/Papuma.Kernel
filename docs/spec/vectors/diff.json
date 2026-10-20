@@ -308,7 +308,22 @@
       ]
     },
     {
-      "name": "empty-key-is-rejected",
+      "name": "empty-key-at-the-top",
+      "before": {
+        "": 1
+      },
+      "after": {
+        "": 2
+      },
+      "diff": {
+        "": {
+          "old": 1,
+          "new": 2
+        }
+      }
+    },
+    {
+      "name": "empty-key-below-a-key",
       "before": {
         "a": {}
       },
@@ -317,7 +332,40 @@
           "": 1
         }
       },
-      "error": "unsupported-key"
+      "diff": {
+        "a.": {
+          "new": 1
+        }
+      }
+    },
+    {
+      "name": "empty-key-below-the-empty-key",
+      "before": {
+        "": {
+          "": 1,
+          "x": 1
+        }
+      },
+      "after": {
+        "": {
+          "": 2,
+          "x": 2
+        }
+      },
+      "diff": {
+        ".": {
+          "old": 1,
+          "new": 2
+        },
+        ".x": {
+          "old": 1,
+          "new": 2
+        }
+      },
+      "orderedPaths": [
+        ".",
+        ".x"
+      ]
     }
   ]
 }

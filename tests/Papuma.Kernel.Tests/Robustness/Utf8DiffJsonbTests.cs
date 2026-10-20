@@ -126,7 +126,7 @@ public sealed class Utf8DiffJsonbTests(PostgresFixture fixture)
     [InlineData("""{"a":1,"a":2}""", """{"a": 2}""")] // the last duplicate wins
     [InlineData("""{"bb":1,"a":2,"ccc":{"z":1,"y":2}}""", """{"a": 2, "bb": 1, "ccc": {"y": 2, "z": 1}}""")] // shorter keys first
     [InlineData("""{"é":1,"z":2,"ab":3}""", """{"z": 2, "ab": 3, "é": 1}""")] // length in UTF-8 bytes, then bytes
-    [InlineData("""{"é":"é\/\n"}""", """{"é": "é/\n"}""")] // minimal escaping, literal non-ASCII
+    [InlineData("""{"\u00e9":"\u00e9\/\n"}""", """{"é": "é/\n"}""")] // minimal escaping, literal non-ASCII
     [InlineData("""{"x" : [1 ,2]}""", """{"x": [1, 2]}""")]
     public async Task Jsonb_NormalizesTheTextLikeThis(string input, string stored)
     {

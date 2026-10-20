@@ -205,13 +205,33 @@ public sealed class JsonDiffEngineTests
         Assert.True(JsonNode.DeepEquals(diff.ToJson(), DocumentDiff.FromJson(diff.ToJson()).ToJson()));
     }
 
-    [Fact]
-    public void Diff_RejectsAnEmptyKey_BecauseAPathCannotNameIt()
+    [Theory]
+    [InlineData("""{"a": {}}""", """{"a": {"": 1}}""", "a.")]
+    [InlineData("""{"": 1}""", """{"": 2}""", "")]
+    [InlineData("""{"": {"x": 1}}""", """{"": {"x": 2}}""", ".x")]
+    [InlineData("""{"": {"": 1}}""", """{"": {"": 2}}""", ".")]
+    public void Diff_NamesAnEmptyKey_AsAnEmptySegment_AndAppliesIt(string beforeJson, string afterJson, string path)
     {
-        var before = Parse("""{"a": {}}""");
-        var after = Parse("""{"a": {"": 1}}""");
+        var before = Parse(beforeJson);
+        var after = Parse(afterJson);
 
-        Assert.Throws<NotSupportedException>(() => JsonDiffEngine.Diff(before, after));
+        var diff = JsonDiffEngine.Diff(before, after);
+
+        Assert.Equal([path], diff.Paths);
+        Assert.True(JsonNode.DeepEquals(after, JsonDiffEngine.Apply(before, diff)));
+        Assert.True(JsonNode.DeepEquals(before, JsonDiffEngine.ApplyReverse(after, diff)));
+        Assert.True(JsonNode.DeepEquals(diff.ToJson(), DocumentDiff.FromJson(diff.ToJson()).ToJson()));
+    }
+
+    // Spec §2.5: a duplicate key is rejected, never resolved to one of the values. JsonNode.Parse (what the
+    // sessions use) builds the object lazily, so the diff is where it surfaces.
+    [Fact]
+    public void Diff_RejectsADuplicateKey_InsteadOfPickingOne()
+    {
+        var withDuplicate = Parse("""{"a": 1, "a": 2}""");
+
+        Assert.Throws<ArgumentException>(() => JsonDiffEngine.Diff(withDuplicate, Parse("""{"a": 2}""")));
+        Assert.Throws<ArgumentException>(() => JsonDiffEngine.Diff(Parse("""{"a": 2}"""), Parse("""{"x": {"a": 1, "a": 2}}""")));
     }
 
     private static JsonObject Parse(string json) => (JsonObject)JsonNode.Parse(json)!;

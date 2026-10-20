@@ -77,7 +77,8 @@ of this specification should have the same:
   field policies — must match the model, and a history of values must replay to every state it passed through. The
   first run found a policy bypass (`[JsonIgnore(Condition = WhenWritingNull)]` switched the property's policy off).
 
-Structural limit: the engines refuse a document nested deeper than 128 levels with a clean error.
+Structural limit: a document nests at most 64 levels of objects and arrays — the limit of the serializer and
+parser, so the engines accept exactly what the stores can write and read; deeper input is refused with a clean error.
 
 ## Changing the vectors
 

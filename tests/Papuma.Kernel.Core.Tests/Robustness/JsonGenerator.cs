@@ -17,7 +17,7 @@ internal sealed class JsonGenerator(int seed)
 {
     private static readonly string[] KeyPool =
     [
-        "a", "b", "c", "d", "Z", "0", "-", "_", "a.b", "a\\", "\\", ".", "..", "x.", ".x", "\\.", "\\\\",
+        "a", "b", "c", "d", "Z", "0", "-", "_", "", "a.b", "a\\", "\\", ".", "..", "x.", ".x", "\\.", "\\\\",
         "é", "日本", "😀", "with space", "k\u0001", "quote\"", "slash/", "tilde~",
     ];
 

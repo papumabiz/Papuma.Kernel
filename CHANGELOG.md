@@ -24,6 +24,16 @@ Breaking:
 
 Changed:
 
+- **Empty object keys are supported.** A dictionary key `""` (or `[JsonPropertyName("")]`) was rejected with
+  `NotSupportedException` when a diff was computed. The path format already names it unambiguously as an empty
+  segment — `""` at the top, `a.` below `a`, `.` below the empty key — so diff, `Apply`/`ApplyReverse`, policy
+  resolution and GDPR paths now accept it (spec changes.md §2.1, vectors `empty-key-*`; the diff schema's path
+  pattern allows empty segments). Consumers that parse paths must not assume non-empty segments.
+
+- **Duplicate keys are rejected, by specification.** A document must not contain the same key twice in one object
+  (spec changes.md §2.5); the engines fail instead of picking a value. PostgreSQL `jsonb` collapses duplicates
+  (last wins) on write, so stored documents never contain them.
+
 - **Samples:** the NATS bridge moved out of `shop-minimal-api` into its own worker sample
   `shop-nats-bridge` (same database, separate process). The shop no longer depends on `NATS.Net`.
 
@@ -99,63 +109,12 @@ Fixed:
   nested field without a policy. An ancestor entry is now redacted when its old or new value holds the erased
   path; a split container that no longer holds it is left alone. Both engines.
 
-- **The diff, canonical and projection engines refuse a document nested deeper than 128 levels** with a clean
-  exception (`NotSupportedException`; `CanonicalJsonException` code `too-deep`) instead of recursing into it. The
-  serializer already stops POCO documents at 64 levels, so this only matters for a hand-built `JsonNode` graph, where a
-  recursive walk would end in an uncatchable stack overflow.
-- **Two document (or event) types with the same logical name are rejected when the model is built.**
-  The name — the simple class name — is stored in every row as `document_type` / `event_type`, so two
-  classes called `Item` in different namespaces used to build without complaint and then silently
-  shared rows, ids and keys. Names are compared case-insensitively, because key index names are
-  lower-cased: two names that differ only in case would get the same index name and the second
-  `CREATE INDEX IF NOT EXISTS` would be skipped, leaving a unique key unenforced. A document and an event
-  may still share a name. If your model registers two same-named classes, rename one.
-- **`Remove` below an array is a no-op on PostgreSQL, as specified.** The PostgreSQL expression used `#-` directly,
-  which fails below an array ("path element is not an integer") and, for a key that merely looks like an index
-  (`"0"`), would delete an array element. Found by the new randomized differential test of the two patch
-  implementations; now guarded, with vectors.
-- **A property with `[JsonIgnore(Condition = WhenWritingNull)]` (or `WhenWritingDefault`) kept no privacy policy.** The
-  metamodel scan treated every `[JsonIgnore]` as "never serialized" and skipped the property, so
-  `[SensitiveData]`, `[TrackHash]`, `[TrackReference]` and `[DoNotTrack]` on it were silently ignored: once it had a
-  value, that value went into the change feed in clear text. Only a property that is *never* serialized
-  (`[JsonIgnore]` or `Condition = Always`) is skipped now; a conditionally ignored one keeps its policy, in the feed,
-  in masked reads and in the data inventory. Found by the new randomized session test. If you combine a policy
-  attribute with a conditional ignore, review what your feed already contains (`RedactHistoryAsync` rewrites it).
-- **Patch operations apply in order on both engines (PostgreSQL lost updates).** Within one
-  `PatchAsync`/`PatchManyAsync`/`PatchWhereAsync`, `Increment` read the *stored* value instead of
-  the result of the preceding operations: two increments on one field applied only the last, and
-  `Set` followed by `Increment` discarded the `Set`. Each operation now sees the previous one's
-  result (`Increment(+2).Increment(+3)` on `1` is `6`; `Set(10).Increment(+5)` is `15`).
-  SQLite was already correct. Multi-operation patches that touch one field twice change result.
-- **`Increment` never overwrites a non-numeric value.** On a string, boolean, object or array SQLite
-  silently replaced the value with the increment; PostgreSQL failed with a raw `PostgresException`
-  (and coerced numeric strings such as `"5"`). Both now throw the new
-  `NonNumericIncrementException` and roll the patch back. Absent and JSON `null` still count as 0.
-- **Object keys containing `.` or `\` no longer make a document unsaveable.** A `Dictionary<string, T>`
-  field with a key such as `feature.enabled` or `home.title` made `Save` throw, because diff paths are
-  dot-separated — a failure that depended on the *data*, not the model, so it only showed up when a user
-  entered such a key. A `.` or `\` inside a key is now escaped (`\.` and `\\`): the key is one path segment
-  (`settings.feature\.enabled`) in the diff, in policies (a policy on `settings` covers it), in masked reads and
-  in GDPR selectors. Paths without such keys are byte-for-byte unchanged, so stored data and consumers that treat
-  paths as opaque strings are unaffected. A declared property whose JSON name contains a dot (`[JsonPropertyName("a.b")]`)
-  is accepted too; on SQLite a *key* property must still have a plain identifier name. Only an **empty** key is
-  rejected (`NotSupportedException`): a path cannot name it.
-- **`Set`/`Increment` below a missing or non-object parent now fail on both engines** with the new
-  `PatchTargetMissingException` and roll the patch back. PostgreSQL used to do nothing (the version
-  still advanced with an empty diff, hiding path typos); SQLite created the parent objects or replaced
-  a scalar parent with an object. To build a nested value, `Set` the parent first in the same patch.
-  `Remove` below a missing parent stays a no-op.
-- **SQLite key lookups use the declared key index.** `LoadByKeyAsync`, `PatchWhereAsync`,
-  `DeleteWhereAsync` and the MCP masked read by key bound the document type as a parameter,
-  which SQLite cannot match against the *partial* key index (`WHERE document_type = '…'`); the
-  planner fell back to the primary-key range plus a filter, so the cost grew with the type's size
-  in the tenant instead of the number of matches. The type is now a validated literal. Results
-  were always correct; PostgreSQL was not affected.
-- **A lost `LISTEN` connection no longer makes the feed loops spin.** After a failover,
-  a server restart or a killed backend, the idle wait threw immediately and the loop
-  re-ran at full speed (hundreds of warnings per second, the database polled flat out).
-  Both processors now degrade to plain polling and re-establish `LISTEN` on the next
-  idle wait; a database that is down at startup no longer stops `RunAsync` either.
+- **The diff, canonical and projection engines refuse a document nested deeper than 64 levels** with a clean
+  exception (`NotSupportedException`; `CanonicalJsonException` code `too-deep`) instead of recursing into it. 64 is
+  also what the serializer and the parser allow (now spelled out in `KernelJson.Options`), so the engines accept
+  exactly what the stores can write and read; it matters for a hand-built `JsonNode` graph, where a recursive walk
+  would end in an uncatchable stack overflow. (An earlier draft of this entry allowed 128 levels in the engines,
+  which no stored document could reach.)
 
 Docs:
 

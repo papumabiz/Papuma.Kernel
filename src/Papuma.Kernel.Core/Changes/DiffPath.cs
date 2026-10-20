@@ -15,6 +15,9 @@ namespace Papuma.Kernel.Changes;
 /// A path without a dot or a backslash in any key — every path of a declared property — is
 /// byte-for-byte what it was before escaping existed, so stored data and consumers that treat paths as
 /// opaque strings are unaffected. Escaped paths sort as plain strings (ordinal), not segment by segment.
+/// An empty key is an empty segment: the empty key at the top is the path <c>""</c>, below <c>a</c> it is
+/// <c>a.</c>. A path always has at least one segment, so <see cref="Split"/> and <see cref="Join"/> stay
+/// inverse; the document root itself is never a path.
 /// </remarks>
 internal static class DiffPath
 {
@@ -47,11 +50,14 @@ internal static class DiffPath
         return builder.ToString();
     }
 
-    /// <summary>Appends one (unescaped) key to a path; an empty <paramref name="prefix"/> is the root.</summary>
-    public static string Append(string prefix, string segment)
+    /// <summary>
+    /// Appends one (unescaped) key to a path; a <c>null</c> <paramref name="prefix"/> is the document root.
+    /// (Not the empty string: <c>""</c> is the path of the empty top-level key.)
+    /// </summary>
+    public static string Append(string? prefix, string segment)
     {
         var escaped = EscapeSegment(segment);
-        return prefix.Length == 0 ? escaped : $"{prefix}{Separator}{escaped}";
+        return prefix is null ? escaped : $"{prefix}{Separator}{escaped}";
     }
 
     /// <summary>Joins (unescaped) segments into a path.</summary>
@@ -61,10 +67,10 @@ internal static class DiffPath
     /// <summary>
     /// Splits a path into its (unescaped) segments.
     /// </summary>
-    /// <exception cref="ArgumentException">The path is empty, has an empty segment, or a dangling or unknown escape.</exception>
+    /// <exception cref="ArgumentException">The path has a dangling or unknown escape.</exception>
     public static string[] Split(string path)
     {
-        ArgumentException.ThrowIfNullOrEmpty(path);
+        ArgumentNullException.ThrowIfNull(path);
 
         var segments = new List<string>();
         var current = new StringBuilder();
@@ -83,7 +89,7 @@ internal static class DiffPath
             }
             else if (ch == Separator)
             {
-                segments.Add(Finish(current, path));
+                segments.Add(Finish(current));
             }
             else
             {
@@ -91,7 +97,7 @@ internal static class DiffPath
             }
         }
 
-        segments.Add(Finish(current, path));
+        segments.Add(Finish(current));
         return [.. segments];
     }
 
@@ -115,13 +121,8 @@ internal static class DiffPath
         return lastSeparator >= 0;
     }
 
-    private static string Finish(StringBuilder segment, string path)
+    private static string Finish(StringBuilder segment)
     {
-        if (segment.Length == 0)
-        {
-            throw new ArgumentException($"Path '{path}' has an empty segment.", nameof(path));
-        }
-
         var result = segment.ToString();
         segment.Clear();
         return result;

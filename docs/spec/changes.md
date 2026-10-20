@@ -37,6 +37,10 @@ field inside such a value (§3, *Policies below an entry*).
    `settings.feature\.enabled`. A path without a dot or backslash in any key is therefore
    exactly what it would be without escaping, and a consumer that treats paths as opaque
    strings needs no change. Escaped paths sort as plain strings, not segment by segment.
+   An **empty** key is an empty segment: `""` is the empty key at the top, `a.` the empty
+   key below `a`, `.` the empty key below the empty key, `.x` the key `x` below it. Every
+   path has at least one segment and the document root is never a path, so a path names
+   exactly one field and splitting it at unescaped dots gives the segments back.
 2. If a key's value is an object on **both** sides, the diff recurses into it.
 3. Any other difference is **one** entry at that path carrying the complete old and
    new value. This covers arrays (atomic), scalars, and any change of JSON type —
@@ -52,11 +56,16 @@ field inside such a value (§3, *Policies below an entry*).
    compare numbers as binary floating point. (Vectors: `numbers-*`.) A change
    between two equal numbers produces no entry; the text form of the value that
    is stored is the writer's.
-5. An **empty** object key cannot be named by a path. An implementation MUST reject the
-   document change with an error rather than emit an ambiguous path. (Vector:
-   `empty-key-is-rejected`; the escaping vectors are `key-with-a-dot-is-one-segment`,
+5. The escaping and empty-key vectors are `key-with-a-dot-is-one-segment`,
    `key-with-a-backslash`, `key-ending-in-a-backslash-before-a-separator`,
-   `a-dotted-key-and-a-nested-object-are-different-paths`, `escaped-paths-sort-as-plain-strings`.)
+   `a-dotted-key-and-a-nested-object-are-different-paths`, `escaped-paths-sort-as-plain-strings`,
+   `empty-key-at-the-top`, `empty-key-below-a-key`, `empty-key-below-the-empty-key`.
+   (Until 2026-10-20 an empty key was rejected; the format never needed that.)
+   A document MUST NOT contain the same key twice in one object, nor be nested deeper
+   than **64** levels of objects and arrays (the root object counts as the first). An
+   implementation that parses document text itself MUST reject both rather than pick
+   one of the duplicates; PostgreSQL `jsonb` collapses duplicates (the last one wins)
+   before any diff sees the document.
 6. Producers SHOULD emit entries ordered by comparing paths as sequences of
    UTF-16 code units (.NET `StringComparer.Ordinal`). Beware: comparing UTF-8
    bytes (the natural order in Rust or Go) differs for characters outside the

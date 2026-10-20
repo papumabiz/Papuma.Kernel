@@ -90,7 +90,7 @@ parsing — inside the transaction, so it is rolled back, but with a `JsonExcept
 
 ## 4. Semantic decisions to make
 
-### 4.1 Empty property names — recommendation: support them
+### 4.1 Empty property names — decided: supported (2026-10-20)
 
 How paths work today: segments are joined with `.`, a `.` or `\` inside a key is escaped as
 `\.` / `\\` (`DiffPath`). `Split` cuts at unescaped dots; `Apply`/`ApplyReverse` split a path and
@@ -115,16 +115,22 @@ Effect of option 1 on the API: none on signatures. `Apply`/`ApplyReverse` work u
 index name. Backwards compatibility: no stored diff can contain such a path today (they were
 rejected), so nothing to migrate; the library is not live anyway.
 
-The prototype currently implements option 3 (the spec still says MUST reject) so that its
-behavior does not depend on which subtrees are unchanged.
+Implemented as option 1: `DiffPath.Split` accepts empty segments, `DiffPath.Append` takes `null` for the
+root (`""` is now the path of the empty key, so it can no longer double as "root"), both engines dropped
+the rejection, the prototype dropped its extra scan (−260 µs per 89 KB document), the spec, schema and
+vectors were updated, and `JsonGenerator` now produces empty keys, so every property and differential
+test covers them. The first run with empty keys found only a test helper that still used `""` as the root.
 
-### 4.2 Duplicate property names — reject
+### 4.2 Duplicate property names — decided: reject (2026-10-20)
 
 `JsonDocumentOptions.AllowDuplicateProperties = false` (new in .NET 10) rejects duplicates at parse
-time with a `JsonException`, including duplicates spelled differently (`"a"` and `"a"`) and in
+time with a `JsonException`, including duplicates spelled differently (`"\u0061"` and `"a"`) and in
 unchanged subtrees — verified. `jsonb` collapses duplicates (last wins) before the kernel ever reads
 a document, so only callers that hand UTF-8 to the engine directly can hit this. The current engine
-fails too, but only when it reaches the duplicate (`JsonObject` throws `ArgumentException` lazily).
+fails too, but only when it reaches the duplicate (`JsonObject` throws `ArgumentException` lazily). Now
+normative (spec changes.md §2.5) and pinned for both engines. The check costs the prototype ~200 µs per
+89 KB document; skipping it for input known to come from `jsonb` is a later optimization with its own
+trigger (parse cost dominating a measured write path), not part of this decision.
 
 ### 4.3 Insert and delete — keep, but fix §3.1
 
@@ -133,13 +139,16 @@ a field present on one side only is one entry with its whole value — the same 
 or removed in an update. So "no recursion on insert" is consistent with updates, not a special
 case. The defect is in the policies (§3.1), not in the granularity.
 
-### 4.4 Depth — one limit of 64
+### 4.4 Depth — decided: one limit of 64 (2026-10-20)
 
 Proposal: `JsonLimits.MaxDepth = 64` everywhere (engine, prototype, explicit parser options in the
 sessions, `CanonicalJson`, `PolicyProjector`), because 64 is what the serializer and the parser
 enforce already and nothing larger can be written through the API. One documented exception type
 for "too deep" at the boundary instead of today's mix (`NotSupportedException` from the engine,
-`JsonException` from the parser). This is an API decision; not changed yet.
+`JsonException` from the parser). Implemented: `JsonLimits.MaxDepth = 64`, spelled out in `KernelJson.Options`,
+pinned by `TheEngineLimit_IsTheParsersAndTheSerializersLimit`. Still open: the exception types stay mixed
+(text → `JsonException` from System.Text.Json, a hand-built node graph → `NotSupportedException`), and
+whether a patch can store a document deeper than 64 is not verified yet.
 
 ### 4.5 Root that is not an object — `ArgumentException`
 

@@ -197,7 +197,7 @@ public sealed class KernelModelBuilder
 
             var policies = new Dictionary<string, FieldPolicy>(StringComparer.Ordinal);
             var ignoredKeys = new Dictionary<string, bool>(StringComparer.Ordinal);
-            ScanType(clrType, prefix: string.Empty, policies, ignoredKeys, visited: []);
+            ScanType(clrType, prefix: null, policies, ignoredKeys, visited: []);
 
             foreach (var (path, policy) in _policyOverrides)
             {
@@ -400,7 +400,7 @@ public sealed class KernelModelBuilder
             // 1. Attribute defaults, scanned recursively into nested POCO types.
             var policies = new Dictionary<string, FieldPolicy>(StringComparer.Ordinal);
             var keys = new Dictionary<string, bool>(StringComparer.Ordinal);
-            ScanType(clrType, prefix: string.Empty, policies, keys, visited: []);
+            ScanType(clrType, prefix: null, policies, keys, visited: []);
 
             // 2. Fluent overrides win.
             foreach (var (path, policy) in _policyOverrides)
@@ -514,7 +514,7 @@ public sealed class KernelModelBuilder
 
     private static void ScanType(
         Type type,
-        string prefix,
+        string? prefix,
         Dictionary<string, FieldPolicy> policies,
         Dictionary<string, bool> keys,
         HashSet<Type> visited)

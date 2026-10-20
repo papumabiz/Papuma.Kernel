@@ -15,5 +15,9 @@ namespace Papuma.Kernel.Model;
 /// </remarks>
 internal static class KernelJson
 {
-    public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
+    // MaxDepth spelled out: it is the default, and it must stay equal to the engines' limit (JsonLimits).
+    public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
+    {
+        MaxDepth = Changes.JsonLimits.MaxDepth,
+    };
 }

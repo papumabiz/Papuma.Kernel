@@ -57,14 +57,14 @@ public static class DataInventory
         Type clrType, IReadOnlyDictionary<string, FieldPolicy> policies)
     {
         var fields = new List<FieldInventory>();
-        Walk(clrType, prefix: string.Empty, policies, fields, visited: []);
+        Walk(clrType, prefix: null, policies, fields, visited: []);
         fields.Sort((a, b) => string.CompareOrdinal(a.Path, b.Path));
         return fields;
     }
 
     private static void Walk(
         Type type,
-        string prefix,
+        string? prefix,
         IReadOnlyDictionary<string, FieldPolicy> policies,
         List<FieldInventory> fields,
         HashSet<Type> visited)

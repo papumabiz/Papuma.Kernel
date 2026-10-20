@@ -40,8 +40,8 @@ public sealed class Utf8JsonDiffEngineContractTests
         { "0 and -0 are equal", """{"a":0}""", """{"a":-0}""" },
         { "large integers differ by one", """{"a":9007199254740993}""", """{"a":9007199254740992}""" },
         { "0.1 and 0.10000000000000001 differ", """{"a":0.1}""", """{"a":0.10000000000000001}""" },
-        { "escaped and literal string", """{"a":"é\/"}""", """{"a":"é/"}""" },
-        { "escaped and literal key", """{"a":1}""", """{"a":2}""" },
+        { "escaped and literal string", """{"a":"\u00e9\/"}""", """{"a":"é/"}""" },
+        { "escaped and literal key", """{"\u0061":1}""", """{"a":2}""" },
         { "key order is irrelevant", """{"a":1,"b":{"x":1,"y":2}}""", """{"b":{"y":2,"x":1},"a":1}""" },
         { "key order inside arrays is irrelevant", """{"a":[{"x":1,"y":2}]}""", """{"a":[{"y":2,"x":1}]}""" },
         { "whitespace is irrelevant", """{"a":{"b":[1, 2]}}""", "{ \"a\" : {\n \"b\" : [ 1 ,2 ] } }" },
@@ -81,27 +81,36 @@ public sealed class Utf8JsonDiffEngineContractTests
         Assert.True(Utf8JsonDiffEngine.Diff((string?)null, null).IsEmpty);
     }
 
-    // ── Deliberately stricter than the current engine ─────────────────────────
+    // ── Empty keys are ordinary keys (an empty path segment) ──────────────────
 
     [Theory]
-    [InlineData("""{"":1}""", """{"":2}""")]
-    [InlineData("""{"":1,"b":1}""", """{"":1,"b":2}""")]
-    [InlineData("""{"x":{"":1},"b":1}""", """{"x":{"":1},"b":2}""")] // the empty key sits in an unchanged subtree
-    [InlineData("""{"":1}""", """{"":1}""")] // identical documents
-    [InlineData("""{"a":[{"":1}]}""", """{"a":[{"":1}]}""")] // inside an array
-    [InlineData(null, """{"x":{"":1}}""")] // nested in an insert
-    [InlineData("""{"x":{"":1}}""", null)] // nested in a delete
-    public void AnEmptyKey_IsRejectedWherever_ItOccurs(string? before, string? after)
+    [InlineData("""{"":1}""", """{"":2}""", "")]
+    [InlineData("""{"":1,"b":1}""", """{"":1,"b":2}""", "b")]
+    [InlineData("""{"x":{"":1},"b":1}""", """{"x":{"":2},"b":1}""", "x.")]
+    [InlineData("""{"":{"":1}}""", """{"":{"":2}}""", ".")]
+    [InlineData("""{"":{"a":1}}""", """{"":{"a":2}}""", ".a")]
+    [InlineData("""{"a":[{"":1}]}""", """{"a":[{"":2}]}""", "a")] // inside an array: atomic
+    [InlineData(null, """{"":{"":1}}""", "")] // insert: one top-level entry
+    [InlineData("""{"x":{"":1}}""", null, "x")] // delete
+    public void AnEmptyKey_IsAnEmptySegment_AndBothEnginesAgree(string? before, string? after, string path)
     {
-        Assert.Throws<NotSupportedException>(() => Utf8JsonDiffEngine.Diff(before, after));
-        Assert.Throws<NotSupportedException>(() => DiffComparison.DiffUtf8(DiffComparison.Utf8(before), DiffComparison.Utf8(after)));
+        var expected = JsonDiffEngine.Diff(Parse(before), Parse(after));
+
+        var actual = Utf8JsonDiffEngine.Diff(before, after);
+
+        Assert.Equal([path], actual.Entries.Select(e => e.Path));
+        Assert.Null(DiffComparison.Difference(expected, actual.ToDocumentDiff()));
+        Assert.Null(DiffComparison.Difference(expected, DiffComparison.DiffUtf8(DiffComparison.Utf8(before), DiffComparison.Utf8(after)).ToDocumentDiff()));
+        Assert.Null(DiffComparison.Reconstruction(Parse(before), Parse(after), actual.ToDocumentDiff()));
     }
+
+    // ── Deliberately stricter than the current engine ─────────────────────────
 
     [Theory]
     [InlineData("""{"a":1,"a":2}""", """{"a":2}""")]
     [InlineData("""{"a":2}""", """{"a":1,"a":3}""")]
     [InlineData("""{"x":{"a":1,"a":1}}""", """{"x":{"a":1,"a":1}}""")] // identical, and nested
-    [InlineData("""{"a":1,"a":2}""", """{}""")] // a duplicate spelled differently
+    [InlineData("""{"\u0061":1,"a":2}""", """{}""")] // a duplicate spelled differently
     public void ADuplicateKey_IsRejected(string before, string after)
     {
         Assert.ThrowsAny<JsonException>(() => Utf8JsonDiffEngine.Diff(before, after));
@@ -154,14 +163,15 @@ public sealed class Utf8JsonDiffEngineContractTests
         Assert.ThrowsAny<JsonException>(() => Utf8JsonDiffEngine.Diff($$"""{"a":{{arrays}}}""", "{}"));
     }
 
-    // Records today's mismatch: the sessions parse with JsonNode.Parse's default of 64 levels, so what the
-    // engine limit of JsonLimits.MaxDepth (128) allows in between never reaches the current engine.
+    // One limit everywhere: what the sessions can serialize and parse is exactly what the engines accept.
     [Fact]
-    public void TheSessionsParseLimit_IsLowerThanTheEngineLimit()
+    public void TheEngineLimit_IsTheParsersAndTheSerializersLimit()
     {
-        Assert.ThrowsAny<JsonException>(() => JsonNode.Parse(Nested(65, "1")));
-        Assert.True(JsonLimits.MaxDepth > 64);
-        Assert.False(Utf8JsonDiffEngine.Diff(Nested(65, "1"), Nested(65, "2")).IsEmpty);
+        Assert.Equal(64, JsonLimits.MaxDepth);
+        Assert.NotNull(JsonNode.Parse(Nested(JsonLimits.MaxDepth, "1"))); // sessions: JsonNode.Parse, default options
+        Assert.ThrowsAny<JsonException>(() => JsonNode.Parse(Nested(JsonLimits.MaxDepth + 1, "1")));
+        Assert.Equal(JsonLimits.MaxDepth, Papuma.Kernel.Model.KernelJson.Options.MaxDepth);
+        Assert.False(JsonLimits.ExceedsMaxDepth(JsonNode.Parse(Nested(JsonLimits.MaxDepth, "1"))));
     }
 
     // ── The result owns its data ──────────────────────────────────────────────

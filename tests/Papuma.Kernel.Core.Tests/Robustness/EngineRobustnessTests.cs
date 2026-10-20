@@ -19,9 +19,9 @@ public sealed class EngineRobustnessTests
 {
     private const int Cases = 3000;
 
-    // The path grammar of docs/spec/schemas/diff.schema.json.
+    // The path grammar of docs/spec/schemas/diff.schema.json (segments may be empty: the empty key).
     private static readonly Regex PathGrammar = new(
-        @"^(?:[^.\\]|\\[.\\])+(?:\.(?:[^.\\]|\\[.\\])+)*$", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
+        @"^(?:[^.\\]|\\[.\\])*(?:\.(?:[^.\\]|\\[.\\])*)*$", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
 
     private static void ForEachCase(int count, int firstSeed, Action<JsonGenerator> body)
     {
@@ -358,7 +358,7 @@ public sealed class EngineRobustnessTests
     }
 
     // The escaped path of every object key, at any depth (arrays are atomic: no paths inside them).
-    private static IEnumerable<string> ObjectPaths(JsonObject? root, string prefix = "")
+    private static IEnumerable<string> ObjectPaths(JsonObject? root, string? prefix = null)
     {
         if (root is null)
         {
@@ -380,7 +380,7 @@ public sealed class EngineRobustnessTests
     }
 
     // Every marker with the path that owns it: its key's path, or the path of the (atomic) array holding it.
-    private static IEnumerable<(string Path, string Marker)> Leaves(JsonObject? root, string prefix = "")
+    private static IEnumerable<(string Path, string Marker)> Leaves(JsonObject? root, string? prefix = null)
     {
         if (root is null)
         {
