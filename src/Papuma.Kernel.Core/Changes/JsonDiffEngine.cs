@@ -134,19 +134,35 @@ public static class JsonDiffEngine
             var present = useNew ? entry.HasNew : entry.HasOld;
             var value = useNew ? entry.New : entry.Old;
             var segments = DiffPath.Split(path);
-            var parent = NavigateToParent(result, segments);
-
             if (present)
             {
-                parent[segments[^1]] = value?.DeepClone();
+                NavigateToParent(result, segments)[segments[^1]] = value?.DeepClone();
             }
             else
             {
-                parent.Remove(segments[^1]);
+                // A removal never creates its parent: when a policy split moved a field below its container
+                // (PolicyApplier), the container entry sorts first and may already have removed or replaced it.
+                FindParent(result, segments)?.Remove(segments[^1]);
             }
         }
 
         return result;
+    }
+
+    private static JsonObject? FindParent(JsonObject root, string[] segments)
+    {
+        var current = root;
+        for (var i = 0; i < segments.Length - 1; i++)
+        {
+            if (current[segments[i]] is not JsonObject next)
+            {
+                return null;
+            }
+
+            current = next;
+        }
+
+        return current;
     }
 
     private static JsonObject NavigateToParent(JsonObject root, string[] segments)

@@ -78,6 +78,17 @@ Added:
 
 Fixed:
 
+- **Security: a policy on a nested field no longer leaks through an entry that carries the whole object.** A
+  `[SensitiveData]` (or `[TrackHash]`, `[TrackReference]`, `[DoNotTrack]`) property inside a nested object —
+  `address.street` — was stored in clear under its container's path (`address`) on insert, on delete, when the
+  object was set or cleared, and on any type change to or from an object, because policy resolution only looked
+  at the entry's path and its ancestors. Such entries are now split before the policies apply: the container
+  keeps the rest of its value, each subtree with a different effective policy gets its own entry (spec
+  changes.md §3, *Policies below an entry*; vectors `nested-policy-*`). A stored diff can now hold a path and
+  paths below it. `Apply`/`ApplyReverse` no longer create a missing parent when removing a field, which keeps such
+  diffs reversible. Diffs written before this fix are not rewritten: the GDPR erasure of a nested path does not
+  yet cover an older whole-object entry either.
+
 - **The diff, canonical and projection engines refuse a document nested deeper than 128 levels** with a clean
   exception (`NotSupportedException`; `CanonicalJsonException` code `too-deep`) instead of recursing into it. The
   serializer already stops POCO documents at 64 levels, so this only matters for a hand-built `JsonNode` graph, where a

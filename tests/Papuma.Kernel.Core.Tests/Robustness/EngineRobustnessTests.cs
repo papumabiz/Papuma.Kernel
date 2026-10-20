@@ -245,6 +245,176 @@ public sealed class EngineRobustnessTests
         });
     }
 
+    // The test above declares policies only on diff paths and their ancestors. This one also declares them
+    // *below* diff paths — the case of an entry that carries a whole object (insert, delete, an added or removed
+    // object, a type change), which once stored a protected nested field under its container's path.
+    [Fact]
+    public void PoliciesOnNestedFields_NeverLeakThroughAnEntryThatCarriesTheWholeObject()
+    {
+        var provider = new MasterKeyHashKeyProvider(
+            Convert.FromHexString("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"), "k1");
+        var scope = ScopeContext.Tenant("acme");
+        var kinds = new[] { FieldPolicy.Redact, FieldPolicy.Reference, FieldPolicy.Hash, FieldPolicy.DoNotTrack, FieldPolicy.Track };
+
+        ForEachCase(Cases, firstSeed: 160_000, g =>
+        {
+            var (before, after) = LabeledPair(g);
+            var policies = new Dictionary<string, FieldPolicy>(StringComparer.Ordinal);
+            var paths = ObjectPaths(before).Concat(ObjectPaths(after)).Distinct().ToList();
+            for (var i = 0; i < Math.Min(4, paths.Count); i++)
+            {
+                policies[g.Pick(paths)] = g.Pick(kinds);
+            }
+
+            var metadata = new DocumentTypeMetadata(
+                "Doc", typeof(object), policies, keys: [], idGetter: _ => "1", upcasters: [], validator: null, exposedToMcp: false);
+            var stored = Show(PolicyApplier.Apply(JsonDiffEngine.Diff(before, after), metadata, "1", provider, scope).ToJson());
+
+            foreach (var (path, marker) in Leaves(before).Concat(Leaves(after)))
+            {
+                if (IndependentlyResolved(policies, path) != FieldPolicy.Track)
+                {
+                    Assert.False(stored.Contains(marker, StringComparison.Ordinal),
+                        $"'{path}' ({IndependentlyResolved(policies, path)}) leaked {marker}.\npolicies={string.Join(", ", policies)}\n" +
+                        $"before={Show(before)}\nafter={Show(after)}\nstored={stored}");
+                }
+            }
+        });
+    }
+
+    [Fact]
+    public void SplittingAtPolicies_KeepsTheDiffReversible()
+    {
+        ForEachCase(Cases, firstSeed: 180_000, g =>
+        {
+            var (before, after) = LabeledPair(g);
+            var paths = ObjectPaths(before).Concat(ObjectPaths(after)).Distinct().ToList();
+            var policies = paths.Where(_ => g.Chance(0.3)).ToDictionary(p => p, _ => FieldPolicy.Redact, StringComparer.Ordinal);
+            var metadata = new DocumentTypeMetadata(
+                "Doc", typeof(object), policies, keys: [], idGetter: _ => "1", upcasters: [], validator: null, exposedToMcp: false);
+
+            var split = PolicyApplier.SplitAtPolicies(JsonDiffEngine.Diff(before, after), metadata);
+
+            Assert.True(JsonNode.DeepEquals(after ?? new JsonObject(), JsonDiffEngine.Apply(before, split)),
+                $"Apply(before, split) != after.\nbefore={Show(before)}\nafter={Show(after)}\nsplit={Show(split.ToJson())}");
+            Assert.True(JsonNode.DeepEquals(before ?? new JsonObject(), JsonDiffEngine.ApplyReverse(after, split)),
+                $"ApplyReverse(after, split) != before.\nbefore={Show(before)}\nafter={Show(after)}\nsplit={Show(split.ToJson())}");
+        });
+    }
+
+    // A before/after pair (either side may be absent) whose every scalar is a unique marker "#n#", so a leaked
+    // value can be found by plain text search.
+    private static (JsonObject? Before, JsonObject? After) LabeledPair(JsonGenerator g)
+    {
+        var next = 0;
+        var before = (JsonObject)Label(g.Object(3), ref next)!;
+        switch (g.Next(5))
+        {
+            case 0:
+                return (null, before);
+            case 1:
+                return (before, null);
+            case 2:
+                return (before, (JsonObject)Label(g.Object(3), ref next)!);
+            default:
+                return (before, (JsonObject)Label(g.Mutate(before), ref next)!);
+        }
+    }
+
+    private static JsonNode? Label(JsonNode? node, ref int next)
+    {
+        switch (node)
+        {
+            case JsonObject obj:
+            {
+                var result = new JsonObject();
+                foreach (var (key, child) in obj)
+                {
+                    result[key] = Label(child, ref next);
+                }
+
+                return result;
+            }
+
+            case JsonArray array:
+            {
+                var result = new JsonArray();
+                foreach (var item in array)
+                {
+                    result.Add(Label(item, ref next));
+                }
+
+                return result;
+            }
+
+            case JsonValue value when value.GetValueKind() == System.Text.Json.JsonValueKind.String
+                                      && ((string)value!).StartsWith('#'):
+                return value.DeepClone(); // already a marker (kept by Mutate)
+            case null:
+                return null;
+            default:
+                return JsonValue.Create($"#{next++}#");
+        }
+    }
+
+    // The escaped path of every object key, at any depth (arrays are atomic: no paths inside them).
+    private static IEnumerable<string> ObjectPaths(JsonObject? root, string prefix = "")
+    {
+        if (root is null)
+        {
+            yield break;
+        }
+
+        foreach (var (key, child) in root)
+        {
+            var path = DiffPath.Append(prefix, key);
+            yield return path;
+            if (child is JsonObject nested)
+            {
+                foreach (var below in ObjectPaths(nested, path))
+                {
+                    yield return below;
+                }
+            }
+        }
+    }
+
+    // Every marker with the path that owns it: its key's path, or the path of the (atomic) array holding it.
+    private static IEnumerable<(string Path, string Marker)> Leaves(JsonObject? root, string prefix = "")
+    {
+        if (root is null)
+        {
+            yield break;
+        }
+
+        foreach (var (key, child) in root)
+        {
+            var path = DiffPath.Append(prefix, key);
+            if (child is JsonObject nested)
+            {
+                foreach (var leaf in Leaves(nested, path))
+                {
+                    yield return leaf;
+                }
+            }
+            else
+            {
+                foreach (var marker in Markers(child))
+                {
+                    yield return (path, marker);
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<string> Markers(JsonNode? node) => node switch
+    {
+        JsonArray array => array.SelectMany(Markers),
+        JsonObject obj => obj.SelectMany(p => Markers(p.Value)),
+        JsonValue value when value.GetValueKind() == System.Text.Json.JsonValueKind.String => [(string)value!],
+        _ => [],
+    };
+
     // The nearest declared ancestor wins — computed here from segments, not with the engine's own helper.
     private static FieldPolicy IndependentlyResolved(Dictionary<string, FieldPolicy> policies, string path)
     {

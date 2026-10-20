@@ -23,7 +23,9 @@ another implementation should share. Each write increments `version` by exactly 
 
 For diffing, an *absent* document (before an insert, after a delete) is
 equivalent to the empty object: every top-level field is reported as added
-(insert) or removed (delete) with its whole value, without recursion.
+(insert) or removed (delete) with its whole value, without recursion — exactly as an
+update reports a field that exists on one side only. Policies still reach every nested
+field inside such a value (§3, *Policies below an entry*).
 
 ## 2. Diff computation
 
@@ -77,7 +79,9 @@ be present.
 
 For every tracked diff: `Apply(before, diff) == after` and
 `ApplyReverse(after, diff) == before`, where an absent document is the empty object.
-`Apply` sets or removes each path (creating intermediate objects as needed).
+`Apply` processes the entries in path order: it sets each path (creating intermediate
+objects as needed) and removes each path whose parent object exists — a removal never
+creates its parent, which keeps a split diff (§3) reversible.
 A diff containing a non-tracked entry (§3) MUST NOT be applied: the operation MUST
 fail rather than reconstruct a state with missing values.
 
@@ -98,6 +102,21 @@ produced**, before the record is stored. No code path may store an unpoliced dif
 declared, otherwise of its nearest declared ancestor (a policy on `address` covers
 `address.city`), otherwise `Track`. The `Reference` text always uses the
 *diff path* (`User/123/address.city`), never the declared ancestor.
+
+**Policies below an entry.** An entry can carry a whole object: on insert and delete,
+for a field added or removed with an object value, and for a type change to or from an
+object. When a path *below* the entry's path declares a policy that differs from the
+entry's own effective policy, the entry MUST be split before the policies apply: the
+entry keeps its value without those subtrees, and each such subtree becomes an entry of
+its own at its path — added or removed, from the side that held it — to which its own
+policy applies (recursively, if it holds further differing paths). Otherwise a protected
+field would be stored in clear under its container's path. The split diff stays
+reversible: an entry sorts before the entries below it, so `Apply` sets the container
+first, and removing a field whose parent is gone or no longer an object is a no-op. A
+stored diff can therefore contain a path and paths below it; consumers MUST NOT assume
+that no path is a prefix of another. (Vectors: `nested-policy-*`,
+`nested-do-not-track-leaves-only-the-container`, `nested-reference-names-the-split-path`,
+`nearest-declared-path-wins-inside-a-split-container`, `no-policy-below-means-no-split`.)
 
 **Non-tracked entries are not values.** They carry no data to reconstruct state
 from. A foreign consumer MUST treat them as "this field changed", nothing more.
@@ -151,7 +170,8 @@ Kept here so they are not lost; each is also in the roadmap.
   implementation relies on it.
 - Because the original number text is preserved, two stores can hold the *same*
   number in different text forms (expected, not yet verified end to end:
-  PostgreSQL `jsonb` normalises exponent forms, SQLite keeps the text). Equality
+  PostgreSQL `jsonb` resolves exponents but keeps the scale — `1e2` → `100`,
+  `1.0` stays `1.0` — verified on PostgreSQL 18; SQLite keeps the text). Equality
   is by value, so diffs agree; only the Hash
   policy (§3) is affected, since it hashes the text.
 

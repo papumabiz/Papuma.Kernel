@@ -155,6 +155,222 @@
       }
     },
     {
+      "name": "nested-policy-splits-an-insert",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": {
+        "address.street": "Redact"
+      },
+      "diff": {
+        "address": {
+          "new": {
+            "street": "Main St 1",
+            "city": "Bonn"
+          }
+        },
+        "name": {
+          "new": "Harry"
+        }
+      },
+      "expected": {
+        "address": {
+          "new": {
+            "city": "Bonn"
+          }
+        },
+        "address.street": {
+          "changed": true
+        },
+        "name": {
+          "new": "Harry"
+        }
+      }
+    },
+    {
+      "name": "nested-policy-splits-a-delete",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": {
+        "address.street": "Redact"
+      },
+      "diff": {
+        "address": {
+          "old": {
+            "street": "Main St 1",
+            "city": "Bonn"
+          }
+        }
+      },
+      "expected": {
+        "address": {
+          "old": {
+            "city": "Bonn"
+          }
+        },
+        "address.street": {
+          "changed": true
+        }
+      }
+    },
+    {
+      "name": "nested-policy-splits-a-type-change",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": {
+        "address.street": "Redact"
+      },
+      "diff": {
+        "address": {
+          "old": null,
+          "new": {
+            "street": "Main St 1",
+            "city": "Bonn"
+          }
+        }
+      },
+      "expected": {
+        "address": {
+          "old": null,
+          "new": {
+            "city": "Bonn"
+          }
+        },
+        "address.street": {
+          "changed": true
+        }
+      }
+    },
+    {
+      "name": "nested-policy-splits-deep-and-keeps-the-rest",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": {
+        "a.b.c": "Redact"
+      },
+      "diff": {
+        "a": {
+          "new": {
+            "b": {
+              "c": "secret",
+              "d": 1
+            },
+            "e": 2
+          }
+        }
+      },
+      "expected": {
+        "a": {
+          "new": {
+            "b": {
+              "d": 1
+            },
+            "e": 2
+          }
+        },
+        "a.b.c": {
+          "changed": true
+        }
+      }
+    },
+    {
+      "name": "nested-do-not-track-leaves-only-the-container",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": {
+        "address.street": "DoNotTrack"
+      },
+      "diff": {
+        "address": {
+          "new": {
+            "street": "Main St 1",
+            "city": "Bonn"
+          }
+        }
+      },
+      "expected": {
+        "address": {
+          "new": {
+            "city": "Bonn"
+          }
+        }
+      }
+    },
+    {
+      "name": "nested-reference-names-the-split-path",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": {
+        "address.street": "Reference"
+      },
+      "diff": {
+        "address": {
+          "new": {
+            "street": "Main St 1",
+            "city": "Bonn"
+          }
+        }
+      },
+      "expected": {
+        "address": {
+          "new": {
+            "city": "Bonn"
+          }
+        },
+        "address.street": {
+          "ref": "User/123/address.street"
+        }
+      }
+    },
+    {
+      "name": "nearest-declared-path-wins-inside-a-split-container",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": {
+        "address": "Redact",
+        "address.city": "Track"
+      },
+      "diff": {
+        "address": {
+          "new": {
+            "street": "Main St 1",
+            "city": "Bonn"
+          }
+        }
+      },
+      "expected": {
+        "address": {
+          "changed": true
+        },
+        "address.city": {
+          "new": "Bonn"
+        }
+      }
+    },
+    {
+      "name": "no-policy-below-means-no-split",
+      "documentType": "User",
+      "documentId": "123",
+      "policies": {
+        "email": "Redact"
+      },
+      "diff": {
+        "address": {
+          "new": {
+            "street": "Main St 1",
+            "city": "Bonn"
+          }
+        }
+      },
+      "expected": {
+        "address": {
+          "new": {
+            "street": "Main St 1",
+            "city": "Bonn"
+          }
+        }
+      }
+    },
+    {
       "name": "nearest-declared-path-wins",
       "documentType": "User",
       "documentId": "123",
