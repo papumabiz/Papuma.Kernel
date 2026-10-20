@@ -420,7 +420,11 @@ themselves:
 
 Change feed and event log have separate sequences and separate checkpoint spaces
 (event handlers are tracked internally with an `event:` prefix in the same
-checkpoint table). A handler consuming both gets **no guaranteed order between the
+checkpoint table). That is why a handler's `Name` — its checkpoint identity — is
+validated when the processor is built: letters, digits, `.`, `_` and `-`, starting
+with a letter or digit, at most 100 characters. `:` is reserved: a change handler
+called `event:orders` would share one cursor and one failure list with the event
+handler `orders`. The same name in both feeds is fine. A handler consuming both gets **no guaranteed order between the
 feeds** — deliberately: a unified sequence (v1's `kind` column in a unified feed)
 would have chained both worlds together.
 

@@ -66,6 +66,11 @@ public sealed class SqliteEventFeedProcessor : IDisposable
         _notifier = notifier;
         _logger = logger ?? NullLogger<SqliteEventFeedProcessor>.Instance;
 
+        foreach (var handler in _handlers)
+        {
+            FeedHandlerNames.Validate(handler.Name, handler.GetType(), nameof(handlers));
+        }
+
         var duplicate = _handlers.GroupBy(h => h.Name, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1);
         if (duplicate is not null)
         {

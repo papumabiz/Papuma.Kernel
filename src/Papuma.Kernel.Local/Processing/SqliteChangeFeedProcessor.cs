@@ -74,7 +74,11 @@ public sealed class SqliteChangeFeedProcessor : IDisposable
     /// Initializes a new instance of the <see cref="SqliteChangeFeedProcessor"/> class.
     /// </summary>
     /// <param name="connectionString">The SQLite connection string.</param>
-    /// <param name="handlers">The change handlers (unique names).</param>
+    /// <param name="handlers">
+    /// The change handlers: unique names of letters, digits, <c>.</c>, <c>_</c> and <c>-</c> (at most 100
+    /// characters, starting with a letter or digit) — the name is the handler's checkpoint identity.
+    /// </param>
+    /// <exception cref="ArgumentException">A handler name is missing, invalid or used twice.</exception>
     /// <param name="notifier">Optional in-process wakeup signal (Stage 4); <c>null</c> falls back to pure polling.</param>
     /// <param name="options">Engine options (optional).</param>
     /// <param name="logger">Logger (optional).</param>
@@ -94,6 +98,11 @@ public sealed class SqliteChangeFeedProcessor : IDisposable
         _options.Validate();
         _notifier = notifier;
         _logger = logger ?? NullLogger<SqliteChangeFeedProcessor>.Instance;
+
+        foreach (var handler in _handlers)
+        {
+            FeedHandlerNames.Validate(handler.Name, handler.GetType(), nameof(handlers));
+        }
 
         var duplicate = _handlers.GroupBy(h => h.Name, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1);
         if (duplicate is not null)

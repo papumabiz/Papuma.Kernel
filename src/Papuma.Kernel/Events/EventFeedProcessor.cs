@@ -51,7 +51,11 @@ public sealed class EventFeedProcessor : IDisposable
     /// Initializes a new instance of the <see cref="EventFeedProcessor"/> class.
     /// </summary>
     /// <param name="dataSource">The PostgreSQL data source.</param>
-    /// <param name="handlers">The event handlers (unique names).</param>
+    /// <param name="handlers">
+    /// The event handlers: unique names of letters, digits, <c>.</c>, <c>_</c> and <c>-</c> (at most 100
+    /// characters, starting with a letter or digit) — the name is the handler's checkpoint identity.
+    /// </param>
+    /// <exception cref="ArgumentException">A handler name is missing, invalid or used twice.</exception>
     /// <param name="options">Engine options (optional; shared shape with the change feed engine).</param>
     /// <param name="logger">Logger (optional).</param>
     public EventFeedProcessor(
@@ -68,6 +72,11 @@ public sealed class EventFeedProcessor : IDisposable
         _options = options ?? new ChangeFeedProcessorOptions();
         _options.Validate();
         _logger = logger ?? NullLogger<EventFeedProcessor>.Instance;
+
+        foreach (var handler in _handlers)
+        {
+            FeedHandlerNames.Validate(handler.Name, handler.GetType(), nameof(handlers));
+        }
 
         var duplicate = _handlers.GroupBy(h => h.Name, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1);
         if (duplicate is not null)

@@ -82,6 +82,16 @@ Fixed:
 
 Breaking:
 
+- **Feed handler names are validated (review P-6, Q-3).** A handler's `Name` is its identity in the shared
+  `checkpoint` and `failure` tables, where the event feed stores its handlers as `event:<name>` — and nothing
+  checked it: a change handler called `event:orders` shared one cursor and one failure list with the event
+  handler `orders` (lost or doubled deliveries), a `null` name failed with a `ParamName` of `key`, an empty or
+  whitespace name was accepted. All four processors (`ChangeFeedProcessor`, `EventFeedProcessor` and the SQLite
+  twins) now throw `ArgumentException` (`handlers`) at construction for a name that is missing, longer than
+  100 characters, or does not match `[A-Za-z0-9][A-Za-z0-9._-]*` — so `:` is out. **Upgrade:** every name in
+  the samples, the docs and this repository already complies; a name outside the rule must be renamed, and
+  because the name is the checkpoint identity, rename it together with its `checkpoint`/`failure` rows (or
+  accept a replay).
 - **The `Hash` policy is keyed (ADR-025): a model with `[TrackHash]` / `StoreAsHash()` needs a hash
   key, or the kernel refuses to start.** The old hash was an unsalted SHA-256 of the serializer's JSON
   text — neither canonical nor safe for low-entropy values such as phone numbers. It is now
