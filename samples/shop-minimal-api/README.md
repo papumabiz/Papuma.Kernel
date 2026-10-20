@@ -34,6 +34,12 @@ docker run -d --name papuma-sample-pg \
 dotnet run --project samples/shop-minimal-api
 ```
 
+> **Demo only — not a deployment pattern.** The sample connects as the `postgres` superuser and
+> lets the kernel create the schema as that role. A superuser bypasses row-level security, so
+> tenant isolation is not enforced against it. In production, create the schema under a separate
+> owner role and run the application as a plain login role — see
+> [SECURITY.md → Database roles](../../SECURITY.md#database-roles).
+
 (Podman works identically. A different port/credentials: override
 `ConnectionStrings__papuma`.) The schema (tables, RLS, key indexes) is created
 idempotently at startup — there is no migration step.

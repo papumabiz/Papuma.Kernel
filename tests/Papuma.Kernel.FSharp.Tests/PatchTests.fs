@@ -119,3 +119,85 @@ let ``plain F# lambdas apply through the C# Patch API`` () : Task =
             finally
                 session.DisposeAsync().AsTask() |> Async.AwaitTask |> Async.RunSynchronously
         })
+
+// ── Negative cases for the quotation converter (review F-3) ─────────────────────
+
+type WithOption =
+    { Id: string
+      Count: int
+      Label: string option
+      Tags: string list }
+
+/// Runs a patch with a quotation the converter must not accept and returns what it threw.
+let private patchWith (patch: PatchBuilder<WithOption> -> unit) : Task<exn option> =
+    task {
+        let mutable thrown: exn option = None
+
+        do!
+            withStore<WithOption> (fun store ->
+                task {
+                    let session = store.OpenSession(newTenant ())
+
+                    try
+                        let id = newId ()
+                        let! _ = session.SaveAsync({ Id = id; Count = 1; Label = None; Tags = [] }, 0L)
+
+                        try
+                            let! _ = session.PatchAsync<WithOption>(id, fun p -> patch p)
+                            ()
+                        with ex ->
+                            thrown <- Some ex
+                    finally
+                        session.DisposeAsync().AsTask() |> Async.AwaitTask |> Async.RunSynchronously
+                })
+
+        return thrown
+    }
+
+[<Fact>]
+let ``a method call in the quotation is rejected with an ArgumentException naming the shape`` () : Task =
+    task {
+        let! thrown = patchWith (fun p -> p.SetQ(<@ fun (x: WithOption) -> x.Id.ToUpper() @>, "x") |> ignore)
+        let ex = Option.get thrown
+        let arg = Assert.IsAssignableFrom<System.ArgumentException>(ex)
+        Assert.Contains("simple property-access chain", arg.Message)
+    }
+
+[<Fact>]
+let ``a constant instead of a property access is rejected`` () : Task =
+    task {
+        let! thrown = patchWith (fun p -> p.SetQ(<@ fun (_: WithOption) -> "constant" @>, "x") |> ignore)
+        let ex = Option.get thrown
+        let arg = Assert.IsAssignableFrom<System.ArgumentException>(ex)
+        Assert.Contains("simple property-access chain", arg.Message)
+    }
+
+[<Fact>]
+let ``an indexer or list access is rejected`` () : Task =
+    task {
+        let! thrown = patchWith (fun p -> p.SetQ(<@ fun (x: WithOption) -> x.Tags.[0] @>, "x") |> ignore)
+        Assert.IsAssignableFrom<System.ArgumentException>(Option.get thrown) |> ignore
+    }
+
+[<Fact>]
+let ``F# box on a property is rejected as not being a plain property access`` () : Task =
+    task {
+        // `box` is a call in the quotation, not a type coercion, so the converter refuses it with
+        // the same explanation as any other call — it never guesses a path.
+        let! thrown = patchWith (fun p -> p.RemoveQ(<@ fun (x: WithOption) -> box x.Count @>) |> ignore)
+
+        let arg = Assert.IsAssignableFrom<System.ArgumentException>(Option.get thrown)
+        Assert.Contains("simple property-access chain", arg.Message)
+    }
+
+[<Fact>]
+let ``an option chain through Value is not caught by the converter but fails closed at patch time`` () : Task =
+    task {
+        // x.Label.Value converts to the path 'label.value'; option fields are not supported in
+        // documents (README), so no stored document has that path and the patch is refused —
+        // it never writes anywhere else.
+        let! thrown = patchWith (fun p -> p.SetQ(<@ fun (x: WithOption) -> x.Label.Value @>, "x") |> ignore)
+
+        let ex = Assert.IsType<PatchTargetMissingException>(Option.get thrown)
+        Assert.Contains("label.value", ex.Message)
+    }

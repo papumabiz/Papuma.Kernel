@@ -1,7 +1,11 @@
 version: 2
 updates:
   - package-ecosystem: nuget
-    directory: "/"
+    # The samples are separate projects outside the solution's src/tests layout; list them
+    # explicitly so a change in discovery never silently drops them.
+    directories:
+      - "/"
+      - "/samples/*"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5

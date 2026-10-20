@@ -39,6 +39,11 @@ Point them at a running Papuma database (e.g. the sample app's). Use
 **`127.0.0.1`, not `localhost`** — container ports are published on IPv4, and a
 `localhost` that resolves to `::1` first stalls in a connection timeout.
 
+> **Demo only.** The connection strings use the `postgres` superuser, which sees every tenant's rows
+> (it bypasses row-level security). A real consumer should connect with a login role that has only
+> `SELECT` on the feed tables it reads — see
+> [SECURITY.md → Database roles](../../SECURITY.md#database-roles).
+
 ```bash
 # Go (pgx) — go run pulls the driver into the module cache
 cd go

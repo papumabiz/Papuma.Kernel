@@ -75,5 +75,11 @@ A `demo-grinder` product (stock 10) is seeded at startup so `/orders` works out
 of the box. (Use `127.0.0.1` over `localhost` if your Postgres is in a container
 published on IPv4 only.)
 
+> **Demo only — not a deployment pattern.** The sample connects as the `postgres` superuser and
+> lets the kernel create the schema as that role. A superuser bypasses row-level security, so
+> tenant isolation is not enforced against it. In production, create the schema under a separate
+> owner role and run the application as a plain login role — see
+> [SECURITY.md → Database roles](../../SECURITY.md#database-roles).
+
 Verified end-to-end 2026-06-13: small order → Approved, large → PendingApproval,
 oversell → 409, stock 10→6, two `OrderPlaced` events appended by the automation.
