@@ -88,10 +88,15 @@ public static class SqliteSchemaManager
         {
             foreach (var key in metadata.Keys)
             {
+                // Everything below is interpolated into DDL text, so each part is validated here, where it is
+                // used — not only when the model was built (review S-12, L-18).
+                InputValidator.ValidateDocumentType(metadata.Name);
                 foreach (var segment in key.ComponentSegments.SelectMany(s => s))
                 {
-                    InputValidator.ValidateDocumentType(segment); // same identifier pattern as type names
+                    InputValidator.ValidateJsonPathSegment(segment); // first: the message that names the property rule
                 }
+
+                InputValidator.ValidateIndexName(key.IndexName);
 
                 // One expression per component, in declaration order (composite keys, ADR-020).
                 var columns = string.Join(", ", key.ComponentSegments

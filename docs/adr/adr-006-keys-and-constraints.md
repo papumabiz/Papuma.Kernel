@@ -51,6 +51,17 @@ inconsistently. Real requirements that cannot be argued away:
    offers no cascades for this — deliberately.
 5. Index DDL is part of the kernel's schema management (idempotent
    `EnsureSchemaAsync` at startup or explicit CLI/setup), not manual sprawl.
+6. **A declaration must be able to take effect** (amendment, review 2026-10-20). The index name is
+   built from the type name and the path — `ux_papuma_doc_<type>_<path>`, `.` folded into `_`, the
+   composite separator into `__`, everything lower-cased — and the DDL is `CREATE INDEX IF NOT
+   EXISTS`. Two declarations that spell the same name (`a.b` and `a_b`; `Order_Item` + `x` and
+   `Order` + `item_x`; paths that differ only in case) would therefore have created only the first
+   index, silently leaving the second UNIQUE constraint unenforced. `Build()` now refuses such a
+   model, naming both keys; the way out is `.Named("…")` on one type or a renamed property.
+   Path segments that reach SQL text must be plain identifiers (`[A-Za-z_][A-Za-z0-9_]{0,100}`:
+   a key can sit on a one-letter property such as `X` or on `_id`, but not on a JSON name like
+   `a-b`); they, the type name and the index name are validated where the DDL is built, not only
+   when the model is.
 
 ## Consequences
 

@@ -1307,7 +1307,7 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
     {
         foreach (var segment in segments)
         {
-            InputValidator.ValidateDocumentType(segment);
+            InputValidator.ValidateJsonPathSegment(segment);
         }
 
         return "$." + string.Join('.', segments);

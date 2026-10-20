@@ -50,6 +50,13 @@ public sealed class DocumentTypeMetadata
     /// </summary>
     public bool ExposedToMcp { get; }
 
+    /// <summary>
+    /// Gets the JSON path of the property that carries the document id (<c>id</c> by convention, or the property
+    /// declared with <c>HasId</c>). A patch must not touch it: the <c>id</c> column and the id inside the document
+    /// would drift apart (review S-1).
+    /// </summary>
+    internal string IdPath { get; }
+
     internal DocumentTypeMetadata(
         string name,
         Type clrType,
@@ -58,8 +65,10 @@ public sealed class DocumentTypeMetadata
         Func<object, string?> idGetter,
         IReadOnlyList<Action<JsonObject>> upcasters,
         Action<object>? validator,
-        bool exposedToMcp)
+        bool exposedToMcp,
+        string? idPath = null)
     {
+        IdPath = idPath ?? "id";
         Name = name;
         ClrType = clrType;
         Policies = policies;
@@ -78,9 +87,15 @@ public sealed class DocumentTypeMetadata
     /// </summary>
     /// <param name="json">The raw stored document.</param>
     /// <param name="storedSchemaVersion">The schema version the document was stored with.</param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="storedSchemaVersion"/> is below 1 or above <see cref="SchemaVersion"/> — a document of a
+    /// newer version cannot be lifted, and callers must refuse it first (review C-9).
+    /// </exception>
     public void Upcast(JsonObject json, int storedSchemaVersion)
     {
         ArgumentNullException.ThrowIfNull(json);
+        ArgumentOutOfRangeException.ThrowIfLessThan(storedSchemaVersion, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(storedSchemaVersion, SchemaVersion);
 
         // Upcaster at index v-1 lifts version v → v+1 (chain is validated contiguous at build).
         for (var version = storedSchemaVersion; version < SchemaVersion; version++)

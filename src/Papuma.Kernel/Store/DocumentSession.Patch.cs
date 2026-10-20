@@ -46,7 +46,7 @@ public sealed partial class DocumentSession
         ArgumentNullException.ThrowIfNull(patch);
         var metadata = _model.GetRequired<T>();
         InputValidator.ValidateDocumentId(id);
-        var operations = CollectOperations(patch);
+        var operations = CollectOperations(patch, metadata);
 
         using var activity = StartWriteActivity("patch", metadata.Name, id);
         try
@@ -235,7 +235,7 @@ public sealed partial class DocumentSession
     {
         ArgumentNullException.ThrowIfNull(patch);
         var metadata = _model.GetRequired<T>();
-        var operations = CollectOperations(patch);
+        var operations = CollectOperations(patch, metadata);
 
         return await ExecuteWriteAsync(async (conn, tx) =>
         {
@@ -381,7 +381,7 @@ public sealed partial class DocumentSession
         }
     }
 
-    private static List<PatchOperation> CollectOperations<T>(Action<PatchBuilder<T>> patch)
+    private static List<PatchOperation> CollectOperations<T>(Action<PatchBuilder<T>> patch, DocumentTypeMetadata metadata)
         where T : class
     {
         var builder = new PatchBuilder<T>();
@@ -391,6 +391,7 @@ public sealed partial class DocumentSession
             throw new ArgumentException("Patch must contain at least one operation.", nameof(patch));
         }
 
+        PatchGuards.EnsureNoOperationOnTheId(builder.Operations, metadata, nameof(patch));
         return builder.Operations;
     }
 

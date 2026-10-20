@@ -30,6 +30,26 @@ Security:
 
 Fixed:
 
+- **Two declared keys can no longer silently share one index (review C-8, N-5).** The index name is built from the
+  type name and the path (`.` and the composite separator folded into `_`, everything lower-cased) and created
+  with `CREATE INDEX IF NOT EXISTS`: `a.b` and `a_b`, `Order_Item` + `x` and `Order` + `item_x`, or two paths that
+  differ only in case produced the same name — the second index was never created and its **UNIQUE constraint
+  was never enforced**, without any error. `Build()` throws `InvalidOperationException` naming both keys now; give
+  one of the types another logical name (`.Named("…")`) or rename a property.
+- **A key can sit on a one-letter property or on `_id` (S-12).** The DDL validated key path segments with the
+  document-type pattern, so `[UniqueKey] string X` or `[JsonPropertyName("_id")]` failed the schema step with
+  "Invalid documentType". Path segments have their own validator now (`[A-Za-z_][A-Za-z0-9_]{0,100}`), and the type
+  name, the segments and the index name are validated where the DDL is built, in both kernels (L-18).
+- **A patch can no longer change the id (S-1).** `PatchAsync(id, p => p.Set(x => x.Id, "other"))` rewrote the id
+  inside the document but not in the `id` column: `LoadAsync(id)` returned a document with a foreign id, the next
+  save addressed another document and feed references named the wrong one. Set, Remove and Increment on the
+  id property (`HasId` or `Id`) throw `ArgumentException` before any SQL runs — also `PatchManyAsync` and
+  `PatchWhereAsync`, on both engines.
+- **`HasId` validates its expression (C-5).** `x => x.Nested.Id`, a field, a method call or a constant used to fail
+  later (an `InvalidCastException` in `Build()`, a `TargetException` at the first save); `HasId` throws
+  `ArgumentException` (`id`) at the call now.
+- **`Upcast` checks its range (C-9).** `DocumentTypeMetadata.Upcast` with a stored schema version below 1 or above
+  the current one throws `ArgumentOutOfRangeException` instead of failing with a list index error or doing nothing.
 - **Looking at the lag can no longer rebuild a projection (review P-4).** `GetLagAsync` — behind the lag health
   check, the dashboard and the MCP tool `get_feed_lag` (documented as non-mutating) — first registered the
   handlers, and registering reconciles projection versions: on the first call per process after a deploy it

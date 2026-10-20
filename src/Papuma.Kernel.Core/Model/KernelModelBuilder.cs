@@ -94,6 +94,7 @@ public sealed class KernelModelBuilder
 
         EnsureUniqueNames("Document", byType.Select(p => (p.Key, p.Value.Name)));
         EnsureUniqueNames("Event", eventsByType.Select(p => (p.Key, p.Value.Name)));
+        EnsureUniqueIndexNames(byType.Values);
 
         return new KernelModel(byType, eventsByType);
     }
@@ -123,6 +124,35 @@ public sealed class KernelModelBuilder
             }
 
             seen[name] = (clrType, name);
+        }
+    }
+
+    /// <summary>
+    /// Fails when two declared keys get the same index name. The name is derived from the type name and the path
+    /// (<c>.</c> becomes <c>_</c>, the composite separator becomes <c>__</c>, everything is lower-cased), so
+    /// <c>a.b</c> and <c>a_b</c>, <c>Order_Item</c>+<c>x</c> and <c>Order</c>+<c>item_x</c>, or two paths that
+    /// differ only in case collide. DDL is <c>CREATE INDEX IF NOT EXISTS</c>: the second index was silently never
+    /// created, and with it the UNIQUE constraint the application relied on (review C-8, N-5).
+    /// </summary>
+    private static void EnsureUniqueIndexNames(IEnumerable<DocumentTypeMetadata> types)
+    {
+        var seen = new Dictionary<string, (string Type, string Path)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var metadata in types.OrderBy(m => m.Name, StringComparer.Ordinal))
+        {
+            foreach (var key in metadata.Keys)
+            {
+                if (seen.TryGetValue(key.IndexName, out var other))
+                {
+                    throw new InvalidOperationException(
+                        $"The keys {other.Type}.{other.Path} and {metadata.Name}.{key.Path} would both get the index " +
+                        $"name '{key.IndexName}'. The name is built from the type name and the path, with '.' and the " +
+                        "composite separator folded into '_' and everything lower-cased, so different declarations can " +
+                        "spell the same name — and the second index would silently never be created, with its UNIQUE " +
+                        "constraint. Give one of the types another logical name (.Named(\"…\")) or rename a property.");
+                }
+
+                seen[key.IndexName] = (metadata.Name, key.Path);
+            }
         }
     }
 
@@ -321,9 +351,24 @@ public sealed class KernelModelBuilder
         /// Declares the id property explicitly. Without this call, a string property
         /// named <c>Id</c> is required by convention.
         /// </summary>
+        /// <param name="id">A property of the document itself, such as <c>x =&gt; x.Code</c>.</param>
+        /// <exception cref="ArgumentException">
+        /// The expression is not a property of the document: a nested property (<c>x.Nested.Id</c>), a field, a method
+        /// call or a constant. Those used to fail in <c>Build()</c> with an <see cref="InvalidCastException"/> or at the
+        /// first save with a <see cref="TargetException"/> (review C-5).
+        /// </exception>
         public DocumentTypeBuilder<T> HasId(Expression<Func<T, string>> id)
         {
             ArgumentNullException.ThrowIfNull(id);
+
+            if (id.Body is not MemberExpression { Member: PropertyInfo, Expression: ParameterExpression })
+            {
+                throw new ArgumentException(
+                    "The id must be a property of the document itself (x => x.Code) — not a nested property, a field, " +
+                    "a method call or a constant.",
+                    nameof(id));
+            }
+
             _idExpression = id;
             return this;
         }
@@ -456,22 +501,21 @@ public sealed class KernelModelBuilder
                 orderedUpcasters.Add(upcaster);
             }
 
+            var (idGetter, idPath) = BuildIdAccess(clrType);
             return new DocumentTypeMetadata(
-                name, clrType, policies, keyMetadata, BuildIdGetter(clrType), orderedUpcasters, _validator,
-                _exposeToMcp);
+                name, clrType, policies, keyMetadata, idGetter, orderedUpcasters, _validator,
+                _exposeToMcp, idPath);
         }
 
         internal void SetPolicy(string path, FieldPolicy policy) => _policyOverrides[path] = policy;
 
-        private Func<object, string?> BuildIdGetter(Type clrType)
+        private (Func<object, string?> Getter, string Path) BuildIdAccess(Type clrType)
         {
             PropertyInfo idProperty;
             if (_idExpression is not null)
             {
-                var body = _idExpression.Body is UnaryExpression { NodeType: ExpressionType.Convert } u
-                    ? u.Operand
-                    : _idExpression.Body;
-                idProperty = (PropertyInfo)((MemberExpression)body).Member;
+                // HasId has checked the shape: a property of the document, directly.
+                idProperty = (PropertyInfo)((MemberExpression)_idExpression.Body).Member;
             }
             else
             {
@@ -487,7 +531,7 @@ public sealed class KernelModelBuilder
                 }
             }
 
-            return document => (string?)idProperty.GetValue(document);
+            return (document => (string?)idProperty.GetValue(document), JsonPathResolver.JsonNameOf(idProperty));
         }
 
         /// <summary>

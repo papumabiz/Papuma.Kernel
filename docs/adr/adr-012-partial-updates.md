@@ -43,7 +43,11 @@ writers that do not even touch the same fields.
 3. **The operation catalog is deliberately minimal**: `Set`, `Remove`,
    `Increment` on typed property paths. No query DSL, no conditional expressions,
    no array manipulation beyond setting by index — whoever needs more uses load +
-   save.
+   save. **The id property is not patchable** (amendment, review 2026-10-20): the id lives
+   twice, in the `id` column and inside the document, and a patch only changes the document.
+   A `Set`, `Remove` or `Increment` on it is refused with an `ArgumentException` before any SQL
+   runs (also for `PatchManyAsync` and `PatchWhereAsync`); the id is the one declared with
+   `HasId` or the conventional `Id`.
 
 4. **Concurrency is opt-in for patches.**
    - Without `expectedVersion`: deliberate **field-level last-writer-wins** —
