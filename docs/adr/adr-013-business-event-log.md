@@ -62,7 +62,9 @@ occurrence → event log. Should something merely happen → handler.*
    relationships correlates via `correlationId`.
 5. **Retention is legitimate here**: unlike ChangeRecords (bound to document
    versions), events may be deleted after type-specific periods (`UserLoggedIn`
-   after 90 days). The event log is a fact store, not a version store.
+   after 90 days). The event log is a fact store, not a version store. The purge
+   deletes in batches of 1000 events, one transaction each, so a large backlog never
+   becomes one huge transaction; cancellation keeps the batches already committed.
 
 ### The red line
 

@@ -30,6 +30,14 @@ Security:
 
 Fixed:
 
+- **Event retention deletes in batches (review P-8, L-11).** `EventRetention.PurgeExpiredAsync` (PostgreSQL) removed
+  everything expired in one transaction — the first purge after retention was switched on for a type with a large
+  backlog held one long transaction (locks, WAL, vacuum debt, a timeout losing all of it). It now deletes 1000
+  events per transaction, oldest first, and loops until the backlog is drained; cancellation is checked between
+  the batches and keeps what is already committed. `SqliteEventRetention` works the same way (one
+  `DELETE … LIMIT` per batch instead of one write lock for the whole purge) and uses one connection for all event
+  types instead of one per type. Public signatures and return values are unchanged.
+
 - **Two declared keys can no longer silently share one index (review C-8, N-5).** The index name is built from the
   type name and the path (`.` and the composite separator folded into `_`, everything lower-cased) and created
   with `CREATE INDEX IF NOT EXISTS`: `a.b` and `a_b`, `Order_Item` + `x` and `Order` + `item_x`, or two paths that
