@@ -15,10 +15,20 @@ namespace Papuma.Kernel.Processing;
 /// watermark — a lower <c>seq</c> can arrive after a higher one.
 /// </summary>
 /// <remarks>
+/// <para>
 /// A handler that derives state also implements <see cref="IProjection"/>, so the kernel
 /// can rebuild it; a handler with side effects (mail, webhook, bus) is an effect and is
 /// never reset — mark it <see cref="StartsAtFeedHeadAttribute"/> so its first start does
 /// not act on the whole history (ADR-024).
+/// </para>
+/// <para>
+/// <b>Handlers see every scope.</b> The feed is read across all tenants and the platform scope
+/// (<see cref="ChangeRecord.Scope"/> tells them apart), and no tenant context is set for the
+/// call. A handler that reads or writes tenant data (a projection, a follow-up command) must
+/// establish the record's scope itself, for example by opening its session with
+/// <see cref="ChangeRecord.Scope"/>, and must not carry state from one record's tenant into the
+/// next.
+/// </para>
 /// </remarks>
 public interface IChangeHandler
 {

@@ -507,9 +507,15 @@ internal abstract class SqliteFeedEngine<THandler, TRecord> : IDisposable
         var newCheckpoint = checkpoint;
         var recovered = new List<long>();
         (long Seq, Exception Error)? failed = null;
+        var cancelled = false;
         foreach (var item in batch)
         {
-            ct.ThrowIfCancellationRequested();
+            if (ct.IsCancellationRequested)
+            {
+                cancelled = true;
+                break;
+            }
+
             var seq = SeqOf(item.Record);
 
             if (item.Attempts >= _options.MaxAttempts)
@@ -538,7 +544,11 @@ internal abstract class SqliteFeedEngine<THandler, TRecord> : IDisposable
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                throw; // shutdown; an OCE the handler raised on its own (HttpClient timeout) is a failure below
+                // Shutdown (an OCE the handler raised on its own, e.g. an HttpClient timeout, is a
+                // failure below). The interrupted record is not counted; the progress before it is
+                // still recorded in phase 3 before the cancellation propagates.
+                cancelled = true;
+                break;
             }
             catch (Exception ex)
             {
@@ -569,28 +579,43 @@ internal abstract class SqliteFeedEngine<THandler, TRecord> : IDisposable
         // 3. Record the outcome — only against the checkpoint it was computed from. If it
         // moved meanwhile (a reset for a rebuild), the outcome belongs to a stale position:
         // drop it, the next cycle reads from the new one.
-        await using (var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct))
+        //
+        // On shutdown the records already delivered have had their effects, so the outcome is
+        // written all the same, not cancellable, and the cancellation propagates afterwards —
+        // otherwise every deploy redelivers up to a batch (review P-3).
+        if (cancelled && newCheckpoint == checkpoint && recovered.Count == 0)
+        {
+            ct.ThrowIfCancellationRequested(); // nothing delivered, nothing to keep
+        }
+
+        var writeCt = cancelled ? CancellationToken.None : ct;
+        await using (var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, writeCt))
         await using (var tx = conn.BeginTransaction(deferred: false))
         {
             // Position AND generation: a reset from 0 to 0 (backfill, rebuild) leaves last_seq
             // unchanged, but not the generation (review L-3).
-            if (await SqliteProjectionLifecycle.ReadCursorAsync(conn, tx, key, ct) != (checkpoint, generation))
+            if (await SqliteProjectionLifecycle.ReadCursorAsync(conn, tx, key, writeCt) != (checkpoint, generation))
             {
-                await tx.RollbackAsync(ct);
+                await tx.RollbackAsync(writeCt);
                 _logger.LogInformation(
                     "Checkpoint of {Handler} moved while its batch was handled; outcome dropped, next cycle re-reads.",
                     name);
+                if (cancelled)
+                {
+                    ct.ThrowIfCancellationRequested();
+                }
+
                 return 0;
             }
 
             foreach (var seq in recovered)
             {
-                await ClearFailureAsync(conn, tx, key, seq, ct);
+                await ClearFailureAsync(conn, tx, key, seq, writeCt);
             }
 
             if (failed is { } failure)
             {
-                var attempts = await RegisterFailureAsync(conn, tx, key, failure.Seq, failure.Error, ct);
+                var attempts = await RegisterFailureAsync(conn, tx, key, failure.Seq, failure.Error, writeCt);
                 _logger.LogWarning(failure.Error,
                     "Handler {Handler} failed on {Kind} seq {Seq} (attempt {Attempts}/{MaxAttempts}).",
                     name, FeedTag, failure.Seq, attempts, _options.MaxAttempts);
@@ -598,10 +623,15 @@ internal abstract class SqliteFeedEngine<THandler, TRecord> : IDisposable
 
             if (newCheckpoint != checkpoint)
             {
-                await SaveCheckpointAsync(conn, tx, key, newCheckpoint, ct);
+                await SaveCheckpointAsync(conn, tx, key, newCheckpoint, writeCt);
             }
 
-            await tx.CommitAsync(ct);
+            await tx.CommitAsync(writeCt);
+        }
+
+        if (cancelled)
+        {
+            ct.ThrowIfCancellationRequested(); // the shutdown that ended the batch early
         }
 
         return processed;

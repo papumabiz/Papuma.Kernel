@@ -455,13 +455,57 @@ internal abstract class PostgresFeedEngine<THandler, TRecord> : IDisposable
             return 0;
         }
 
-        var processed = 0;
-        var position = cursor.SliceSeq;
-        var highest = 0L;
-        var stopped = false;
+        var progress = new BatchProgress(cursor.SliceSeq);
+        try
+        {
+            await DeliverAsync(handler, name, key, conn, tx, batch, progress, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            await TryKeepProgressAsync(conn, tx, key, locked, cursor, progress);
+            throw;
+        }
+
+        // A batch that came back short without stopping the line has emptied the slice.
+        var sliceCompleted = !progress.Stopped && batch.Count < _options.BatchSize;
+        var next = cursor.After(progress.Position, progress.Highest, sliceCompleted);
+        if (next != locked)
+        {
+            await next.SaveAsync(conn, tx, key, ct);
+        }
+
+        await tx.CommitAsync(ct);
+        return progress.Processed;
+    }
+
+    /// <summary>What a batch has delivered so far, kept outside <see cref="DeliverAsync"/> so a shutdown can still persist it.</summary>
+    private sealed class BatchProgress(long position)
+    {
+        public int Processed { get; set; }
+
+        public long Position { get; set; } = position;
+
+        public long Highest { get; set; }
+
+        public bool Stopped { get; set; }
+    }
+
+    // Runs the handler over the batch in strict order. Only a record the handler returned from
+    // moves the progress: one interrupted by a shutdown is not counted and is delivered again.
+    private async Task DeliverAsync(
+        THandler handler, string name, string key, NpgsqlConnection conn, NpgsqlTransaction tx,
+        IReadOnlyList<BatchItem> batch, BatchProgress progress, CancellationToken ct)
+    {
         foreach (var item in batch)
         {
             ct.ThrowIfCancellationRequested();
+
+            if (item.RetryPending && item.Attempts < _options.MaxAttempts)
+            {
+                progress.Stopped = true;
+                break; // stop-the-line: strict ordering, retry after backoff (ADR-009)
+            }
+
             var seq = SeqOf(item.Record);
 
             if (item.Attempts >= _options.MaxAttempts)
@@ -473,15 +517,9 @@ internal abstract class PostgresFeedEngine<THandler, TRecord> : IDisposable
                 KernelDiagnostics.FeedPoisoned.Add(1,
                     new KeyValuePair<string, object?>("papuma.feed", FeedTag),
                     new KeyValuePair<string, object?>("papuma.handler", name));
-                position = seq;
-                highest = Math.Max(highest, seq);
+                progress.Position = seq;
+                progress.Highest = Math.Max(progress.Highest, seq);
                 continue;
-            }
-
-            if (item.RetryPending)
-            {
-                stopped = true;
-                break; // stop-the-line: strict ordering, retry after backoff (ADR-009)
             }
 
             // Handler span links to the originating write's trace (metadata traceparent).
@@ -505,7 +543,7 @@ internal abstract class PostgresFeedEngine<THandler, TRecord> : IDisposable
                 _logger.LogWarning(ex,
                     "Handler {Handler} failed on {Kind} seq {Seq} (attempt {Attempts}/{MaxAttempts}).",
                     name, FeedTag, seq, attempts, _options.MaxAttempts);
-                stopped = true;
+                progress.Stopped = true;
                 break; // stop-the-line; checkpoint stays before the failed seq
             }
 
@@ -518,28 +556,53 @@ internal abstract class PostgresFeedEngine<THandler, TRecord> : IDisposable
 
             if (item.Attempts > 0)
             {
-                await ClearFailureAsync(conn, tx, key, seq, ct);
+                // The handler has returned: finish the bookkeeping even if shutdown arrived just now,
+                // so the record counts as delivered (a short statement on the open transaction).
+                await ClearFailureAsync(conn, tx, key, seq, CancellationToken.None);
             }
 
-            position = seq;
-            highest = Math.Max(highest, seq);
-            processed++;
+            progress.Position = seq;
+            progress.Highest = Math.Max(progress.Highest, seq);
+            progress.Processed++;
         }
+    }
 
-        // A batch that came back short without stopping the line has emptied the slice.
-        var sliceCompleted = !stopped && batch.Count < _options.BatchSize;
-        var next = cursor.After(position, highest, sliceCompleted);
-        if (next != locked)
+    // Shutdown in the middle of a batch: the records already delivered have had their effects,
+    // so their progress is committed (not cancellable, the token is spent) before the
+    // cancellation propagates — otherwise every deploy redelivers up to a batch (review P-3).
+    // Best effort: if the cancellation tore the connection or the transaction down, the
+    // progress is lost and the records come again — at-least-once holds either way.
+    private async Task TryKeepProgressAsync(
+        NpgsqlConnection conn, NpgsqlTransaction tx, string key,
+        SnapshotCursor locked, SnapshotCursor cursor, BatchProgress progress)
+    {
+        if (progress.Position == cursor.SliceSeq)
         {
-            await next.SaveAsync(conn, tx, key, ct);
+            return; // nothing delivered
         }
 
-        await tx.CommitAsync(ct);
-        return processed;
+        try
+        {
+            var next = cursor.After(progress.Position, progress.Highest, sliceCompleted: false);
+            if (next != locked)
+            {
+                await next.SaveAsync(conn, tx, key, CancellationToken.None);
+            }
+
+            await tx.CommitAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Handler {Handler} could not persist its progress at shutdown; the delivered {Kind} records will be delivered again.",
+                key, FeedTag);
+        }
     }
 
     // RetryPending is decided by the database clock that also set next_retry_at — comparing it
     // with the application's clock would shift every retry by the clock skew between hosts.
+    // Record is default for the one item that ends a batch early: a record still waiting for its
+    // retry (LoadBatchAsync) — it and everything behind it are not delivered, so not mapped either.
     private sealed record BatchItem(TRecord Record, int Attempts, bool RetryPending);
 
     private async Task<IReadOnlyList<BatchItem>> LoadBatchAsync(
@@ -568,12 +631,19 @@ internal abstract class PostgresFeedEngine<THandler, TRecord> : IDisposable
         while (await reader.ReadAsync(ct))
         {
             var seq = reader.GetInt64(0);
+            var attempts = reader.GetInt32(RecordColumnCount);
+            var retryPending = reader.GetBoolean(RecordColumnCount + 1);
+            if (retryPending && attempts < _options.MaxAttempts)
+            {
+                // Stop-the-line (ADR-009): a handler waiting out its backoff would otherwise map the
+                // whole batch on every poll cycle just to throw it away (review P-15).
+                batch.Add(new BatchItem(default!, attempts, RetryPending: true));
+                break;
+            }
+
             try
             {
-                batch.Add(new BatchItem(
-                    Map(reader),
-                    reader.GetInt32(RecordColumnCount),
-                    reader.GetBoolean(RecordColumnCount + 1)));
+                batch.Add(new BatchItem(Map(reader), attempts, retryPending));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

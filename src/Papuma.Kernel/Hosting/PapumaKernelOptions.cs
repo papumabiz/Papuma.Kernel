@@ -66,10 +66,13 @@ public sealed class PapumaKernelOptions
     public ChangeFeedProcessorOptions Processing { get; } = new();
 
     /// <summary>
-    /// Gets or sets the interval of the event retention worker (default: 1 hour).
+    /// Gets or sets the interval of the event retention worker (default: 1 hour, at most about 49.7 days).
     /// The worker only runs when at least one event type declares a retention (ADR-013).
     /// </summary>
     public TimeSpan RetentionInterval { get; set; } = TimeSpan.FromHours(1);
+
+    // The longest period a PeriodicTimer accepts (0xFFFFFFFE ms, ~49.7 days).
+    private static readonly TimeSpan MaxRetentionInterval = TimeSpan.FromMilliseconds(0xFFFFFFFE);
 
     internal Action<KernelModelBuilder>? ModelConfiguration { get; private set; }
 
@@ -92,6 +95,11 @@ public sealed class PapumaKernelOptions
                 "Configure exactly one of PapumaKernelOptions.ConnectionString or .DataSource.");
         }
 
+        if (ConnectionString is not null)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(ConnectionString);
+        }
+
         if (ModelConfiguration is null)
         {
             throw new InvalidOperationException(
@@ -101,6 +109,13 @@ public sealed class PapumaKernelOptions
         if (RetentionInterval <= TimeSpan.Zero)
         {
             throw new InvalidOperationException("RetentionInterval must be positive.");
+        }
+
+        if (RetentionInterval > MaxRetentionInterval)
+        {
+            // PeriodicTimer rejects longer periods: fail at startup, not when the worker starts.
+            throw new InvalidOperationException(
+                $"RetentionInterval must not exceed {MaxRetentionInterval} (the longest period a PeriodicTimer accepts).");
         }
 
         if (HashMasterKey is not null)

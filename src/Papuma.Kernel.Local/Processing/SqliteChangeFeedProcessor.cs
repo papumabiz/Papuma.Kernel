@@ -122,8 +122,17 @@ public sealed class SqliteChangeFeedProcessor : IDisposable
         _engine.GetFailuresAsync(ct);
 
     /// <summary>
-    /// Removes a failure entry so the next cycle retries the record immediately.
+    /// Removes a failure entry so the next cycle retries the record immediately — the manual
+    /// override for a record that is waiting out its backoff.
     /// </summary>
+    /// <remarks>
+    /// This does <b>not</b> redeliver a poison record (<c>attempts</c> reached
+    /// <see cref="ChangeFeedProcessorOptions.MaxAttempts"/>): the checkpoint has already moved past
+    /// it, or does at the next cycle. Removing the entry only deletes the permanent trace of the
+    /// skip. To replay such a record into a projection, remove the entry and then rebuild the
+    /// handler (<c>ResetProjectionAsync</c>) — without removing it the replay skips the record
+    /// as poison again. An effect handler is never reset: repeat its lost work by hand (ADR-024).
+    /// </remarks>
     /// <exception cref="ArgumentException">No handler of that name runs in this processor (the event feed's handlers are not reachable here).</exception>
     public Task<bool> RetryFailureAsync(string handlerName, long seq, CancellationToken ct = default) =>
         _engine.RetryFailureAsync(handlerName, seq, ct);

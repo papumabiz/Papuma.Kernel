@@ -72,11 +72,13 @@ IReadOnlyList<ChangeRecord> history =
 // The failure table as an API (both processors)
 IReadOnlyList<FeedFailure> failures = await processor.GetFailuresAsync();
 
-// Manual retry after fixing the cause (removes the poison entry)
+// Manual retry after fixing the cause: removes the failure entry, so a record still
+// waiting out its backoff is retried at once. It does NOT redeliver a poison record —
+// the checkpoint has passed it (or passes it at the next cycle), only the entry is gone.
 await processor.RetryFailureAsync(handlerName, seq);
-// If the checkpoint already passed the poison seq: for a projection,
-// ResetProjectionAsync(handlerName) rebuilds it; an effect is never reset —
-// repeat its lost work by hand (ADR-024).
+// To redeliver a poison record: for a projection, RetryFailureAsync first (otherwise the
+// replay skips it as poison again), then ResetProjectionAsync(handlerName) rebuilds it;
+// an effect is never reset — repeat its lost work by hand (ADR-024).
 ```
 
 Privacy note: spans tag document *ids* and the tenant, never contents; diffs in
@@ -103,6 +105,21 @@ the same rules:
   test notices (the original exception for one fault, an `AggregateException` for several).
   A row that cannot be mapped is reported as `InvalidDataException` naming the sequence number
   and the handler.
+- **A shutdown keeps what was delivered.** Cancelling the token in the middle of a batch
+  persists the checkpoint (and the cleared failure entries) for the records the handler had
+  already finished, then ends the cycle with the cancellation. The record that was in flight
+  is not counted and is delivered again on the next start; the ones before it are not. This
+  is best effort — if the connection is torn down with the cancellation, the progress is
+  lost and the records come again, which at-least-once allows.
+- **A half-dead LISTEN connection costs latency, not data.** The wakeup comes through one
+  `LISTEN` connection per processor. After a failover or a dropped route without a TCP reset
+  that connection can look open while no `NOTIFY` arrives any more; the feeds then fall back
+  to the poll interval (`PollInterval`) — nothing is lost, delivery just stops being
+  immediate. Enable Npgsql's keepalive in the connection string of the data source the kernel
+  uses (for example `Keepalive=30`, seconds): its periodic ping makes a dead idle connection
+  fail, and the processor then re-establishes the `LISTEN` connection on its next idle wait.
+  The setting applies to every connection of that data source; it is off by default
+  ([Npgsql keepalive](https://www.npgsql.org/doc/keepalive.html)).
 - **A worker that ends by itself stops the host.** If the hosted service's loop returns
   without a shutdown request, it throws, so `BackgroundServiceExceptionBehavior` (default:
   stop the host) applies instead of leaving every projection frozen behind a service that

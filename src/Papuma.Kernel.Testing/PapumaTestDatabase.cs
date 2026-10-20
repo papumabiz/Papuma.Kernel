@@ -37,19 +37,22 @@ public sealed partial class PapumaTestDatabase : IAsyncDisposable
     public const string DefaultAppRoleName = "papuma_test_app";
 
     private readonly PostgreSqlContainer? _container;
+    private readonly bool _roleCreated;
 
     private PapumaTestDatabase(
         PostgreSqlContainer? container,
         string ownerConnectionString,
         NpgsqlDataSource ownerDataSource,
         NpgsqlDataSource appDataSource,
-        string appRoleName)
+        string appRoleName,
+        bool roleCreated)
     {
         _container = container;
         OwnerConnectionString = ownerConnectionString;
         OwnerDataSource = ownerDataSource;
         AppDataSource = appDataSource;
         AppRoleName = appRoleName;
+        _roleCreated = roleCreated;
     }
 
     /// <summary>
@@ -73,6 +76,17 @@ public sealed partial class PapumaTestDatabase : IAsyncDisposable
 
     /// <summary>Gets the name of the application role behind <see cref="AppDataSource"/>.</summary>
     public string AppRoleName { get; }
+
+    /// <summary>
+    /// Gets or sets whether <see cref="DisposeAsync"/> removes the application role again
+    /// (default: <c>false</c>). Roles are server-wide and outlive the test run, which adds up
+    /// on a long-lived server (<see cref="ConnectAsync"/>). Only a role this instance created is
+    /// dropped — one that existed already may belong to something else and is left alone — and
+    /// its privileges and the objects it owns in the connected database go with it
+    /// (<c>DROP OWNED BY</c>). A container started by <see cref="StartAsync"/> is removed as a
+    /// whole, so there the option has no effect.
+    /// </summary>
+    public bool DropRoleOnDispose { get; set; }
 
     /// <summary>
     /// Starts a PostgreSQL container (Testcontainers) and prepares the application role.
@@ -111,11 +125,18 @@ public sealed partial class PapumaTestDatabase : IAsyncDisposable
     /// <remarks>
     /// Roles are server-wide, not per database: test runs that share one server in
     /// parallel need distinct <paramref name="appRoleName"/>s, or each resets the other's
-    /// password.
+    /// password. An existing role is reset to <c>LOGIN NOSUPERUSER NOBYPASSRLS</c> with a new
+    /// password, so only a dedicated test role qualifies: the connecting account itself and any
+    /// role that is a superuser or may create roles are refused, untouched. The role outlives
+    /// the run unless <see cref="DropRoleOnDispose"/> is set.
     /// </remarks>
     /// <param name="ownerConnectionString">Connection string of the owner or superuser account.</param>
     /// <param name="appRoleName">The application role to create or reuse.</param>
     /// <param name="ct">A cancellation token.</param>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="appRoleName"/> is not a valid role name, or names the connecting account or
+    /// a superuser / <c>CREATEROLE</c> role.
+    /// </exception>
     public static Task<PapumaTestDatabase> ConnectAsync(
         string ownerConnectionString,
         string appRoleName = DefaultAppRoleName,
@@ -181,10 +202,23 @@ public sealed partial class PapumaTestDatabase : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await AppDataSource.DisposeAsync();
-        await OwnerDataSource.DisposeAsync();
-        if (_container is not null)
+        try
         {
-            await _container.DisposeAsync();
+            // The container goes away with its roles; on a shared server only the role created here is removed.
+            if (DropRoleOnDispose && _roleCreated && _container is null)
+            {
+                await using var cmd = OwnerDataSource.CreateCommand(
+                    $"DROP OWNED BY {AppRoleName}; DROP ROLE IF EXISTS {AppRoleName};");
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+        finally
+        {
+            await OwnerDataSource.DisposeAsync();
+            if (_container is not null)
+            {
+                await _container.DisposeAsync();
+            }
         }
     }
 
@@ -198,9 +232,11 @@ public sealed partial class PapumaTestDatabase : IAsyncDisposable
         try
         {
             var password = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16));
+            bool roleCreated;
             await using (var conn = await ownerDataSource.OpenConnectionAsync(ct))
-            await using (var cmd = conn.CreateCommand())
             {
+                roleCreated = !await RoleExistsAsync(conn, appRoleName, ct);
+                await using var cmd = conn.CreateCommand();
                 // Role name validated; password is hex. Neither can break out of the literal.
                 cmd.CommandText = $"""
                     DO $$
@@ -223,13 +259,39 @@ public sealed partial class PapumaTestDatabase : IAsyncDisposable
             }.ConnectionString;
 
             return new PapumaTestDatabase(
-                container, ownerConnectionString, ownerDataSource, NpgsqlDataSource.Create(appConnectionString), appRoleName);
+                container, ownerConnectionString, ownerDataSource, NpgsqlDataSource.Create(appConnectionString), appRoleName, roleCreated);
         }
         catch
         {
             await ownerDataSource.DisposeAsync();
             throw;
         }
+    }
+
+    // The role is reset below (new password, NOSUPERUSER, ...), so refuse before touching a role that
+    // must not be: the account we are connected as, or one that is a superuser or may create roles
+    // (review P-17). Returns whether the role exists.
+    private static async Task<bool> RoleExistsAsync(NpgsqlConnection conn, string appRoleName, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT rolsuper, rolcreaterole, rolname = current_user FROM pg_roles WHERE rolname = @name";
+        cmd.Parameters.AddWithValue("name", appRoleName);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+        {
+            return false;
+        }
+
+        if (reader.GetBoolean(0) || reader.GetBoolean(1) || reader.GetBoolean(2))
+        {
+            throw new ArgumentException(
+                $"Role '{appRoleName}' is the connecting account, a superuser or may create roles; " +
+                "the test database resets its application role (password, NOSUPERUSER) and refuses to touch it. " +
+                "Use a dedicated role name.",
+                nameof(appRoleName));
+        }
+
+        return true;
     }
 
     private static void ValidateRoleName(string appRoleName)

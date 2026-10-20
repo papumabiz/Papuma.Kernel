@@ -209,6 +209,25 @@ Fixed:
   error filter translates once instead of twice; the event append, correlation lookup and event redaction bind their
   scope parameters through the shared helper.
 
+- **A shutdown in the middle of a batch keeps the progress made (review P-3).** The feed engines threw away the
+  position of the records a handler had already finished when the host stopped mid-batch: the next start delivered up
+  to `BatchSize - 1` of them again, which shows for effect handlers (mail, webhook). On PostgreSQL the checkpoint
+  (and the failure entries cleared on the way) is now committed with a non-cancellable token before the
+  `OperationCanceledException` propagates; on SQLite the outcome phase runs although the handler phase ended in a
+  cancellation. The record a handler was cancelled on is not counted and is delivered again, the ones before it
+  are not. Best effort: if the cancellation tears the PostgreSQL connection down, nothing is persisted and the
+  records come again (at-least-once, as before). A handler that has returned also finishes clearing its failure
+  entry even if the shutdown arrives at that moment.
+- **A handler waiting for its retry no longer maps a whole batch per poll cycle (review P-15).** The PostgreSQL
+  engine loaded and parsed up to `BatchSize` rows every cycle while the first record sat out its backoff, only to
+  discard them. Reading now stops at the record whose retry is pending (it and everything behind it were never
+  delivered). Delivery is unchanged: poison records before it are still skipped, nothing behind it is delivered. A
+  row behind a pending retry that cannot be mapped is no longer reported until the retry is due.
+- **`PapumaKernelOptions` / `PapumaKernelLocalOptions` validate more at startup (review P-11).** A blank
+  `ConnectionString` (`""`, whitespace) throws `ArgumentException` (`ConnectionString`) instead of failing at the
+  first connection, and a `RetentionInterval` above what a `PeriodicTimer` accepts (about 49.7 days) throws
+  `InvalidOperationException` instead of failing when the retention worker starts.
+
 Breaking:
 
 - **MCP tools: record lists come back as `{ "records": [...], "truncated": false }` and are capped (review M-3).**
@@ -280,6 +299,12 @@ Breaking:
   an empty collection redacted nothing and returned 0, indistinguishable from a successful erasure that found
   nothing. It throws `ArgumentException` (`paths`) now, on both engines, like `RedactEventsAsync` always did.
 
+- **`PapumaTestDatabase.ConnectAsync` refuses a role it must not reset (review P-17).** It resets an existing
+  application role to `NOSUPERUSER` with a new password — which for `postgres` (or any superuser / `CREATEROLE`
+  role) locked the account out of its own server. It now throws `ArgumentException` (`appRoleName`) before touching
+  a role that is the connecting account, a superuser, or may create roles. Use a dedicated role name; ordinary
+  existing roles are reused as before.
+
 Changed:
 
 - **One feed engine per backend instead of four copies (review Q-1, P-7, L-15).** `ChangeFeedProcessor`,
@@ -341,8 +366,19 @@ Changed:
   RLS — run the application as a separate, non-owner role (`SECURITY.md`, `SchemaDdl`, getting started);
   `idle_in_transaction_session_timeout` for sessions that only read (architecture).
 
+- **Documentation corrected (review P-5, P-9, P-18).** `RetryFailureAsync` (all four processors) does not redeliver
+  a poison record — the checkpoint is past it, only its failure entry is removed; the XML docs and
+  `docs/observability.md` now say so, and name the working route (remove the entry, then rebuild the projection).
+  Rejecting poison entries was considered and dropped: it would remove the only way to replay them. `IChangeHandler`
+  and `IEventHandler` state that handlers run across all scopes and must establish the record's scope themselves.
+  `docs/observability.md` recommends Npgsql's `Keepalive` so a half-dead `LISTEN` connection is noticed.
+
 Added:
 
+- **`PapumaTestDatabase.DropRoleOnDispose`** (default `false`, review P-20): removes the application role (and its
+  privileges, `DROP OWNED BY`) on dispose when `ConnectAsync` created it, so test runs on a long-lived server stop
+  accumulating roles. A role that existed before is left alone; with `StartAsync` the container takes the role
+  with it, so the option does nothing there.
 - **`DocumentTooDeepException`** (`Papuma.Kernel.Store`, derives from `NotSupportedException`): the one exception
   for a document nested deeper than 64 levels, with `DocumentType`/`DocumentId` when known. Saves, patches (a
   result too deep, or a value too deep on its own), reads of a stored state, the engines and the UTF-8 prototype

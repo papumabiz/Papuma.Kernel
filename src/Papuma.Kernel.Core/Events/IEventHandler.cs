@@ -9,10 +9,19 @@ namespace Papuma.Kernel.Events;
 /// backoff, at-least-once delivery — implementations must be idempotent.
 /// </summary>
 /// <remarks>
+/// <para>
 /// As for change handlers (ADR-024): a handler that derives state also implements
 /// <see cref="Processing.IProjection"/>; an effect handler is never reset — mark it
 /// <see cref="Processing.StartsAtFeedHeadAttribute"/> so its first start does not act on
 /// the whole history.
+/// </para>
+/// <para>
+/// <b>Handlers see every scope.</b> The event log is read across all tenants and the platform
+/// scope (<see cref="EventRecord.Scope"/> tells them apart), and no tenant context is set for the
+/// call. A handler that reads or writes tenant data must establish the record's scope itself,
+/// for example by opening its session with <see cref="EventRecord.Scope"/>, and must not carry
+/// state from one record's tenant into the next.
+/// </para>
 /// </remarks>
 public interface IEventHandler
 {

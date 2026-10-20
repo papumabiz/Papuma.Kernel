@@ -266,7 +266,10 @@ Why it is more than convenience:
   reports success over the exception.
 
 No container runtime? `PapumaTestDatabase.ConnectAsync(ownerConnectionString)`
-uses an existing server (a CI service container, say).
+uses an existing server (a CI service container, say). It resets the application role
+(new password, `NOSUPERUSER`), so give it a dedicated role name: the connecting account
+and any superuser or `CREATEROLE` role are refused. Roles outlive the run; set
+`DropRoleOnDispose = true` to remove the role it created on dispose.
 
 **Tests that boot the real host.** A fixture that runs the application's own
 composition (`AddPapumaKernel` plus its hosted services) turns the hosted feed loops
