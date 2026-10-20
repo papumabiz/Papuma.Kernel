@@ -15,6 +15,18 @@ Security:
 
 Fixed:
 
+- **A rejected write can no longer leave half of itself in the transaction (review Q-2, S-6, L-6).** Each write
+  runs under a savepoint and a failing write is rolled back to it — but that rollback used the caller's
+  `CancellationToken`. When the request was cancelled at the moment a write failed (after its `UPDATE` ran, e.g.
+  a patch validator rejecting while the client disconnects) the rollback threw instead, the caller's exception
+  was lost, and the transaction still held the write: an application that then committed ("commit regardless")
+  persisted a document changed **without its change record**, which diverges every projection for good. On
+  SQLite a bulk patch could be persisted half-done the same way. The rollback now ignores the token and the
+  caller's own exception always surfaces. If the rollback itself fails (lost connection) the session becomes
+  unusable — `CommitAsync` and every further operation throw `InvalidOperationException`; `DiscardAsync`
+  recovers it when the full rollback succeeds. The failure is attached to the original exception as
+  `Data["papuma.savepoint_rollback_failure"]` and logged. `DisposeAsync` (and `ScopedConnection`) now release
+  the connection even when rolling back throws.
 - **A handler timeout no longer stops the feed (review P-1, L-1).** An `OperationCanceledException` raised by
   a handler itself — typically the `TaskCanceledException` of an `HttpClient` timeout — was treated as
   shutdown: `RunAsync` returned, the hosted service "completed successfully", and every projection stood

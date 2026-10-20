@@ -70,6 +70,10 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
     private SqliteTransaction? _transaction;
     private bool _disposed;
 
+    // Set when rolling a failed write back to its savepoint itself failed. SQLite keeps the
+    // transaction alive after an error, so a later commit would persist the half-done write.
+    private bool _broken;
+
     /// <summary>Gets the scope this session is bound to.</summary>
     public ScopeContext Scope { get; }
 
@@ -100,9 +104,11 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
     /// commit). The next operation starts a fresh transaction.
     /// </summary>
     /// <param name="ct">A cancellation token.</param>
+    /// <exception cref="InvalidOperationException">The session is unusable after a failed rollback of a write.</exception>
     public async Task CommitAsync(CancellationToken ct = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfBroken();
 
         if (_transaction is null)
         {
@@ -133,7 +139,9 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
     /// <summary>
     /// Rolls back all writes performed since the session was opened (or since the last
     /// commit), deliberately — unlike a dispose with pending writes, which logs a warning.
-    /// The session stays usable; the next operation starts a fresh transaction.
+    /// The session stays usable; the next operation starts a fresh transaction. This also
+    /// recovers a session that became unusable after a failed rollback of a write — provided
+    /// the full rollback succeeds.
     /// </summary>
     /// <param name="ct">A cancellation token.</param>
     public async Task DiscardAsync(CancellationToken ct = default)
@@ -148,6 +156,7 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
         await _transaction.RollbackAsync(ct);
         await _transaction.DisposeAsync();
         _transaction = null;
+        _broken = false;
         _pendingWrites.Clear();
     }
 
@@ -181,17 +190,43 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
 
         _disposed = true;
 
-        if (_transaction is not null)
+        // The connection is released even when rolling the transaction back throws (a failed
+        // commit leaves the transaction set): otherwise it would leak and keep the file locked.
+        try
         {
-            await _transaction.DisposeAsync(); // implicit rollback
-            _transaction = null;
-            ReportUncommittedDisposal();
+            if (_transaction is not null)
+            {
+                var transaction = _transaction;
+                _transaction = null;
+                try
+                {
+                    await transaction.DisposeAsync(); // implicit rollback
+                }
+                finally
+                {
+                    ReportUncommittedDisposal();
+                }
+            }
         }
-
-        if (_connection is not null)
+        finally
         {
-            await _connection.DisposeAsync();
+            var connection = _connection;
             _connection = null;
+            if (connection is not null)
+            {
+                await connection.DisposeAsync();
+            }
+        }
+    }
+
+    private void ThrowIfBroken()
+    {
+        if (_broken)
+        {
+            throw new InvalidOperationException(
+                "This session is unusable: rolling back a failed write to its savepoint failed, so the " +
+                "transaction may still hold part of that write. Dispose the session, or call DiscardAsync " +
+                "to roll the whole transaction back, and start over.");
         }
     }
 
@@ -903,6 +938,7 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
         CancellationToken ct)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfBroken();
 
         if (_transaction is null)
         {
@@ -936,12 +972,40 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
             await ExecuteSavepointCommandAsync(conn, tx, $"RELEASE {WriteSavepoint};", ct);
             return result;
         }
-        catch
+        catch (Exception ex)
         {
-            await ExecuteSavepointCommandAsync(conn, tx, $"ROLLBACK TO {WriteSavepoint};", ct);
+            await RollbackWriteAsync(conn, tx, ex);
             throw;
         }
     }
+
+    // The rollback must not depend on the caller's token: a request cancelled at the moment a
+    // write fails would otherwise skip it, and since SQLite keeps the transaction alive after
+    // an error, a later commit would persist the half-done write — a document changed without
+    // its change record. The caller's exception always wins; if the rollback itself fails the
+    // session is poisoned.
+    private async Task RollbackWriteAsync(SqliteConnection conn, SqliteTransaction tx, Exception original)
+    {
+        try
+        {
+            await ExecuteSavepointCommandAsync(conn, tx, $"ROLLBACK TO {WriteSavepoint};", CancellationToken.None);
+        }
+        catch (Exception rollbackFailure)
+        {
+            _broken = true;
+            original.Data[SavepointRollbackFailureKey] = rollbackFailure;
+            _logger?.LogError(
+                rollbackFailure,
+                "Rolling back a failed write to its savepoint failed (correlation {CorrelationId}); the session is unusable.",
+                CorrelationId);
+        }
+    }
+
+    /// <summary>
+    /// The <see cref="Exception.Data"/> key under which the exception of a failed savepoint
+    /// rollback is attached to the exception of the write that triggered it.
+    /// </summary>
+    internal const string SavepointRollbackFailureKey = "papuma.savepoint_rollback_failure";
 
     private static async Task ExecuteSavepointCommandAsync(
         SqliteConnection conn, SqliteTransaction tx, string sql, CancellationToken ct)

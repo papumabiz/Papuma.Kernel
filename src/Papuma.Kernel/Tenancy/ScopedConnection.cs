@@ -70,8 +70,15 @@ public sealed class ScopedConnection : IAsyncDisposable
     /// <summary>Rolls back unless committed, and closes the connection.</summary>
     public async ValueTask DisposeAsync()
     {
-        await Transaction.DisposeAsync(); // rolls back an uncommitted transaction
-        await Connection.DisposeAsync();
+        // The connection is released even if rolling back throws (a lost connection).
+        try
+        {
+            await Transaction.DisposeAsync(); // rolls back an uncommitted transaction
+        }
+        finally
+        {
+            await Connection.DisposeAsync();
+        }
     }
 
     internal static async Task<ScopedConnection> OpenAsync(
