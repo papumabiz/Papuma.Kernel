@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
+using System.Text.Encodings.Web;
+
 namespace Papuma.Kernel.AspNetCore.Dashboard;
 
 /// <summary>
@@ -8,15 +10,31 @@ namespace Papuma.Kernel.AspNetCore.Dashboard;
 /// string with vanilla JS that polls <c>{path}/data</c> every 2 seconds and computes
 /// rates client-side from the cumulative counters.
 /// </summary>
+/// <remarks>
+/// Everything the page renders into <c>innerHTML</c> originates from feed data that
+/// tenant input can influence (handler names, exception messages), so every dynamic
+/// value goes through <c>esc()</c>. The Content-Security-Policy set by the endpoint is
+/// the second layer; the inline script and style carry a per-request nonce.
+/// </remarks>
 internal static class DashboardPage
 {
-    public static string Html(string dataPath) => $$"""
+    /// <summary>Renders the page.</summary>
+    /// <param name="dataPath">The (validated) URL of the JSON data endpoint.</param>
+    /// <param name="nonce">The per-request CSP nonce applied to the inline script and style.</param>
+    public static string Html(string dataPath, string nonce)
+    {
+        var jsDataPath = JavaScriptEncoder.Default.Encode(dataPath);
+        var attrNonce = System.Net.WebUtility.HtmlEncode(nonce);
+        return Template(jsDataPath, attrNonce);
+    }
+
+    private static string Template(string dataPath, string nonce) => $$"""
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <title>Papuma.Kernel Dashboard</title>
-<style>
+<style nonce="{{nonce}}">
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   body { margin: 0; padding: 24px; background: #0f1115; color: #d7dae0;
@@ -65,7 +83,7 @@ internal static class DashboardPage
 <table><thead><tr><th>Series</th><th class="num">Invocations</th><th class="num">Avg ms</th></tr></thead>
 <tbody id="histograms"></tbody></table>
 
-<script>
+<script nonce="{{nonce}}">
 const DATA = "{{dataPath}}";
 const RATE_CARDS = [
   ["papuma.session.writes", "writes/s"],
@@ -76,6 +94,10 @@ const RATE_CARDS = [
   ["papuma.feed.failures", "handler failures/s"],
 ];
 let prev = null, prevAt = 0;
+
+// Feed data is tenant-influenced (handler names, exception messages): never trust it as markup.
+const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ESC[c]); }
 
 function sumByPrefix(counters, prefix) {
   return Object.entries(counters)
@@ -90,11 +112,13 @@ function lagRows(rows, tbody) {
   el.innerHTML = rows.map(r => {
     const cls = r.lag === 0 ? "ok" : r.lag < 1000 ? "warn" : "bad";
     const width = Math.max(2, Math.round(160 * r.lag / max));
-    const kind = r.kind === "projection" ? `projection v${r.projectionVersion}${r.paused ? " — paused (newer deploy)" : ""}` : "effect";
-    return `<tr><td>${r.handler}</td><td>${kind}</td><td class="num">${r.checkpoint.toLocaleString()}</td>` +
-           `<td class="num">${r.latestSeq.toLocaleString()}</td>` +
-           `<td><span class="bar" style="width:${r.lag === 0 ? 2 : width}px"></span>` +
-           `<span class="${cls}">${r.lag.toLocaleString()}</span></td></tr>`;
+    const kind = r.kind === "projection"
+      ? "projection v" + r.projectionVersion + (r.paused ? " — paused (newer deploy)" : "")
+      : "effect";
+    return `<tr><td>${esc(r.handler)}</td><td>${esc(kind)}</td><td class="num">${esc(Number(r.checkpoint).toLocaleString())}</td>` +
+           `<td class="num">${esc(Number(r.latestSeq).toLocaleString())}</td>` +
+           `<td><span class="bar" style="width:${esc(r.lag === 0 ? 2 : width)}px"></span>` +
+           `<span class="${esc(cls)}">${esc(Number(r.lag).toLocaleString())}</span></td></tr>`;
   }).join("");
 }
 
@@ -113,7 +137,7 @@ async function refresh() {
         const delta = total - sumByPrefix(prev.counters, prefix);
         rate = (delta / ((now - prevAt) / 1000)).toFixed(1);
       }
-      return `<div class="card"><div class="v">${rate}</div><div class="l">${label} <span style="float:right">Σ ${total.toLocaleString()}</span></div></div>`;
+      return `<div class="card"><div class="v">${esc(rate)}</div><div class="l">${esc(label)} <span style="float:right">Σ ${esc(total.toLocaleString())}</span></div></div>`;
     }).join("");
     prev = d; prevAt = now;
 
@@ -125,13 +149,13 @@ async function refresh() {
       ...d.eventFeed.failures.map(f => ({ feed: "event", ...f })),
     ];
     document.getElementById("failures").innerHTML = failures.length
-      ? failures.map(f => `<tr><td>${f.feed}</td><td>${f.handler}</td><td class="num">${f.seq}</td>` +
-          `<td class="num ${f.attempts >= 5 ? "bad" : "warn"}">${f.attempts}</td>` +
-          `<td>${new Date(f.nextRetryAt).toLocaleTimeString()}</td><td>${f.lastError}</td></tr>`).join("")
+      ? failures.map(f => `<tr><td>${esc(f.feed)}</td><td>${esc(f.handler)}</td><td class="num">${esc(f.seq)}</td>` +
+          `<td class="num ${esc(f.attempts >= 5 ? "bad" : "warn")}">${esc(f.attempts)}</td>` +
+          `<td>${esc(new Date(f.nextRetryAt).toLocaleTimeString())}</td><td>${esc(f.lastError)}</td></tr>`).join("")
       : '<tr><td colspan="6" class="empty ok">none — all handlers healthy</td></tr>';
 
     document.getElementById("histograms").innerHTML = Object.entries(d.histograms)
-      .map(([k, h]) => `<tr><td>${k}</td><td class="num">${h.count.toLocaleString()}</td><td class="num">${h.avgMs}</td></tr>`)
+      .map(([k, h]) => `<tr><td>${esc(k)}</td><td class="num">${esc(Number(h.count).toLocaleString())}</td><td class="num">${esc(h.avgMs)}</td></tr>`)
       .join("") || '<tr><td colspan="3" class="empty">no measurements yet</td></tr>';
 
     document.getElementById("status").textContent =

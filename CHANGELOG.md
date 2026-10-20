@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+Security:
+
+- **Dashboard: stored XSS fixed (review A-1).** The embedded dashboard rendered handler names, exception
+  messages and metric series names into `innerHTML` unescaped, so text a tenant could get into an exception
+  message ran as script in the operator's browser — also behind `RequireAuthorization()`. Every dynamic value
+  now goes through `esc()`. As a second layer both the page and `{path}/data` send a
+  `Content-Security-Policy` (the inline script and style carry a per-request nonce; `frame-ancestors 'none'`),
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `Cache-Control: no-store`.
+  `MapPapumaDashboard(path)` now validates `path` (absolute, letters/digits/`_`/`-` segments) and throws
+  `ArgumentException` for `/` and other values — `/` used to map the application root.
+
 Breaking:
 
 - **The `Hash` policy is keyed (ADR-025): a model with `[TrackHash]` / `StoreAsHash()` needs a hash

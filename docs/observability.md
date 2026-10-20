@@ -107,6 +107,15 @@ Security: the dashboard exposes operational metadata (handler names, lag, error
 messages). Protect it like a health endpoint —
 `MapPapumaDashboard().RequireAuthorization(...)` or bind it internally.
 
+Independent of that, the page and `{path}/data` harden their own responses: every
+value is HTML-escaped before it reaches the DOM (error messages can quote tenant
+input), and both endpoints send `Content-Security-Policy` (script and style only
+with a per-request nonce, same-origin `connect-src`, `frame-ancestors 'none'`),
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and
+`Cache-Control: no-store`. If a reverse proxy rewrites or strips these headers,
+the page may stop working — let them through. The mount path must be absolute and
+made of letters, digits, `_` and `-` segments (`/` is rejected).
+
 It is a viewer, not a second source of truth: lag and failures come from the
 same `GetLagAsync`/`GetFailuresAsync` the MCP server uses; counter totals are
 process-local (they reset with the process — rates are what matters here).

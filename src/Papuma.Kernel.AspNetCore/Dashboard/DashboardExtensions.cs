@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
+using System.Security.Cryptography;
+using System.Text.RegularExpressions;
+
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -21,6 +24,12 @@ namespace Papuma.Kernel.AspNetCore.Dashboard;
 /// </summary>
 public static class DashboardExtensions
 {
+    // Mount path: absolute, URL-safe segments only. Keeps the path usable inside a JS
+    // string literal and a route template without further escaping.
+    private static readonly Regex PathPattern = new(
+        "^/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(1));
     /// <summary>
     /// Registers the in-process metrics collector. Call once at startup —
     /// the collector must listen from the beginning to see all measurements.
@@ -44,7 +53,12 @@ public static class DashboardExtensions
     /// or bind it to an internal-only host.
     /// </remarks>
     /// <param name="endpoints">The endpoint route builder.</param>
-    /// <param name="path">The base path of the dashboard.</param>
+    /// <param name="path">
+    /// The base path of the dashboard: absolute, made of letters, digits, <c>_</c> and <c>-</c>
+    /// segments (for example <c>/papuma</c>). <c>/</c> is rejected so the dashboard never
+    /// claims the application root.
+    /// </param>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is not a valid mount path.</exception>
     public static IEndpointConventionBuilder MapPapumaDashboard(
         this IEndpointRouteBuilder endpoints,
         string path = "/papuma")
@@ -52,6 +66,12 @@ public static class DashboardExtensions
         ArgumentNullException.ThrowIfNull(endpoints);
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         path = path.TrimEnd('/');
+        if (!PathPattern.IsMatch(path))
+        {
+            throw new ArgumentException(
+                "The dashboard path must be absolute and consist of letters, digits, '_' and '-' segments (e.g. '/papuma'); '/' is not allowed.",
+                nameof(path));
+        }
 
         // Resolving the collector here (not lazily per request) starts the meter
         // listener with the app, so totals cover the full process lifetime.
@@ -59,13 +79,20 @@ public static class DashboardExtensions
 
         var group = endpoints.MapGroup(path);
 
-        group.MapGet("/", () => Results.Content(DashboardPage.Html($"{path}/data"), "text/html"));
+        group.MapGet("/", (HttpContext http) =>
+        {
+            var nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
+            ApplySecurityHeaders(http.Response, nonce);
+            return Results.Content(DashboardPage.Html($"{path}/data", nonce), "text/html");
+        });
 
         group.MapGet("/data", async (
+            HttpContext http,
             ChangeFeedProcessor changeProcessor,
             EventFeedProcessor eventProcessor,
             CancellationToken ct) =>
         {
+            ApplySecurityHeaders(http.Response, nonce: null);
             var json = await DashboardDataBuilder.BuildAsync(changeProcessor, eventProcessor, collector, ct);
             return Results.Content(json.ToJsonString(), "application/json");
         });
@@ -89,5 +116,27 @@ public static class DashboardExtensions
         });
 
         return group;
+    }
+
+    /// <summary>
+    /// Hardens the page and data responses: the page may only run its own nonce-tagged
+    /// script and style, can only talk to its own origin and cannot be framed; nothing
+    /// is cached because the content is operational metadata.
+    /// </summary>
+    private static void ApplySecurityHeaders(HttpResponse response, string? nonce)
+    {
+        // style-src-attr: the page sets a few inline style attributes (bar widths); a
+        // nonce cannot cover attributes. Scripts stay nonce-only.
+        var csp = nonce is null
+            ? "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+            : $"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'nonce-{nonce}'; " +
+              "style-src-attr 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; " +
+              "base-uri 'none'; form-action 'none'";
+
+        var headers = response.Headers;
+        headers["Content-Security-Policy"] = csp;
+        headers["X-Content-Type-Options"] = "nosniff";
+        headers["Referrer-Policy"] = "no-referrer";
+        headers["Cache-Control"] = "no-store";
     }
 }

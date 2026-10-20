@@ -96,6 +96,8 @@ internal static class DashboardDataBuilder
         return json;
     }
 
+    // SanitizeError already caps what is stored, but the type name is prepended and rows
+    // written by older versions may be longer, so the display cap stays.
     private static string Truncate(string value, int max) =>
         value.Length <= max ? value : value[..max] + "…";
 }

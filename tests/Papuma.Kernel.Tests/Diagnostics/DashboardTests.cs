@@ -90,7 +90,7 @@ public sealed class DashboardTests : IAsyncLifetime
         var html = typeof(DashboardMetricsCollector).Assembly
             .GetType("Papuma.Kernel.AspNetCore.Dashboard.DashboardPage")!
             .GetMethod("Html", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public)!
-            .Invoke(null, ["/papuma/data"]) as string;
+            .Invoke(null, ["/papuma/data", "nonce"]) as string;
 
         Assert.NotNull(html);
         Assert.Contains("/papuma/data", html);

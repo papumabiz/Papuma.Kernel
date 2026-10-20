@@ -46,7 +46,9 @@ These are the parts where a bug is a vulnerability rather than a defect:
 - **The ASP.NET Core dashboard** — it is unauthenticated unless you put
   authorization in front of it; mapping it without authorization metadata emits a
   startup warning. Exposing it publicly is a deployment mistake, not a kernel
-  vulnerability.
+  vulnerability. The page itself escapes all dynamic values and sends a
+  Content-Security-Policy plus `nosniff` / `no-store` headers; a rendering
+  bypass of that escaping is in scope.
 
 ## Out of scope
 
