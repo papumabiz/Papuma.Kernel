@@ -112,7 +112,10 @@ public sealed partial class SqliteDocumentSession
     /// </summary>
     /// <typeparam name="TEvent">The registered event CLR type.</typeparam>
     /// <param name="selectorPath">The dot-separated payload path identifying the data subject (e.g. <c>userId</c>).</param>
-    /// <param name="selectorValue">The value to match (text comparison).</param>
+    /// <param name="selectorValue">
+    /// The value to match, compared as text with the JSON spelling of the field (<c>42</c>, <c>true</c>,
+    /// <c>1.50</c>) — as on the PostgreSQL kernel. Object and array fields are not meaningful selectors.
+    /// </param>
     /// <param name="paths">The payload paths to remove (descendant-covering). Must not be empty.</param>
     /// <param name="reason">The mandatory audit reason.</param>
     /// <param name="ct">A cancellation token.</param>
@@ -148,12 +151,12 @@ public sealed partial class SqliteDocumentSession
                 await using (var cmd = conn.CreateCommand())
                 {
                     cmd.Transaction = tx;
-                    cmd.CommandText = """
+                    cmd.CommandText = $"""
                         SELECT seq, payload, metadata
                         FROM event
                         WHERE scope = @scope AND tenant_id = @tenantId
                           AND event_type = @type
-                          AND json_extract(payload, @path) = @value
+                          AND {PayloadTextAtPath} = @value
                         ORDER BY seq
                         """;
                     cmd.Parameters.AddWithValue("scope", Scope.Scope.ToString());
@@ -197,6 +200,18 @@ public sealed partial class SqliteDocumentSession
             throw; // unreachable — the filter never catches
         }
     }
+
+    /// <summary>
+    /// The payload value at the bound <c>@path</c> as text, the way PostgreSQL's <c>#&gt;&gt;</c> yields it.
+    /// <c>json_extract</c> alone does not: it returns INTEGER/REAL for JSON numbers and 0/1 for
+    /// booleans, which never equal a TEXT parameter — an erasure request for a numeric id would match
+    /// nothing (review L-4, pinned in <c>SqliteSpikeTests</c>). Strings are decoded as usual; every other
+    /// type is read as its JSON text (<c>-&gt;</c>), so <c>42</c>, <c>1.50</c> and <c>true</c> keep their
+    /// spelling and a number beyond 2^53 is not rounded through a double. JSON <c>null</c> gives SQL
+    /// NULL, a missing path too — both match nothing, as in PostgreSQL.
+    /// </summary>
+    private const string PayloadTextAtPath =
+        "CASE json_type(payload, @path) WHEN 'text' THEN json_extract(payload, @path) WHEN 'null' THEN NULL ELSE payload -> @path END";
 
     /// <summary>
     /// Shallow top-level merge of <paramref name="source"/> into <paramref name="target"/>

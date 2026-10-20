@@ -277,8 +277,8 @@ public sealed class SqliteEventFeedProcessor : IDisposable
                 Seq: reader.GetInt64(1),
                 Attempts: reader.GetInt32(2),
                 LastError: reader.GetString(3),
-                NextRetryAt: DateTimeOffset.Parse(reader.GetString(4)),
-                UpdatedAt: DateTimeOffset.Parse(reader.GetString(5))));
+                NextRetryAt: SqliteTimestamp.Parse(reader.GetString(4)),
+                UpdatedAt: SqliteTimestamp.Parse(reader.GetString(5))));
         }
 
         return failures;
@@ -551,12 +551,12 @@ public sealed class SqliteEventFeedProcessor : IDisposable
                     Payload: (JsonObject)JsonNode.Parse(reader.GetString(4))!,
                     ActorId: reader.GetString(5),
                     Metadata: (JsonObject)JsonNode.Parse(reader.GetString(6))!,
-                    OccurredAt: DateTimeOffset.Parse(reader.GetString(7)));
+                    OccurredAt: SqliteTimestamp.Parse(reader.GetString(7)));
 
                 batch.Add(new BatchItem(
                     record,
                     reader.GetInt32(8),
-                    reader.IsDBNull(9) ? null : DateTimeOffset.Parse(reader.GetString(9))));
+                    reader.IsDBNull(9) ? null : SqliteTimestamp.Parse(reader.GetString(9))));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

@@ -203,6 +203,9 @@ same hard rules above — with these engine-specific adjustments:
   with an `ISqliteSchemaContributor` runs after the kernel schema, before the feed
   workers — same place as on Postgres, no advisory lock needed (one process owns
   the file). SQLite has no `ADD COLUMN IF NOT EXISTS`: check `pragma_table_info`.
+- **Key values compare as numbers, not text.** SQLite's `json_extract` returns INTEGER/REAL
+  for JSON numbers, so numeric keys bind as numbers (integers as `long`, exact beyond 2^53).
+  `RedactEventsAsync` selects by the JSON spelling as text, like PostgreSQL's `#>>`.
 - **No embedded dashboard, no feed-lag health check, no MCP surface (yet).**
   Those live in `Papuma.Kernel.AspNetCore`/`Papuma.Kernel.Mcp`, which have no
   SQLite counterpart. `KernelDiagnostics` (`Meter`/`ActivitySource`) *is*

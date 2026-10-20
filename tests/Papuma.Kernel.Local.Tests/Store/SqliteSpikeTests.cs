@@ -216,6 +216,34 @@ public sealed class SqliteSpikeTests : IDisposable
         Assert.Equal(1, intMatchCount);         // confirms it DOES match with the correct SQLite type
     }
 
+    [Theory]
+    [InlineData("{\"v\":\"alice\"}", "alice")]               // string: decoded
+    [InlineData("{\"v\":\"a\\\"b\"}", "a\"b")]                // string with an escape: decoded
+    [InlineData("{\"v\":42}", "42")]                       // integer keeps its spelling
+    [InlineData("{\"v\":-7}", "-7")]
+    [InlineData("{\"v\":9007199254740993}", "9007199254740993")] // not rounded through a double
+    [InlineData("{\"v\":1.50}", "1.50")]                   // scale kept, like jsonb
+    [InlineData("{\"v\":0.25}", "0.25")]
+    [InlineData("{\"v\":true}", "true")]
+    [InlineData("{\"v\":false}", "false")]
+    [InlineData("{\"v\":null}", null)]                      // JSON null -> SQL NULL, as #>> in PostgreSQL
+    [InlineData("{\"w\":1}", null)]                         // missing path -> NULL
+    public void PayloadTextAtPath_YieldsTheJsonSpelling_LikePostgresTextExtraction(string json, string? expected)
+    {
+        // Pins what SqliteDocumentSession.PayloadTextAtPath relies on (review L-4): json_type tells
+        // the JSON type, '->' returns the JSON text of non-string values, json_extract decodes
+        // strings. A SQLite upgrade that changes any of this must fail here, not in an erasure.
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText =
+            "SELECT CASE json_type(@json, '$.\"v\"') WHEN 'text' THEN json_extract(@json, '$.\"v\"') " +
+            "WHEN 'null' THEN NULL ELSE @json -> '$.\"v\"' END;";
+        cmd.Parameters.AddWithValue("json", json);
+
+        var actual = cmd.ExecuteScalar();
+
+        Assert.Equal(expected, actual is DBNull or null ? null : (string)actual);
+    }
+
     [Fact]
     public void JsonExtractIndex_NotUsed_WhenPathIsABoundParameter()
     {

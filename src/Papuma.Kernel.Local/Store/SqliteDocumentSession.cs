@@ -1321,8 +1321,11 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
     /// unlike Postgres's <c>#&gt;&gt;</c>, which always returns text (see
     /// SqliteSpikeTests.JsonExtract_NumericField_ComparedAgainstTextParameter_DoesNotMatch).
     /// INTEGER vs. REAL doesn't need to match exactly — SQLite compares both as NUMERIC
-    /// and <c>42 = 42.0</c> is true — so every numeric CLR type binds as <c>double</c>.
-    /// Falls back to the pre-existing text/JSON behavior for anything else (e.g. Guid,
+    /// and <c>42 = 42.0</c> is true. Integers still bind as <c>long</c> (review L-9): a
+    /// <c>double</c> has 53 bits of mantissa, so <c>9007199254740993</c> became
+    /// <c>9007199254740992.0</c> and matched the neighbouring document — snowflake ids hit this.
+    /// Only floating-point, fractional decimal and beyond-int64 values bind as <c>double</c>
+    /// (SQLite itself stores those as REAL). Falls back to the pre-existing text/JSON behavior for anything else (e.g. Guid,
     /// DateTimeOffset), which is correct there since those fields serialize to JSON
     /// strings, so <c>json_extract</c> returns TEXT for them too.
     /// </summary>
@@ -1334,7 +1337,14 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
                 return s;
             case bool b:
                 return b ? 1L : 0L;
-            case sbyte or byte or short or ushort or int or uint or long or ulong or float or double or decimal:
+            case sbyte or byte or short or ushort or int or uint or long:
+                return Convert.ToInt64(value);
+            case ulong u:
+                // Beyond int64 SQLite stores the JSON number as REAL, so a double is all that can match.
+                return u <= long.MaxValue ? (long)u : (double)u;
+            case decimal d when decimal.Truncate(d) == d && d >= long.MinValue && d <= long.MaxValue:
+                return (long)d; // an integral decimal is an integer key
+            case float or double or decimal:
                 return Convert.ToDouble(value);
             default:
                 var node = JsonSerializer.SerializeToNode(value, KernelJson.Options)

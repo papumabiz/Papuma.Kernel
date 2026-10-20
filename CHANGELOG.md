@@ -15,6 +15,18 @@ Security:
 
 Fixed:
 
+- **SQLite: `RedactEventsAsync` finds events by numeric and boolean selectors (review L-4, GDPR).**
+  `json_extract(payload, path) = @value` compared a TEXT parameter with an INTEGER/REAL/0-1 value, which
+  SQLite never considers equal — an erasure request for `userId = 42` returned 0 and left the personal data
+  in the event log, silently. The selector is now compared as text with the JSON spelling of the field,
+  exactly like the PostgreSQL kernel's `#>>` (`42`, `true`, `1.50`; a number beyond 2^53 is not rounded;
+  JSON `null` and a missing field match nothing). Both engines now run the same case table.
+- **SQLite: integer keys beyond 2^53 are matched exactly (L-9).** `LoadByKey`, `LoadAllByKey`, `PatchWhere`
+  and `DeleteWhere` bound every number as `double`, so `9007199254740993` became `…992.0` — not found, or
+  worse: the **neighbouring document** was returned, patched or deleted (snowflake ids). Integers bind as
+  `long` now.
+- **SQLite: stored timestamps are parsed culture-independently (L-10).** Hardening only: the suspected shift
+  under `th-TH` does not occur for the `"O"` text the kernel writes.
 - **A rejected write can no longer leave half of itself in the transaction (review Q-2, S-6, L-6).** Each write
   runs under a savepoint and a failing write is rolled back to it — but that rollback used the caller's
   `CancellationToken`. When the request was cancelled at the moment a write failed (after its `UPDATE` ran, e.g.

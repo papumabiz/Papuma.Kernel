@@ -72,7 +72,7 @@ public sealed partial class SqliteDocumentSession
                 Diff: DocumentDiff.FromJson((JsonObject)JsonNode.Parse(reader.GetString(4))!),
                 ActorId: reader.GetString(5),
                 Metadata: (JsonObject)JsonNode.Parse(reader.GetString(6))!,
-                OccurredAt: DateTimeOffset.Parse(reader.GetString(7))));
+                OccurredAt: SqliteTimestamp.Parse(reader.GetString(7))));
         }
 
         return history;
@@ -125,7 +125,7 @@ public sealed partial class SqliteDocumentSession
                 Diff: DocumentDiff.FromJson((JsonObject)JsonNode.Parse(reader.GetString(6))!),
                 ActorId: reader.GetString(7),
                 Metadata: (JsonObject)JsonNode.Parse(reader.GetString(8))!,
-                OccurredAt: DateTimeOffset.Parse(reader.GetString(9))));
+                OccurredAt: SqliteTimestamp.Parse(reader.GetString(9))));
         }
 
         return changes;

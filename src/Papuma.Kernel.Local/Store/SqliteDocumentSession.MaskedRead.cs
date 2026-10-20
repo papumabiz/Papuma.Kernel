@@ -37,62 +37,11 @@ public sealed partial class SqliteDocumentSession
         string documentType, string id, CancellationToken ct) =>
         LoadMaskedCoreAsync(ResolveExposedType(documentType), id, ct);
 
-    /// <summary>
-    /// MCP-style entry point: masked read by a declared key (ADR-006/016). The key path
-    /// must be a declared key — there is no free-form query (ADR-009).
-    /// </summary>
-    internal async Task<MaskedDocumentResult?> LoadMaskedByKeyForMcpAsync(
-        string documentType, string keyPath, string value, CancellationToken ct)
-    {
-        var metadata = ResolveExposedType(documentType);
-        var key = metadata.Keys.FirstOrDefault(k => k.Path == keyPath)
-            ?? throw new ArgumentException(
-                $"'{keyPath}' is not a declared key on {metadata.Name}. " +
-                "Masked reads are limited to declared keys — there is no free-form query (ADR-009).",
-                nameof(keyPath));
-        if (key.IsComposite)
-        {
-            throw new ArgumentException(
-                $"'{keyPath}' is a composite key on {metadata.Name}; masked reads by key match " +
-                "single-field keys only (ADR-020).",
-                nameof(keyPath));
-        }
-
-        var (conn, tx) = await EnsureTransactionAsync(ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        // Path interpolated as a validated literal, not bound — see
-        // SqliteDocumentSession.ValidatedKeyJsonPath's remarks (a bound @path parameter
-        // defeats the declared-key expression index). Value stays text-compared here
-        // (MCP entry point, string-in by contract) — matches the Postgres kernel's own
-        // #>> semantics for this specific method, which is always text too. The type is a
-        // validated literal as well: key indexes are partial, a bound @type is not matched.
-        cmd.CommandText = $"""
-            SELECT data, version, schema_version
-            FROM document
-            WHERE scope = @scope AND tenant_id = @tenantId
-              AND document_type = {ValidatedTypeLiteral(metadata.Name)}
-              AND json_extract(data, '{ValidatedKeyJsonPath(key)}') = @value
-            LIMIT 2
-            """;
-        AddScopeParameters(cmd, metadata.Name);
-        cmd.Parameters.AddWithValue("value", value);
-
-        var matches = new List<MaskedDocumentResult>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            matches.Add(MaskRow(metadata, reader.GetString(0), reader.GetInt64(1), reader.GetInt32(2)));
-        }
-
-        return matches.Count switch
-        {
-            0 => null,
-            1 => matches[0],
-            _ => throw new InvalidOperationException(
-                $"Key {metadata.Name}.{keyPath} matched multiple documents. Use a unique key."),
-        };
-    }
+    // There is deliberately no masked read by key here. The PostgreSQL kernel has one for the MCP
+    // tools (text comparison via #>>); a copy that compared json_extract against a TEXT parameter
+    // could not find numeric or boolean keys (review L-4/L-19), and nothing called it — the MCP
+    // package reaches only the PostgreSQL session. When Local gets MCP support, build it on the
+    // same text semantics as RedactEventsAsync (PayloadTextAtPath) and test it against PostgreSQL.
 
     private DocumentTypeMetadata ResolveExposedType(string documentType)
     {

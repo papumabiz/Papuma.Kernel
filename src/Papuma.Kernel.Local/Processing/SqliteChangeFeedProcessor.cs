@@ -369,8 +369,8 @@ public sealed class SqliteChangeFeedProcessor : IDisposable
                 Seq: reader.GetInt64(1),
                 Attempts: reader.GetInt32(2),
                 LastError: reader.GetString(3),
-                NextRetryAt: DateTimeOffset.Parse(reader.GetString(4)),
-                UpdatedAt: DateTimeOffset.Parse(reader.GetString(5))));
+                NextRetryAt: SqliteTimestamp.Parse(reader.GetString(4)),
+                UpdatedAt: SqliteTimestamp.Parse(reader.GetString(5))));
         }
 
         return failures;
@@ -579,12 +579,12 @@ public sealed class SqliteChangeFeedProcessor : IDisposable
                     Diff: DocumentDiff.FromJson((JsonObject)JsonNode.Parse(reader.GetString(8))!),
                     ActorId: reader.GetString(9),
                     Metadata: (JsonObject)JsonNode.Parse(reader.GetString(10))!,
-                    OccurredAt: DateTimeOffset.Parse(reader.GetString(11)));
+                    OccurredAt: SqliteTimestamp.Parse(reader.GetString(11)));
 
                 batch.Add(new BatchItem(
                     record,
                     reader.GetInt32(12),
-                    reader.IsDBNull(13) ? null : DateTimeOffset.Parse(reader.GetString(13))));
+                    reader.IsDBNull(13) ? null : SqliteTimestamp.Parse(reader.GetString(13))));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

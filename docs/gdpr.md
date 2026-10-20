@@ -107,7 +107,10 @@ diffs after the delete. Exactly this gap is closed by the redaction primitives:
   works for already-deleted documents. Idempotent.
 - `RedactEventsAsync<TEvent>(selectorPath, selectorValue, paths, reason)` removes
   payload fields from selected events (semantics of the Redact event policy: the
-  field is absent, consumers see defaults).
+  field is absent, consumers see defaults). `selectorValue` is compared **as text with
+  the JSON spelling of the field**: `"alice"`, `"42"`, `"true"`, `"1.50"` — so a numeric
+  user id is selected with `userId.ToString()`. A JSON `null` or a missing field matches
+  nothing. The same on PostgreSQL and SQLite (the engines run one shared case table).
 
 Both are **irreversible** and demand an audit reason; every rewritten row gets a
 `redaction` block in its metadata (when, why, actor, correlation). Consequence
