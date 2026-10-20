@@ -75,8 +75,9 @@ public sealed partial class SqliteDocumentSession
 
                 EnsurePatchableSchema(metadata, id, oldSchemaVersion);
 
-                var patchedJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
+                var patchedJson = DocumentJson.ParseStored(oldJsonText, metadata.Name, id);
                 JsonPatchApplier.Apply(patchedJson, operations, metadata.Name, id);
+                DocumentJson.EnsureDepth(patchedJson, metadata.Name, id, "cannot be patched");
                 RunValidator(metadata, patchedJson);
 
                 await using var updateCmd = conn.CreateCommand();
@@ -105,7 +106,7 @@ public sealed partial class SqliteDocumentSession
                     throw await VersionConflictAsync(conn, tx, metadata.Name, id, expectedVersion ?? 0, ct);
                 }
 
-                var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
+                var oldJson = DocumentJson.ParseStored(oldJsonText, metadata.Name, id);
                 var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, patchedJson), metadata, id, _hashKeys, Scope);
 
                 await InsertChangeRecordAsync(
@@ -257,8 +258,9 @@ public sealed partial class SqliteDocumentSession
                 // Any violation rolls the entire savepoint back — bulk is atomic (ADR-014).
                 EnsurePatchableSchema(metadata, id, oldSchemaVersion);
 
-                var patchedJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
+                var patchedJson = DocumentJson.ParseStored(oldJsonText, metadata.Name, id);
                 JsonPatchApplier.Apply(patchedJson, operations, metadata.Name, id);
+                DocumentJson.EnsureDepth(patchedJson, metadata.Name, id, "cannot be patched");
                 RunValidator(metadata, patchedJson);
 
                 await using var updateCmd = conn.CreateCommand();
@@ -276,7 +278,7 @@ public sealed partial class SqliteDocumentSession
                 var newVersion = (long)(await ExecuteMappingKeyViolationsAsync(
                     () => updateCmd.ExecuteScalarAsync(ct), metadata.Name))!;
 
-                var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
+                var oldJson = DocumentJson.ParseStored(oldJsonText, metadata.Name, id);
                 var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, patchedJson), metadata, id, _hashKeys, Scope);
                 changes.Add((id, newVersion, metadata.SchemaVersion, diff));
             }
@@ -321,7 +323,7 @@ public sealed partial class SqliteDocumentSession
             {
                 EnsureSchemaNotNewer(metadata, id, oldSchemaVersion);
 
-                var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
+                var oldJson = DocumentJson.ParseStored(oldJsonText, metadata.Name, id);
                 var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, after: null), metadata, id, _hashKeys, Scope);
                 changes.Add((id, version + 1, oldSchemaVersion, diff));
             }

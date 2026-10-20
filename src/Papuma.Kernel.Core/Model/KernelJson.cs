@@ -15,9 +15,11 @@ namespace Papuma.Kernel.Model;
 /// </remarks>
 internal static class KernelJson
 {
-    // MaxDepth spelled out: it is the default, and it must stay equal to the engines' limit (JsonLimits).
+    // One more than the engines' limit on purpose: the serializer writes at most MaxDepth - 1 levels (measured on
+    // .NET 10), the parser reads MaxDepth. With 65 a document of exactly JsonLimits.MaxDepth (64) levels can be
+    // saved, and the 65th level is refused — the same document the engines and the parser accept.
     public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
     {
-        MaxDepth = Changes.JsonLimits.MaxDepth,
+        MaxDepth = Changes.JsonLimits.MaxDepth + 1,
     };
 }

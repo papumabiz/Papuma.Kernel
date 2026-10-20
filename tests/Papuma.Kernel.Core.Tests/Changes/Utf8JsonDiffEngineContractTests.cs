@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 
 using Papuma.Kernel.Changes;
+using Papuma.Kernel.Store;
 
 namespace Papuma.Kernel.Core.Tests.Changes;
 
@@ -151,8 +152,8 @@ public sealed class Utf8JsonDiffEngineContractTests
 
         Assert.Single(diff.Entries);
         Assert.Equal(JsonLimits.MaxDepth, diff.Entries[0].Path.Split('.').Length);
-        Assert.ThrowsAny<JsonException>(() => Utf8JsonDiffEngine.Diff(Nested(JsonLimits.MaxDepth + 1, "1"), "{}"));
-        Assert.ThrowsAny<JsonException>(() => Utf8JsonDiffEngine.Diff(Nested(10_000, "1"), "{}"));
+        Assert.Throws<DocumentTooDeepException>(() => Utf8JsonDiffEngine.Diff(Nested(JsonLimits.MaxDepth + 1, "1"), "{}"));
+        Assert.Throws<DocumentTooDeepException>(() => Utf8JsonDiffEngine.Diff(Nested(10_000, "1"), "{}"));
     }
 
     [Fact]
@@ -160,7 +161,7 @@ public sealed class Utf8JsonDiffEngineContractTests
     {
         var arrays = new string('[', JsonLimits.MaxDepth) + new string(']', JsonLimits.MaxDepth);
 
-        Assert.ThrowsAny<JsonException>(() => Utf8JsonDiffEngine.Diff($$"""{"a":{{arrays}}}""", "{}"));
+        Assert.Throws<DocumentTooDeepException>(() => Utf8JsonDiffEngine.Diff($$"""{"a":{{arrays}}}""", "{}"));
     }
 
     // One limit everywhere: what the sessions can serialize and parse is exactly what the engines accept.
@@ -170,7 +171,10 @@ public sealed class Utf8JsonDiffEngineContractTests
         Assert.Equal(64, JsonLimits.MaxDepth);
         Assert.NotNull(JsonNode.Parse(Nested(JsonLimits.MaxDepth, "1"))); // sessions: JsonNode.Parse, default options
         Assert.ThrowsAny<JsonException>(() => JsonNode.Parse(Nested(JsonLimits.MaxDepth + 1, "1")));
-        Assert.Equal(JsonLimits.MaxDepth, Papuma.Kernel.Model.KernelJson.Options.MaxDepth);
+        // The serializer writes one level less than its MaxDepth, hence the + 1 in KernelJson.Options.
+        Assert.Equal(JsonLimits.MaxDepth + 1, Papuma.Kernel.Model.KernelJson.Options.MaxDepth);
+        Assert.Equal(JsonLimits.MaxDepth, Levels(System.Text.Json.JsonSerializer.SerializeToNode(Chain(JsonLimits.MaxDepth), Papuma.Kernel.Model.KernelJson.Options)));
+        Assert.ThrowsAny<JsonException>(() => System.Text.Json.JsonSerializer.SerializeToNode(Chain(JsonLimits.MaxDepth + 1), Papuma.Kernel.Model.KernelJson.Options));
         Assert.False(JsonLimits.ExceedsMaxDepth(JsonNode.Parse(Nested(JsonLimits.MaxDepth, "1"))));
     }
 
@@ -249,6 +253,27 @@ public sealed class Utf8JsonDiffEngineContractTests
         var after = Encoding.UTF8.GetBytes("""{"a":2,"padding":"................................................"}""");
         return (new WeakReference(before), new WeakReference(after), Utf8JsonDiffEngine.Diff(before.AsMemory(), after.AsMemory()));
     }
+
+    public sealed record Link(int V, Link? Next);
+
+    // A chain of `levels` objects: the outermost Link is the first level.
+    private static Link Chain(int levels)
+    {
+        Link? link = null;
+        for (var i = 0; i < levels; i++)
+        {
+            link = new Link(i, link);
+        }
+
+        return link!;
+    }
+
+    private static int Levels(JsonNode? node) => node switch
+    {
+        JsonObject obj => 1 + obj.Select(p => Levels(p.Value)).DefaultIfEmpty(0).Max(),
+        JsonArray array => 1 + array.Select(Levels).DefaultIfEmpty(0).Max(),
+        _ => 0,
+    };
 
     private static string Nested(int levels, string leaf)
     {

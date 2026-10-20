@@ -41,6 +41,10 @@ accumulate. (Both engines conform; see §3 for why this is pinned.)
   (`not-numeric`; `NonNumericIncrementException` in the .NET kernels) and the whole
   patch is rolled back. It MUST NOT overwrite or coerce the value — a numeric string
   such as `"5"` is not a number.
+- A patch whose **result** would nest deeper than 64 levels (changes.md §2.5) — a deep
+  value set far down, each fine on its own — **fails** (`too-deep`;
+  `DocumentTooDeepException` in the .NET kernels) and the whole patch is rolled back. A
+  value that is too deep on its own fails before anything is sent.
 
 ### When several operations would fail
 

@@ -39,6 +39,14 @@ Changed:
 
 Added:
 
+- **`DocumentTooDeepException`** (`Papuma.Kernel.Store`, derives from `NotSupportedException`): the one exception
+  for a document nested deeper than 64 levels, with `DocumentType`/`DocumentId` when known. Saves, patches (a
+  result too deep, or a value too deep on its own), reads of a stored state, the engines and the UTF-8 prototype
+  throw it instead of a serializer `JsonException` that spoke of a "possible object cycle", a parser
+  `JsonException` with a byte position, or a bare `NotSupportedException`. A reference cycle in a saved object is
+  reported the same way (the serializer can only tell it by its depth). A failing write changes nothing — verified
+  for patches on both engines. `CanonicalJson` keeps its own `CanonicalJsonException` code `too-deep`.
+
 - Evaluation (internal, not used by the sessions): `Utf8JsonDiffEngine`, the diff computed on UTF-8 text without
   a node tree, with differential tests against `JsonDiffEngine`, PostgreSQL `jsonb` integration tests and
   end-to-end pipeline benchmarks (`-- diffpipeline`, `diffmemory`, `diffcold`). Results and the open semantic
@@ -110,10 +118,10 @@ Fixed:
   path; a split container that no longer holds it is left alone. Both engines.
 
 - **The diff, canonical and projection engines refuse a document nested deeper than 64 levels** with a clean
-  exception (`NotSupportedException`; `CanonicalJsonException` code `too-deep`) instead of recursing into it. 64 is
-  also what the serializer and the parser allow (now spelled out in `KernelJson.Options`), so the engines accept
-  exactly what the stores can write and read; it matters for a hand-built `JsonNode` graph, where a recursive walk
-  would end in an uncatchable stack overflow. (An earlier draft of this entry allowed 128 levels in the engines,
+  exception instead of recursing into it — for a hand-built `JsonNode` graph, where a recursive walk would end in
+  an uncatchable stack overflow. 64 is also what the parser allows and, with `KernelJson.Options.MaxDepth = 65`
+  (the serializer writes one level less than its setting), exactly what a session can save: a 64-level document
+  round-trips, the 65th level is refused. (An earlier draft of this entry allowed 128 levels in the engines,
   which no stored document could reach.)
 
 Docs:

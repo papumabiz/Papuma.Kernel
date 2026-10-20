@@ -100,10 +100,10 @@ public sealed partial class DocumentSession
             var (oldJsonText, newJsonText, newVersion, oldSchemaVersion) = row.Value;
             EnsurePatchableSchema(metadata, id, oldSchemaVersion);
 
-            var storedNewJson = (JsonObject)JsonNode.Parse(newJsonText)!;
+            var storedNewJson = DocumentJson.ParseStored(newJsonText, metadata.Name, id, "cannot be patched");
             RunValidator(metadata, storedNewJson);
 
-            var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
+            var oldJson = DocumentJson.ParseStored(oldJsonText, metadata.Name, id);
             // SQL cannot raise for a missing parent: the old state is already at hand, so the rule is checked here.
             JsonPatchApplier.EnsureTargetsExist(oldJson, operations, metadata.Name, id);
             var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, storedNewJson), metadata, id, _hashKeys, Scope);
@@ -281,10 +281,10 @@ public sealed partial class DocumentSession
                 // Any violation rolls the entire statement back — bulk is atomic (ADR-014).
                 EnsurePatchableSchema(metadata, id, oldSchemaVersion);
 
-                var storedNewJson = (JsonObject)JsonNode.Parse(newJsonText)!;
+                var storedNewJson = DocumentJson.ParseStored(newJsonText, metadata.Name, id, "cannot be patched");
                 RunValidator(metadata, storedNewJson);
 
-                var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
+                var oldJson = DocumentJson.ParseStored(oldJsonText, metadata.Name, id);
                 // SQL cannot raise for a missing parent: the old state is already at hand, so the rule is checked here.
                 JsonPatchApplier.EnsureTargetsExist(oldJson, operations, metadata.Name, id);
                 var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, storedNewJson), metadata, id, _hashKeys, Scope);
@@ -332,7 +332,7 @@ public sealed partial class DocumentSession
             {
                 EnsureSchemaNotNewer(metadata, id, oldSchemaVersion);
 
-                var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
+                var oldJson = DocumentJson.ParseStored(oldJsonText, metadata.Name, id);
                 var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, after: null), metadata, id, _hashKeys, Scope);
                 changes.Add((id, version + 1, oldSchemaVersion, diff));
             }

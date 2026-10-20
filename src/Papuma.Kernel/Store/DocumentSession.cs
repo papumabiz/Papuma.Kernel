@@ -387,7 +387,7 @@ public sealed partial class DocumentSession : IAsyncDisposable
         var id = metadata.GetDocumentId(document);
         InputValidator.ValidateDocumentId(id);
 
-        var newJson = JsonSerializer.SerializeToNode(document, KernelJson.Options) as JsonObject
+        var newJson = DocumentJson.Serialize(document, metadata.Name, id) as JsonObject
             ?? throw new ArgumentException(
                 $"Document of type {typeof(T).Name} must serialize to a JSON object.", nameof(document));
 
@@ -459,7 +459,7 @@ public sealed partial class DocumentSession : IAsyncDisposable
 
             EnsureSchemaNotNewer(metadata, id, oldSchemaVersion);
 
-            var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
+            var oldJson = DocumentJson.ParseStored(oldJsonText, metadata.Name, id);
             var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, after: null), metadata, id, _hashKeys, Scope);
             var deletedVersion = expectedVersion + 1;
 
@@ -667,8 +667,8 @@ public sealed partial class DocumentSession : IAsyncDisposable
         // Throwing here rolls the already-applied UPDATE back — no silent back-migration (ADR-005).
         EnsureSchemaNotNewer(metadata, id, oldSchemaVersion);
 
-        var oldJson = (JsonObject)JsonNode.Parse(oldJsonText)!;
-        var storedNewJson = (JsonObject)JsonNode.Parse(newJsonText)!;
+        var oldJson = DocumentJson.ParseStored(oldJsonText, metadata.Name, id);
+        var storedNewJson = DocumentJson.ParseStored(newJsonText, metadata.Name, id);
         var diff = PolicyApplier.Apply(JsonDiffEngine.Diff(oldJson, storedNewJson), metadata, id, _hashKeys, Scope);
 
         await InsertChangeRecordAsync(

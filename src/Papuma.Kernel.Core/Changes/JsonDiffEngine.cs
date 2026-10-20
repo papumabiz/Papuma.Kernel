@@ -46,8 +46,7 @@ public static class JsonDiffEngine
         {
             if (JsonLimits.ExceedsMaxDepth(document))
             {
-                throw new NotSupportedException(
-                    $"A document is nested deeper than {JsonLimits.MaxDepth} levels and cannot be diffed.");
+                throw new Store.DocumentTooDeepException(documentType: null, documentId: null, "cannot be diffed");
             }
         }
     }

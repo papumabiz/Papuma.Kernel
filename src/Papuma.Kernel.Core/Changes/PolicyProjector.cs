@@ -36,8 +36,7 @@ internal static class PolicyProjector
     {
         if (JsonLimits.ExceedsMaxDepth(document))
         {
-            throw new NotSupportedException(
-                $"A document is nested deeper than {JsonLimits.MaxDepth} levels and cannot be projected.");
+            throw new Store.DocumentTooDeepException(metadata.Name, documentId: null, "cannot be projected");
         }
 
         var clone = (JsonObject)document.DeepClone();

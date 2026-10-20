@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 
 using Papuma.Kernel.Changes;
 using Papuma.Kernel.Model;
+using Papuma.Kernel.Store;
 using Papuma.Kernel.Tenancy;
 
 namespace Papuma.Kernel.Core.Tests.Robustness;
@@ -460,14 +461,14 @@ public sealed class EngineRobustnessTests
     {
         var tooDeep = Nested(JsonLimits.MaxDepth + 1);
 
-        Assert.Throws<NotSupportedException>(() => JsonDiffEngine.Diff(tooDeep, new JsonObject()));
-        Assert.Throws<NotSupportedException>(() => JsonDiffEngine.Diff(new JsonObject(), tooDeep));
+        Assert.Throws<DocumentTooDeepException>(() => JsonDiffEngine.Diff(tooDeep, new JsonObject()));
+        Assert.Throws<DocumentTooDeepException>(() => JsonDiffEngine.Diff(new JsonObject(), tooDeep));
         Assert.Equal("too-deep", Assert.Throws<CanonicalJsonException>(() => CanonicalJson.Serialize(tooDeep)).Code);
 
         // Far past the limit is refused without recursing into it. (Much deeper than this cannot be tested:
         // building a JsonNode chain of ~100,000 levels overflows the stack inside System.Text.Json itself,
         // before any engine code runs — which is also why the serializer's own limit of 64 matters.)
-        Assert.Throws<NotSupportedException>(() => JsonDiffEngine.Diff(Nested(10_000), new JsonObject()));
+        Assert.Throws<DocumentTooDeepException>(() => JsonDiffEngine.Diff(Nested(10_000), new JsonObject()));
     }
 
     [Fact]
@@ -492,7 +493,7 @@ public sealed class EngineRobustnessTests
 
         var document = new JsonObject { ["a"] = inner };
 
-        Assert.Throws<NotSupportedException>(() => JsonDiffEngine.Diff(new JsonObject(), document));
+        Assert.Throws<DocumentTooDeepException>(() => JsonDiffEngine.Diff(new JsonObject(), document));
     }
 
     [Fact]

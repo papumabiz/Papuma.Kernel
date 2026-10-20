@@ -79,14 +79,18 @@ redacted as a whole when its old or new value holds the erased path; a split con
 it keeps its values. Tests: `RedactionEngineTests`, two `GdprToolingTests` cases on PostgreSQL (one with a
 stored diff rewritten into the pre-fix shape), `SqliteNestedErasureTests`.
 
-### 3.2 Depth limits disagree
+### 3.2 Depth limits disagreed (resolved)
 
 `JsonLimits.MaxDepth` is 128, but the sessions parse with `JsonNode.Parse`'s default of **64**,
 and `JsonSerializer` serializes documents with its default of 64 as well. Between 65 and 128
 levels a document is accepted by the engine API but rejected on every session read path
 (pinned by `TheSessionsParseLimit_IsLowerThanTheEngineLimit`). A patch can store a document
 deeper than 64 (a 64-level value set below a non-root path), whose next update then fails while
-parsing — inside the transaction, so it is rolled back, but with a `JsonException`. To verify.
+parsing — inside the transaction, so it is rolled back, but with a `JsonException`. **Verified and
+resolved** (2026-10-20): such a patch is refused on both engines and the document stays unchanged; it now
+fails with `DocumentTooDeepException` (`DocumentDepthLimitTests`, `SqliteDocumentDepthLimitTests`). The
+same tests found that the serializer writes one level less than its `MaxDepth`, so `KernelJson.Options`
+uses 65 to let a session save exactly 64 levels.
 
 ## 4. Semantic decisions to make
 
@@ -146,9 +150,10 @@ sessions, `CanonicalJson`, `PolicyProjector`), because 64 is what the serializer
 enforce already and nothing larger can be written through the API. One documented exception type
 for "too deep" at the boundary instead of today's mix (`NotSupportedException` from the engine,
 `JsonException` from the parser). Implemented: `JsonLimits.MaxDepth = 64`, spelled out in `KernelJson.Options`,
-pinned by `TheEngineLimit_IsTheParsersAndTheSerializersLimit`. Still open: the exception types stay mixed
-(text → `JsonException` from System.Text.Json, a hand-built node graph → `NotSupportedException`), and
-whether a patch can store a document deeper than 64 is not verified yet.
+pinned by `TheEngineLimit_IsTheParsersAndTheSerializersLimit`. The exception types are unified as well:
+`DocumentTooDeepException` (a `NotSupportedException`) from every save, patch, stored-state read, engine and
+the prototype; a "too deep" serializer or parser exception is recognized on the failure path only (the
+serializer's path has 64 segments, the parser's input is re-scanned), every other JSON error passes through.
 
 ### 4.5 Root that is not an object — `ArgumentException`
 

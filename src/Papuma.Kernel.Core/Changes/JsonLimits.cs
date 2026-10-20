@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
+using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace Papuma.Kernel.Changes;
@@ -68,5 +70,61 @@ internal static class JsonLimits
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Whether a <see cref="JsonException"/> of the <i>serializer</i> means "too deep": it reports the depth (or a
+    /// reference cycle, which it can only tell by its depth) with the path where it stopped, which then has
+    /// <see cref="MaxDepth"/> segments. Read on the failure path only.
+    /// </summary>
+    public static bool IsSerializerDepthError(JsonException exception) =>
+        exception.Path is { } path && Segments(path) >= MaxDepth;
+
+    /// <summary>
+    /// Whether UTF-8 JSON nests deeper than <see cref="MaxDepth"/> — the second look a failed parse gets, since the
+    /// parser's exception does not say why it failed. Malformed input that fails before that depth is not too deep.
+    /// </summary>
+    public static bool TextExceedsMaxDepth(ReadOnlySpan<byte> utf8Json)
+    {
+        try
+        {
+            var reader = new Utf8JsonReader(utf8Json, new JsonReaderOptions { MaxDepth = int.MaxValue });
+            while (reader.Read())
+            {
+                if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray && reader.CurrentDepth >= MaxDepth)
+                {
+                    return true;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // malformed before reaching the limit
+        }
+
+        return false;
+    }
+
+    /// <summary>Whether JSON text nests deeper than <see cref="MaxDepth"/>; see the UTF-8 overload.</summary>
+    public static bool TextExceedsMaxDepth(string json) => TextExceedsMaxDepth(Encoding.UTF8.GetBytes(json));
+
+    // Segments of a serializer path such as $.a.b[0]['c.d']: separators outside quoted names.
+    private static int Segments(string path)
+    {
+        var count = 0;
+        var quoted = false;
+        foreach (var ch in path)
+        {
+            if (ch == '\'')
+            {
+                quoted = !quoted;
+            }
+            else if (!quoted && ch is '.' or '[')
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 }

@@ -18,7 +18,8 @@ namespace Papuma.Kernel.Changes;
 /// <item>An absent document (<c>null</c>) is the empty object (spec changes.md §1): every top-level field of the
 /// other side becomes one added or removed entry carrying its whole value.</item>
 /// <item>Both documents must be JSON objects (<see cref="ArgumentException"/>), parse with at most
-/// <see cref="JsonLimits.MaxDepth"/> levels and without duplicate property names (<see cref="JsonException"/>).</item>
+/// <see cref="JsonLimits.MaxDepth"/> levels (<see cref="Store.DocumentTooDeepException"/>) and without duplicate
+/// property names (<see cref="JsonException"/>).</item>
 /// <item>An empty property name is an ordinary key with an empty path segment (spec changes.md §2.1).</item>
 /// <item>The result owns copies of the changed values and never refers to the input buffers, which may be
 /// reused or released as soon as the call returns.</item>
@@ -72,14 +73,30 @@ internal static class Utf8JsonDiffEngine
     }
 
     /// <summary>Parses and validates one UTF-8 input. The document refers to <paramref name="utf8Json"/>.</summary>
-    internal static JsonDocument Parse(ReadOnlyMemory<byte> utf8Json, string paramName) =>
-        Validated(JsonDocument.Parse(utf8Json, DocumentOptions), paramName);
+    internal static JsonDocument Parse(ReadOnlyMemory<byte> utf8Json, string paramName)
+    {
+        try
+        {
+            return Validated(JsonDocument.Parse(utf8Json, DocumentOptions), paramName);
+        }
+        catch (JsonException ex) when (JsonLimits.TextExceedsMaxDepth(utf8Json.Span))
+        {
+            throw new Store.DocumentTooDeepException(documentType: null, documentId: null, $"cannot be diffed ({paramName})", ex);
+        }
+    }
 
     /// <summary>Parses and validates one text input. The document owns its UTF-8 copy.</summary>
     internal static JsonDocument Parse(string json, string paramName)
     {
         ArgumentNullException.ThrowIfNull(json, paramName);
-        return Validated(JsonDocument.Parse(json, DocumentOptions), paramName);
+        try
+        {
+            return Validated(JsonDocument.Parse(json, DocumentOptions), paramName);
+        }
+        catch (JsonException ex) when (JsonLimits.TextExceedsMaxDepth(json))
+        {
+            throw new Store.DocumentTooDeepException(documentType: null, documentId: null, $"cannot be diffed ({paramName})", ex);
+        }
     }
 
     /// <summary>

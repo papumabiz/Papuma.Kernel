@@ -34,7 +34,7 @@ public sealed class PatchBuilder<T> where T : class
         ArgumentNullException.ThrowIfNull(property);
 
         var path = DiffPath.Split(JsonPathResolver.Resolve(property));
-        var node = JsonSerializer.SerializeToNode(value, KernelJson.Options);
+        var node = DocumentJson.Serialize(value, documentType: null, documentId: null, $"cannot be set as '{DiffPath.Join(path)}'");
         Operations.Add(new PatchOperation(PatchOperationKind.Set, path, node, IncrementBy: 0));
         return this;
     }
