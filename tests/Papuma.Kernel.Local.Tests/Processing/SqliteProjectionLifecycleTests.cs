@@ -260,6 +260,50 @@ public sealed class SqliteProjectionLifecycleTests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public async Task SchemaMigration_AddsTheGenerationColumn_KeepsRows_AndAResetBumpsIt()
+    {
+        // A file from before reset_count (review L-3): a checkpoint row with a position and a version.
+        var path = Path.Combine(Path.GetTempPath(), $"papuma_resetcount_{Guid.NewGuid():N}.db");
+        var connectionString = $"Data Source={path}";
+        try
+        {
+            await using (var conn = await SqliteConnectionFactory.OpenAsync(connectionString))
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = """
+                    CREATE TABLE checkpoint (handler_name TEXT NOT NULL PRIMARY KEY,
+                        last_seq INTEGER NOT NULL DEFAULT 0, projection_version INTEGER, updated_at TEXT NOT NULL);
+                    INSERT INTO checkpoint (handler_name, last_seq, projection_version, updated_at)
+                        VALUES ('old', 42, 3, '2026-01-01T00:00:00.0000000+00:00');
+                    """;
+                await cmd.ExecuteNonQueryAsync();
+
+                await SqliteSchemaManager.EnsureSchemaAsync(conn);
+                await SqliteSchemaManager.EnsureSchemaAsync(conn); // idempotent
+
+                cmd.CommandText = "SELECT last_seq, projection_version, reset_count FROM checkpoint WHERE handler_name = 'old'";
+                await using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    Assert.True(await reader.ReadAsync());
+                    Assert.Equal((42L, 3L, 0L), (reader.GetInt64(0), reader.GetInt64(1), reader.GetInt64(2)));
+                }
+
+                await using var tx = conn.BeginTransaction();
+                await SqliteProjectionLifecycle.ResetCursorAsync(conn, tx, "old", version: null, CancellationToken.None);
+                Assert.Equal((0L, 1L), await SqliteProjectionLifecycle.ReadCursorAsync(conn, tx, "old", CancellationToken.None));
+                await SqliteProjectionLifecycle.ResetCursorAsync(conn, tx, "old", version: null, CancellationToken.None);
+                Assert.Equal((0L, 2L), await SqliteProjectionLifecycle.ReadCursorAsync(conn, tx, "old", CancellationToken.None));
+                await tx.CommitAsync();
+            }
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            File.Delete(path);
+        }
+    }
+
     /// <summary>A plain handler under the name a projection takes over later.</summary>
     private sealed class PlainHandler(string name) : IChangeHandler
     {

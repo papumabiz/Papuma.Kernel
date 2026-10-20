@@ -274,9 +274,10 @@ public sealed class ChangeFeedProcessor : IDisposable
     /// </summary>
     /// <param name="handlerName">The handler name.</param>
     /// <param name="ct">A cancellation token.</param>
+    /// <exception cref="ArgumentException">No handler of that name runs in this processor (the event feed's handlers are not reachable here).</exception>
     public async Task ResetCheckpointAsync(string handlerName, CancellationToken ct = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(handlerName);
+        EnsureKnownHandler(handlerName);
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
@@ -335,12 +336,13 @@ public sealed class ChangeFeedProcessor : IDisposable
 
     /// <summary>
     /// Returns a lag snapshot per handler: committed changes not yet delivered (ADR-022).
+    /// A pure read — it neither registers a handler nor reconciles a projection version, so a
+    /// health probe, the dashboard or an MCP tool on a node that runs no workers can never
+    /// trigger a rebuild. A handler that has not been registered yet shows the whole backlog.
     /// </summary>
     /// <param name="ct">A cancellation token.</param>
     public async Task<IReadOnlyList<ChangeFeedLagSnapshot>> GetLagAsync(CancellationToken ct = default)
     {
-        await EnsureRegisteredAsync(ct);
-
         await using var conn = await _dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
         await conn.SetAllScopesAsync(tx, ct);
@@ -391,8 +393,25 @@ public sealed class ChangeFeedProcessor : IDisposable
     /// <param name="seq">The feed sequence number.</param>
     /// <param name="ct">A cancellation token.</param>
     /// <returns><c>true</c> when a failure entry existed and was removed.</returns>
-    public Task<bool> RetryFailureAsync(string handlerName, long seq, CancellationToken ct = default) =>
-        PostgresFeedDiagnostics.RetryFailureAsync(_dataSource, handlerName, prefix: string.Empty, seq, ct);
+    /// <exception cref="ArgumentException">No handler of that name runs in this processor (the event feed's handlers are not reachable here).</exception>
+    public async Task<bool> RetryFailureAsync(string handlerName, long seq, CancellationToken ct = default)
+    {
+        EnsureKnownHandler(handlerName);
+        return await PostgresFeedDiagnostics.RetryFailureAsync(_dataSource, handlerName, prefix: string.Empty, seq, ct);
+    }
+
+    // The checkpoint and failure tables are shared by both feeds and keyed by name only: an
+    // unchecked name would let a typo create an orphan checkpoint row, or reach the other
+    // feed's entry ("event:orders" belongs to the event feed).
+    private void EnsureKnownHandler(string handlerName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(handlerName);
+        if (!_projectionVersions.ContainsKey(handlerName))
+        {
+            throw new ArgumentException(
+                $"No handler named '{handlerName}' runs in this change feed processor.", nameof(handlerName));
+        }
+    }
 
     private async Task<int> ProcessHandlerBatchAsync(IChangeHandler handler, CancellationToken ct)
     {

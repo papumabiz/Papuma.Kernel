@@ -40,17 +40,11 @@ public static class SqliteSchemaManager
             await schemaCmd.ExecuteNonQueryAsync(ct);
         }
 
-        // Files created before ADR-024: SQLite has no ADD COLUMN IF NOT EXISTS.
-        await using (var columnCmd = connection.CreateCommand())
-        {
-            columnCmd.CommandText =
-                "SELECT count(*) FROM pragma_table_info('checkpoint') WHERE name = 'projection_version'";
-            if ((long)(await columnCmd.ExecuteScalarAsync(ct))! == 0)
-            {
-                columnCmd.CommandText = "ALTER TABLE checkpoint ADD COLUMN projection_version INTEGER";
-                await columnCmd.ExecuteNonQueryAsync(ct);
-            }
-        }
+        // Files created before a column existed: SQLite has no ADD COLUMN IF NOT EXISTS.
+        // projection_version: ADR-024. reset_count: the generation of the checkpoint, bumped by every
+        // reset, so a batch can tell "reset to 0" from "never moved" (review L-3).
+        await AddCheckpointColumnIfMissingAsync(connection, "projection_version", "INTEGER", ct);
+        await AddCheckpointColumnIfMissingAsync(connection, "reset_count", "INTEGER NOT NULL DEFAULT 0", ct);
 
         if (model is not null)
         {
@@ -62,6 +56,23 @@ public static class SqliteSchemaManager
                 await keyCmd.ExecuteNonQueryAsync(ct);
             }
         }
+    }
+
+    // column and definition are constants of this class, never caller input.
+    private static async Task AddCheckpointColumnIfMissingAsync(
+        SqliteConnection connection, string column, string definition, CancellationToken ct)
+    {
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT count(*) FROM pragma_table_info('checkpoint') WHERE name = @column";
+        cmd.Parameters.AddWithValue("column", column);
+        if ((long)(await cmd.ExecuteScalarAsync(ct))! != 0)
+        {
+            return;
+        }
+
+        cmd.Parameters.Clear();
+        cmd.CommandText = $"ALTER TABLE checkpoint ADD COLUMN {column} {definition}";
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     /// <summary>

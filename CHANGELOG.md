@@ -15,6 +15,27 @@ Security:
 
 Fixed:
 
+- **Looking at the lag can no longer rebuild a projection (review P-4).** `GetLagAsync` — behind the lag health
+  check, the dashboard and the MCP tool `get_feed_lag` (documented as non-mutating) — first registered the
+  handlers, and registering reconciles projection versions: on the first call per process after a deploy it
+  could run `IProjection.ResetAsync()` and reset the cursor. A web node that runs no workers and declares a
+  newer version therefore emptied the projection when the load balancer probed it, while the running
+  workers paused. `GetLagAsync` is a pure read now (no registration, no row lock); a handler that is not
+  registered yet shows the whole backlog. Registration and rebuild happen only in `RunAsync`,
+  `ProcessOnceAsync` and the reset methods. All four processors.
+- **An interrupted manual projection reset is finished on the next start (P-14).** `ResetProjectionAsync` emptied
+  the target and then reset the cursor in a second step; a crash in between left an empty target behind a
+  checkpoint at the head, for good. A marker (stored projection version `-1`) is now committed first and
+  makes the next start rebuild.
+- **SQLite: a reset during a batch that started at checkpoint 0 is no longer overwritten (L-3).** The outcome of
+  a batch was applied if the checkpoint still equalled the one read — and a rebuild from 0 to 0 looks
+  unchanged, so the checkpoint jumped to the end of the batch although the projection had just been
+  emptied: rows lost for good. The checkpoint has a generation now (`reset_count`, added to existing files by
+  `EnsureSchema`; **run it once** — with `EnsureSchema = false` the new column must be added by your own
+  migration: `ALTER TABLE checkpoint ADD COLUMN reset_count INTEGER NOT NULL DEFAULT 0`).
+- **`ResetCheckpointAsync` and `RetryFailureAsync` accept only the processor's own handlers (P-13).** A typo
+  created an orphan checkpoint row; `"event:orders"` on the change feed reached the event feed's entry. They
+  throw `ArgumentException` (`handlerName`) now.
 - **SQLite: `RedactEventsAsync` finds events by numeric and boolean selectors (review L-4, GDPR).**
   `json_extract(payload, path) = @value` compared a TEXT parameter with an INTEGER/REAL/0-1 value, which
   SQLite never considers equal — an erasure request for `userId = 42` returned 0 and left the personal data

@@ -93,27 +93,55 @@ internal static class ProjectionLifecycle
     /// Resets a projection — its target via <see cref="IProjection.ResetAsync"/>, then its
     /// cursor and failures — unless a newer instance owns it (stored version higher).
     /// </summary>
+    /// <remarks>
+    /// Two steps, because emptying the target is not part of the checkpoint transaction (it runs on
+    /// the projection's own connection): first a committed marker
+    /// (<see cref="HandlerKind.RebuildPendingVersion"/>), then — under the row lock — the target reset
+    /// and the cursor reset. A crash between the target reset and the commit leaves the marker, and the next
+    /// start rebuilds (review P-14). Without it the target stayed empty behind a checkpoint at the head.
+    /// </remarks>
     /// <returns><c>false</c> when the stored version is higher and nothing was reset.</returns>
     public static async Task<bool> ResetProjectionAsync(
         NpgsqlDataSource dataSource, string key, IProjection projection, int declared,
         ILogger logger, CancellationToken ct)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-
-        var stored = await LockVersionAsync(conn, tx, key, ct);
-        if (stored > declared)
+        await using (var conn = await dataSource.OpenConnectionAsync(ct))
+        await using (var tx = await conn.BeginTransactionAsync(ct))
         {
-            logger.LogWarning(
-                "Projection {Handler} is at version {Stored}, this instance declares {Declared} — not resetting it.",
-                key, stored, declared);
+            var stored = await LockVersionAsync(conn, tx, key, ct);
+            if (stored > declared)
+            {
+                logger.LogWarning(
+                    "Projection {Handler} is at version {Stored}, this instance declares {Declared} — not resetting it.",
+                    key, stored, declared);
+                await tx.CommitAsync(ct);
+                return false;
+            }
+
+            await SetVersionAsync(conn, tx, key, HandlerKind.RebuildPendingVersion, ct);
             await tx.CommitAsync(ct);
-            return false;
         }
 
-        await projection.ResetAsync(ct);
-        await ResetCursorAsync(conn, tx, key, declared, ct);
-        await tx.CommitAsync(ct);
+        await using (var conn = await dataSource.OpenConnectionAsync(ct))
+        await using (var tx = await conn.BeginTransactionAsync(ct))
+        {
+            // Re-take the lock: a newer instance may have rebuilt in between (it sees the marker as
+            // "older than declared" and does), and then this reset must not undo its work.
+            var stored = await LockVersionAsync(conn, tx, key, ct);
+            if (stored > declared)
+            {
+                logger.LogWarning(
+                    "Projection {Handler} was taken over by a version {Stored} instance while resetting, this instance declares {Declared} — not resetting it.",
+                    key, stored, declared);
+                await tx.CommitAsync(ct);
+                return false;
+            }
+
+            await projection.ResetAsync(ct);
+            await ResetCursorAsync(conn, tx, key, declared, ct);
+            await tx.CommitAsync(ct);
+        }
+
         logger.LogInformation("Projection {Handler} reset — full replay on the next cycle.", key);
         return true;
     }

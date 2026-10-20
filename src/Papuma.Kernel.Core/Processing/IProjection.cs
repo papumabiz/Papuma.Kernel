@@ -58,6 +58,15 @@ public sealed class StartsAtFeedHeadAttribute : Attribute;
 internal static class HandlerKind
 {
     /// <summary>
+    /// The stored <see cref="IProjection.Version"/> while a manual rebuild is under way: written
+    /// (and committed) before the projection's target is emptied, replaced by the declared version
+    /// when the cursor has been reset. A process that dies in between leaves it behind — below every
+    /// declared version (those are not negative), so the next start finds "stored &lt; declared" and
+    /// finishes the rebuild instead of leaving an emptied target behind a checkpoint at the head.
+    /// Older kernel versions read it the same way.
+    /// </summary>
+    public const int RebuildPendingVersion = -1;
+    /// <summary>
     /// Returns the declared projection version, or <c>null</c> for an effect.
     /// </summary>
     /// <exception cref="ArgumentException">The declaration is contradictory or invalid.</exception>

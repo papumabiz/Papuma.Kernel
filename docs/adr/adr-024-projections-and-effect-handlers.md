@@ -63,10 +63,23 @@ first delivery, each processor reconciles every projection under a waiting row l
 | = *v* | *v* | nothing |
 | > *v* | *v* | **pause** this projection in this instance: it runs older code during a rolling deploy and must not write the old shape into the rebuilt target. Checked again each cycle; logged once. The version never goes down. |
 
+This reconciliation happens when a processor **runs** (`RunAsync`, `ProcessOnceAsync`) or
+is asked to reset — never when it is merely *looked at*: `GetLagAsync`, and with it the
+health check, the dashboard and the MCP tool `get_feed_lag`, is a pure read. It writes no
+checkpoint row, takes no lock and cannot rebuild; a node that runs no workers (and may
+declare a newer version during a rolling deploy) therefore cannot empty a projection by
+answering a load-balancer probe. A handler that is not registered yet shows the whole
+backlog as its lag.
+
 `ResetAsync` commits in its own transaction before the cursor reset commits (on SQLite
 it runs with no transaction open at all: it may write to the same file, and the file has
 one write lock). A crash in between leaves the old version stored, so the next start
-repeats both — hence idempotency. For a table under row-level security, `TRUNCATE` is
+repeats both — hence idempotency. A **manual** reset (`ResetProjectionAsync`) has no
+version change to fall back on, so it first commits a marker — the stored version
+`-1`, below every declared version — and only then empties the target; a crash leaves the
+marker, the next start sees "stored < declared" and rebuilds, and the cursor reset replaces
+the marker with the declared version. (Without it the target stayed empty behind a
+checkpoint at the head.) For a table under row-level security, `TRUNCATE` is
 the reset: it is not subject to RLS (the role needs the `TRUNCATE` privilege). Two new instances starting together serialize on the row lock; the second
 finds the version already recorded.
 
@@ -76,7 +89,13 @@ finds the version already recorded.
 for every projection it runs — the one line an upgrade note like 2.0.0's needs;
 `ResetProjectionAsync(name)` does it for one and refuses a handler that is not a
 projection.
-`ResetCheckpointAsync(name)` stays as the raw tool: it resets the cursor only.
+`ResetCheckpointAsync(name)` stays as the raw tool: it resets the cursor only. It and
+`RetryFailureAsync(name, seq)` accept only the handlers of their own processor: the
+checkpoint and failure tables are shared by both feeds and keyed by name, so a typo would
+create an orphan row and `"event:orders"` would reach the event feed's entry.
+On SQLite the checkpoint also carries a generation (`reset_count`, bumped by every reset): a
+batch that started before a reset drops its outcome even when the reset moved the position
+from 0 to 0.
 
 ### 4. Effects can start at the head
 

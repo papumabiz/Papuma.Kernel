@@ -288,9 +288,10 @@ public sealed class SqliteChangeFeedProcessor : IDisposable
     /// Resets a handler's checkpoint to 0 and clears its failure entries — the next
     /// cycle replays the full feed.
     /// </summary>
+    /// <exception cref="ArgumentException">No handler of that name runs in this processor (the event feed's handlers are not reachable here).</exception>
     public async Task ResetCheckpointAsync(string handlerName, CancellationToken ct = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(handlerName);
+        EnsureKnownHandler(handlerName);
 
         await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
         await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
@@ -300,12 +301,12 @@ public sealed class SqliteChangeFeedProcessor : IDisposable
     }
 
     /// <summary>
-    /// Returns a lag snapshot per handler (feed head vs. checkpoint).
+    /// Returns a lag snapshot per handler (feed head vs. checkpoint). A pure read: it neither
+    /// registers a handler nor reconciles a projection version, so a dashboard or health probe
+    /// can never trigger a rebuild. A handler that has not been registered yet shows the whole backlog.
     /// </summary>
     public async Task<IReadOnlyList<ChangeFeedLagSnapshot>> GetLagAsync(CancellationToken ct = default)
     {
-        await EnsureRegisteredAsync(ct);
-
         // Deferred: a lag read must not take the file's write lock (it runs every idle cycle).
         await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
         await using var tx = conn.BeginTransaction(deferred: true);
@@ -379,9 +380,10 @@ public sealed class SqliteChangeFeedProcessor : IDisposable
     /// <summary>
     /// Removes a failure entry so the next cycle retries the record immediately.
     /// </summary>
+    /// <exception cref="ArgumentException">No handler of that name runs in this processor (the event feed's handlers are not reachable here).</exception>
     public async Task<bool> RetryFailureAsync(string handlerName, long seq, CancellationToken ct = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(handlerName);
+        EnsureKnownHandler(handlerName);
 
         await using var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
         await using var cmd = conn.CreateCommand();
@@ -405,11 +407,12 @@ public sealed class SqliteChangeFeedProcessor : IDisposable
 
         // 1. Read: one consistent snapshot of checkpoint and batch.
         long checkpoint;
+        long generation; // the checkpoint's reset_count: told apart from "reset to the same position"
         IReadOnlyList<BatchItem> batch;
         await using (var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct))
         await using (var tx = conn.BeginTransaction(deferred: true))
         {
-            checkpoint = await ReadCheckpointAsync(conn, tx, key, ct);
+            (checkpoint, generation) = await SqliteProjectionLifecycle.ReadCursorAsync(conn, tx, key, ct);
             batch = await IsPausedAsync(handler, conn, tx, key, ct)
                 ? []
                 : await LoadBatchAsync(conn, tx, key, checkpoint, ct);
@@ -491,7 +494,9 @@ public sealed class SqliteChangeFeedProcessor : IDisposable
         await using (var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, ct))
         await using (var tx = conn.BeginTransaction(deferred: false))
         {
-            if (await ReadCheckpointAsync(conn, tx, key, ct) != checkpoint)
+            // Position AND generation: a reset from 0 to 0 (backfill, rebuild) leaves last_seq
+            // unchanged, but not the generation (review L-3).
+            if (await SqliteProjectionLifecycle.ReadCursorAsync(conn, tx, key, ct) != (checkpoint, generation))
             {
                 await tx.RollbackAsync(ct);
                 _logger.LogInformation(
@@ -524,14 +529,17 @@ public sealed class SqliteChangeFeedProcessor : IDisposable
         return processed;
     }
 
-    private static async Task<long> ReadCheckpointAsync(
-        SqliteConnection conn, SqliteTransaction tx, string key, CancellationToken ct)
+    // The checkpoint and failure tables are shared by both feeds and keyed by name only: an
+    // unchecked name would let a typo create an orphan checkpoint row, or reach the other
+    // feed's entry ("event:orders" belongs to the event feed).
+    private void EnsureKnownHandler(string handlerName)
     {
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = "SELECT last_seq FROM checkpoint WHERE handler_name = @name";
-        cmd.Parameters.AddWithValue("name", key);
-        return await cmd.ExecuteScalarAsync(ct) is long seq ? seq : 0L;
+        ArgumentException.ThrowIfNullOrWhiteSpace(handlerName);
+        if (!_projectionVersions.ContainsKey(handlerName))
+        {
+            throw new ArgumentException(
+                $"No handler named '{handlerName}' runs in this change feed processor.", nameof(handlerName));
+        }
     }
 
     private sealed record BatchItem(ChangeRecord Record, int Attempts, DateTimeOffset? NextRetryAt);

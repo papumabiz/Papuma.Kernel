@@ -96,18 +96,28 @@ internal static class SqliteProjectionLifecycle
     /// Resets a projection — its target first, then its checkpoint and failures — unless
     /// the stored version is higher.
     /// </summary>
+    /// <remarks>
+    /// The target is emptied with no transaction open, so the checkpoint cannot move with it. A
+    /// committed marker (<see cref="HandlerKind.RebuildPendingVersion"/>) goes first: a crash after the
+    /// target was emptied leaves it, and the next start rebuilds instead of leaving an empty target
+    /// behind a checkpoint at the head (review P-14).
+    /// </remarks>
     /// <returns><c>false</c> when the stored version is higher and nothing was reset.</returns>
     public static async Task<bool> ResetProjectionAsync(
         string connectionString, string key, IProjection projection, int declared,
         ILogger logger, CancellationToken ct)
     {
         await using (var conn = await SqliteConnectionFactory.OpenAsync(connectionString, ct))
+        await using (var tx = conn.BeginTransaction(deferred: false))
         {
-            if (await ReadVersionAsync(conn, tx: null, key, ct) > declared)
+            if (await ReadVersionAsync(conn, tx, key, ct) > declared)
             {
                 logger.LogWarning("Projection {Handler} is at a higher version than this instance declares — not resetting it.", key);
                 return false;
             }
+
+            await SetVersionAsync(conn, tx, key, HandlerKind.RebuildPendingVersion, ct);
+            await tx.CommitAsync(ct);
         }
 
         await projection.ResetAsync(ct); // no transaction open: it may write to this file
@@ -123,7 +133,11 @@ internal static class SqliteProjectionLifecycle
         return true;
     }
 
-    /// <summary>Resets a checkpoint to 0 and clears its failures; records the version when given.</summary>
+    /// <summary>
+    /// Resets a checkpoint to 0 and clears its failures; records the version when given. Bumps the
+    /// checkpoint's generation (<c>reset_count</c>): a batch that started before the reset compares it
+    /// and drops its outcome — <c>last_seq</c> alone cannot tell a reset from 0 to 0 from no reset (review L-3).
+    /// </summary>
     public static async Task ResetCursorAsync(
         SqliteConnection conn, SqliteTransaction tx, string key, int? version, CancellationToken ct)
     {
@@ -132,9 +146,10 @@ internal static class SqliteProjectionLifecycle
         {
             reset.Transaction = tx;
             reset.CommandText = """
-                INSERT INTO checkpoint (handler_name, last_seq, updated_at)
-                VALUES (@name, 0, @now)
-                ON CONFLICT (handler_name) DO UPDATE SET last_seq = 0, updated_at = @now
+                INSERT INTO checkpoint (handler_name, last_seq, updated_at, reset_count)
+                VALUES (@name, 0, @now, 1)
+                ON CONFLICT (handler_name) DO UPDATE
+                    SET last_seq = 0, updated_at = @now, reset_count = reset_count + 1
                 """;
             reset.Parameters.AddWithValue("name", key);
             reset.Parameters.AddWithValue("now", now);
@@ -153,6 +168,21 @@ internal static class SqliteProjectionLifecycle
         {
             await SetVersionAsync(conn, tx, key, declared, ct);
         }
+    }
+
+    /// <summary>
+    /// Reads a handler's position and generation. A handler without a checkpoint row reads as
+    /// <c>(0, 0)</c>; a row created by a reset starts at generation 1, so the two never compare equal.
+    /// </summary>
+    public static async Task<(long LastSeq, long ResetCount)> ReadCursorAsync(
+        SqliteConnection conn, SqliteTransaction tx, string key, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SELECT last_seq, reset_count FROM checkpoint WHERE handler_name = @name";
+        cmd.Parameters.AddWithValue("name", key);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? (reader.GetInt64(0), reader.GetInt64(1)) : (0L, 0L);
     }
 
     /// <summary>Reads the stored projection version, or <c>null</c>.</summary>
