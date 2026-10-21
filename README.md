@@ -6,7 +6,7 @@
 ![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)
 ![PostgreSQL 18+](https://img.shields.io/badge/PostgreSQL-%E2%89%A518-336791)
 ![SQLite embedded](https://img.shields.io/badge/SQLite-embedded-003B57)
-![2.1.0](https://img.shields.io/badge/version-2.1.0-blue)
+![3.0.0-preview.1](https://img.shields.io/badge/version-3.0.0--preview.1-orange)
 ![MIT](https://img.shields.io/badge/license-MIT-green)
 
 **Your documents are the truth. The change feed follows automatically.**
@@ -197,7 +197,7 @@ Pattern guides on kernel primitives ([docs/recipes](https://github.com/papumabiz
 
 ## Maturity, stated plainly
 
-`2.1.0` — the Postgres kernel's design is complete (13 implementation phases,
+`3.0.0-preview.1` (the last stable release is `2.1.0`; this branch carries breaking changes, see the changelog) — the Postgres kernel's design is complete (13 implementation phases,
 every decision recorded as an ADR, every identified risk closed with a test or a
 measurement; **the full integration suite runs against real PostgreSQL 18 on
 every CI build**), but it has **not yet

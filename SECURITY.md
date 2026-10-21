@@ -4,6 +4,7 @@
 
 | Version | Supported |
 |---|---|
+| 3.0.0-preview.x (`main`) | ✅ pre-release — fixes land here first |
 | 2.1.x | ✅ |
 | < 2.1 | ❌ — upgrade to the latest 2.1.x (2.0.x lets the `All` scope delete across tenants; 1.x feeds can skip records — see the changelog) |
 
