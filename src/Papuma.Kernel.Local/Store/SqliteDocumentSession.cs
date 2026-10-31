@@ -66,6 +66,7 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
     private readonly ILogger? _logger;
     private readonly IHashKeyProvider? _hashKeys;
     private readonly PendingWrites _pendingWrites = new();
+    private readonly bool _readOnly;
 
     private SqliteConnection? _connection;
     private SqliteTransaction? _transaction;
@@ -87,8 +88,10 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
     internal SqliteDocumentSession(
         string connectionString, KernelModel model, ScopeContext scope, SessionOptions? options, Action? notifyWaiters,
         ILogger? logger,
-        IHashKeyProvider? hashKeys)
+        IHashKeyProvider? hashKeys,
+        bool readOnly = false)
     {
+        _readOnly = readOnly;
         _logger = logger;
         _hashKeys = hashKeys;
         _connectionString = connectionString;
@@ -948,7 +951,10 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
                 _connection = await SqliteConnectionFactory.OpenAsync(_connectionString, ct);
             }
 
-            _transaction = (SqliteTransaction)await _connection.BeginTransactionAsync(ct);
+            // A read session's transaction is deferred: under WAL it takes no write lock (review L-5).
+            _transaction = _readOnly
+                ? _connection.BeginTransaction(deferred: true)
+                : (SqliteTransaction)await _connection.BeginTransactionAsync(ct);
         }
 
         return (_connection!, _transaction);
@@ -965,6 +971,13 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
         Func<SqliteConnection, SqliteTransaction, Task<TResult>> write,
         CancellationToken ct)
     {
+        if (_readOnly)
+        {
+            throw new InvalidOperationException(
+                "This session was opened with OpenReadSession and only reads. Open a session with OpenSession for " +
+                "writes, and keep it short: it holds the database's write lock until it is committed or disposed.");
+        }
+
         var (conn, tx) = await EnsureTransactionAsync(ct);
         await ExecuteSavepointCommandAsync(conn, tx, $"SAVEPOINT {WriteSavepoint};", ct);
         try

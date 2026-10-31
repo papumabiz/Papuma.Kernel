@@ -99,4 +99,25 @@ public sealed class SqliteDocumentStore
         ArgumentNullException.ThrowIfNull(scope);
         return new SqliteDocumentSession(ConnectionString, Model, scope, options, _notifyWaiters, _logger, _hashKeys);
     }
+
+    /// <summary>
+    /// Opens a session that only reads (review L-5). A session from <see cref="OpenSession"/> takes the file's single
+    /// write lock with its first operation and holds it until commit or dispose — kept open over user interaction (load,
+    /// form, save) it blocks every writer, the feed workers included. A read session starts a deferred transaction
+    /// instead: under SQLite's WAL mode it takes no write lock and blocks no writer, and it reads one consistent snapshot
+    /// until it is committed or disposed. Every write method throws <see cref="InvalidOperationException"/>; open a
+    /// session with <see cref="OpenSession"/> for the save, and keep that one short.
+    /// </summary>
+    /// <remarks>
+    /// The snapshot is held as long as the session is open, so the WAL file cannot be checkpointed past it and grows;
+    /// commit or dispose a read session when the reads are done, not when the window closes.
+    /// </remarks>
+    /// <param name="scope">The scope context all session operations run under.</param>
+    /// <param name="options">Optional session metadata (correlation/causation/actor).</param>
+    public SqliteDocumentSession OpenReadSession(ScopeContext scope, SessionOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        return new SqliteDocumentSession(
+            ConnectionString, Model, scope, options, _notifyWaiters, _logger, _hashKeys, readOnly: true);
+    }
 }

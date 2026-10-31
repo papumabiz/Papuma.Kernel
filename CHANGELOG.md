@@ -103,6 +103,16 @@ Security:
 
 Fixed:
 
+- **SQLite: `OpenReadSession` for reads that must not block writers; the feed says when a batch is redelivered
+  (review L-5, decision D-7).** Every `SqliteDocumentSession` begins `IMMEDIATE` and holds the file's write lock from
+  its first operation — kept open over a form it blocked every writer, and the feed worker's checkpoint write failed
+  after the busy and command timeouts, so the batch went to the handlers again without a word beyond a generic error.
+  `SqliteDocumentStore.OpenReadSession(scope)` opens a session with a deferred transaction: under WAL it takes no write
+  lock, and its write methods throw `InvalidOperationException`. A checkpoint write that fails on a locked database
+  now logs a warning naming the handler, the sequence range and that the batch will be redelivered. Sessions from
+  `OpenSession` are unchanged. The playbook's Differences section describes the pattern (read session, short write
+  session).
+
 - **A `[JsonDerivedType]` document read back from PostgreSQL fails no more.** `jsonb` stores object keys in its own
   order, so the `$type` discriminator was no longer the first property and `System.Text.Json` refused the read
   ("must specify a type discriminator"). The serializer options allow the discriminator anywhere in the object now.

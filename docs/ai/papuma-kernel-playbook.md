@@ -201,6 +201,17 @@ same hard rules above — with these engine-specific adjustments:
 - **One writer, one file, one process.** Don't open the same `.db` file from
   two processes — that's an OS file-lock violation, not a kernel concern to
   code around.
+- **A session holds the write lock from its first operation; read through `OpenReadSession`.**
+  `OpenSession` starts `BEGIN IMMEDIATE`: from the first `LoadAsync` until commit or dispose no
+  other writer gets in — not the application's other sessions, not the feed workers. A feed cycle
+  whose checkpoint write meets that lock fails after the busy and command timeouts; its handlers
+  already ran, so the batch is delivered again (at-least-once — effect handlers must be idempotent)
+  and the feed logs a warning saying so. For screens and reports open the session with
+  `store.OpenReadSession(scope)`: a deferred transaction that, under WAL, takes no write lock and
+  blocks no writer; every write method throws `InvalidOperationException`. Load in a read session,
+  let the user edit, then save in a short `OpenSession` (with the loaded version as
+  `expectedVersion`). Commit or dispose a read session when the reads are done: its snapshot keeps
+  the WAL file from being checkpointed past it (review L-5).
 - **Schema contributors take a `SqliteConnection`.** `AddSchemaContributor<T>()`
   with an `ISqliteSchemaContributor` runs after the kernel schema, before the feed
   workers — same place as on Postgres, no advisory lock needed (one process owns
@@ -227,8 +238,8 @@ same hard rules above — with these engine-specific adjustments:
   long. The kernel's own `PRAGMA busy_timeout` is 5 s; a long-running statement also runs to its
   end. Plan `HostOptions.ShutdownTimeout` (default 30 s) with that in mind: if it elapses first, the
   host stops waiting and the process ends — SQLite rolls the interrupted write back, and the
-  records of an unfinished feed cycle come again (at-least-once). Keep sessions short and never hold
-  one open across user interaction (it holds the write lock).
+  records of an unfinished feed cycle come again (at-least-once). Keep write sessions short and never
+  hold one open across user interaction (it holds the write lock); read with `OpenReadSession`.
 - **Result sets are not bounded.** `GetHistoryAsync`, `GetChangesByCorrelationAsync`,
   `LoadManyAsync`, `PatchManyAsync`/`PatchWhereAsync`, `DeleteManyAsync`/`DeleteWhereAsync` and
   both `Redact…` calls materialise everything they touch in memory, which on a desktop with little

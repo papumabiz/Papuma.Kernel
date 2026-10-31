@@ -589,44 +589,58 @@ internal abstract class SqliteFeedEngine<THandler, TRecord> : IDisposable
         }
 
         var writeCt = cancelled ? CancellationToken.None : ct;
-        await using (var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, writeCt))
-        await using (var tx = conn.BeginTransaction(deferred: false))
+        try
         {
-            // Position AND generation: a reset from 0 to 0 (backfill, rebuild) leaves last_seq
-            // unchanged, but not the generation (review L-3).
-            if (await SqliteProjectionLifecycle.ReadCursorAsync(conn, tx, key, writeCt) != (checkpoint, generation))
+            await using (var conn = await SqliteConnectionFactory.OpenAsync(_connectionString, writeCt))
+            await using (var tx = conn.BeginTransaction(deferred: false))
             {
-                await tx.RollbackAsync(writeCt);
-                _logger.LogInformation(
-                    "Checkpoint of {Handler} moved while its batch was handled; outcome dropped, next cycle re-reads.",
-                    name);
-                if (cancelled)
+                // Position AND generation: a reset from 0 to 0 (backfill, rebuild) leaves last_seq
+                // unchanged, but not the generation (review L-3).
+                if (await SqliteProjectionLifecycle.ReadCursorAsync(conn, tx, key, writeCt) != (checkpoint, generation))
                 {
-                    ct.ThrowIfCancellationRequested();
+                    await tx.RollbackAsync(writeCt);
+                    _logger.LogInformation(
+                        "Checkpoint of {Handler} moved while its batch was handled; outcome dropped, next cycle re-reads.",
+                        name);
+                    if (cancelled)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                    }
+
+                    return 0;
                 }
 
-                return 0;
-            }
+                foreach (var seq in recovered)
+                {
+                    await ClearFailureAsync(conn, tx, key, seq, writeCt);
+                }
 
-            foreach (var seq in recovered)
-            {
-                await ClearFailureAsync(conn, tx, key, seq, writeCt);
-            }
+                if (failed is { } failure)
+                {
+                    var attempts = await RegisterFailureAsync(conn, tx, key, failure.Seq, failure.Error, writeCt);
+                    _logger.LogWarning(failure.Error,
+                        "Handler {Handler} failed on {Kind} seq {Seq} (attempt {Attempts}/{MaxAttempts}).",
+                        name, FeedTag, failure.Seq, attempts, _options.MaxAttempts);
+                }
 
-            if (failed is { } failure)
-            {
-                var attempts = await RegisterFailureAsync(conn, tx, key, failure.Seq, failure.Error, writeCt);
-                _logger.LogWarning(failure.Error,
-                    "Handler {Handler} failed on {Kind} seq {Seq} (attempt {Attempts}/{MaxAttempts}).",
-                    name, FeedTag, failure.Seq, attempts, _options.MaxAttempts);
-            }
+                if (newCheckpoint != checkpoint)
+                {
+                    await SaveCheckpointAsync(conn, tx, key, newCheckpoint, writeCt);
+                }
 
-            if (newCheckpoint != checkpoint)
-            {
-                await SaveCheckpointAsync(conn, tx, key, newCheckpoint, writeCt);
+                await tx.CommitAsync(writeCt);
             }
-
-            await tx.CommitAsync(writeCt);
+        }
+        catch (SqliteException ex) when (ex.SqliteErrorCode is SqliteBusy or SqliteLocked && newCheckpoint != checkpoint)
+        {
+            // The records were handed to the handler, the checkpoint could not move: the next cycle delivers them again
+            // (at-least-once). The usual cause is a session holding the write lock (review L-5).
+            _logger.LogWarning(ex,
+                "{Feed} feed: the outcome of handler {Handler} (seq {From}-{To}) could not be written, the database is " +
+                "locked; the batch will be redelivered (at-least-once). A long-open session holds the write lock: keep " +
+                "write sessions short and read through OpenReadSession.",
+                FeedName, name, checkpoint + 1, newCheckpoint);
+            throw;
         }
 
         if (cancelled)
@@ -636,6 +650,10 @@ internal abstract class SqliteFeedEngine<THandler, TRecord> : IDisposable
 
         return processed;
     }
+
+    // SQLITE_BUSY / SQLITE_LOCKED: another connection holds the write lock past the busy timeout.
+    private const int SqliteBusy = 5;
+    private const int SqliteLocked = 6;
 
     private sealed record BatchItem(TRecord Record, int Attempts, DateTimeOffset? NextRetryAt);
 
