@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Papuma.Kernel.Model;
 
@@ -9,7 +10,9 @@ namespace Papuma.Kernel.Model;
 /// Central serializer configuration for document persistence.
 /// </summary>
 /// <remarks>
-/// Web defaults: camelCase property names on write, case-insensitive matching on read.
+/// Web defaults: camelCase property names on write, case-insensitive matching on read. Enum values are
+/// written by member name (as declared, not camelCased) and read from a name or, for documents written before
+/// 3.0, from a number.
 /// Deliberately one fixed configuration — the serialized form is the document's wire
 /// truth, so it must not vary between call sites.
 /// </remarks>
@@ -26,5 +29,9 @@ internal static class KernelJson
         // [JsonDerivedType] value is no longer the first property when PostgreSQL hands the document back. Without
         // this the read fails with "must specify a type discriminator".
         AllowOutOfOrderMetadataProperties = true,
+
+        // By name, not by number: a number made the feed unreadable, IsFieldTransition("status", "Pending", "Paid")
+        // never matched, and a reordered enum silently changed every stored value. Numbers still read (old documents).
+        Converters = { new JsonStringEnumConverter(namingPolicy: null, allowIntegerValues: true) },
     };
 }

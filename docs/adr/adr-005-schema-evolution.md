@@ -51,7 +51,9 @@ no answer for it — hence this day-one ADR.
    - a new optional property with a **constant** default,
    - removing a property (surplus JSON fields are ignored; they disappear on the
      next save),
-   - adding a new enum value.
+   - adding a new enum value (anywhere in the declaration: enum values are stored by member name since 3.0,
+     so the position of a member does not matter; renaming a member is a rename and needs an upcaster).
+     Documents written before 3.0 hold numbers; they still read, and are written by name on their next save.
 
    Upcaster + version bump are only needed for **transforming** changes: rename,
    restructuring, type change, derived (non-constant) defaults. Explicitly

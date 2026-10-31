@@ -327,6 +327,15 @@ Fixed:
 
 Breaking:
 
+- **Enum values are stored by member name, not by number.** The serializer had no enum converter, so `Status.Paid`
+  went into documents, diffs, the feed and key indexes as `1`: the feed was unreadable,
+  `change.IsFieldTransition("status", "Pending", "Paid")` (the pattern of ADR-011) never matched an enum, and
+  inserting or reordering an enum member silently changed the meaning of every stored value — although ADR-005 calls
+  a new enum value additive. Values are written as declared (`"Paid"`, not camelCased); numbers still read, so
+  documents written before stay loadable and are written by name on their next save (the diff of that save shows
+  `0 → "Pending"`-style entries once). **A key on an enum field matches by name now:** documents stored with a number
+  are found by an enum lookup only after they were saved again. Renaming an enum member is now a rename (upcaster).
+
 - **The published test hash key is refused as configuration (review P-16, decision D-8).** `MasterKeyHashKeyProvider.FromBase64` — the path `HashMasterKey` takes — throws `ArgumentException` for the key of
   `Papuma.Kernel.Testing` (`TestHashKeys`), whatever the environment: anyone with the package can compute its hashes.
   `TestHashKeys.MasterKeyBase64` is removed; tests register `TestHashKeys.Provider` as the `IHashKeyProvider`.
