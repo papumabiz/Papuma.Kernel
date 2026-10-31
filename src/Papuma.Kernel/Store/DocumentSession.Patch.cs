@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
+using System.Globalization;
 using System.Linq.Expressions;
 using System.Text;
 using System.Text.Json;
@@ -430,7 +431,7 @@ public sealed partial class DocumentSession
                     {
                         Value = op.Value?.ToJsonString() ?? "null",
                     });
-                    expression.Insert(0, "jsonb_set(").Append($", @{pathParam}, @{valueParam}, true)");
+                    expression.Insert(0, "jsonb_set(").Append(CultureInfo.InvariantCulture, $", @{pathParam}, @{valueParam}, true)");
                     break;
 
                 case PatchOperationKind.Remove:
@@ -442,7 +443,7 @@ public sealed partial class DocumentSession
                         k => $" AND jsonb_typeof(d #> (@{pathParam})[1:{k}]) IS DISTINCT FROM 'array'"));
                     var removeSource = expression.ToString();
                     expression.Clear().Append(
-                        $"(SELECT CASE WHEN TRUE{removeGuards} THEN d #- @{pathParam} ELSE d END " +
+                        CultureInfo.InvariantCulture, $"(SELECT CASE WHEN TRUE{removeGuards} THEN d #- @{pathParam} ELSE d END " +
                         $"FROM (SELECT {removeSource} AS d) AS s)");
                     break;
 
@@ -457,7 +458,7 @@ public sealed partial class DocumentSession
                     cmd.Parameters.AddWithValue(byParam, op.IncrementBy);
                     var current = expression.ToString();
                     expression.Clear().Append(
-                        $"(SELECT jsonb_set(d, @{pathParam}, to_jsonb(COALESCE((CASE WHEN jsonb_typeof(d #> @{pathParam}) = 'string' " +
+                        CultureInfo.InvariantCulture, $"(SELECT jsonb_set(d, @{pathParam}, to_jsonb(COALESCE((CASE WHEN jsonb_typeof(d #> @{pathParam}) = 'string' " +
                         $"THEN (d #>> @{pathParam}) || '!' ELSE d #>> @{pathParam} END)::numeric, 0) + @{byParam}), true) " +
                         $"FROM (SELECT {current} AS d) AS s)");
                     break;

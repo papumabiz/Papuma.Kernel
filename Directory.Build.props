@@ -40,4 +40,20 @@
     <NuGetAuditMode>all</NuGetAuditMode>
     <WarningsAsErrors>$(WarningsAsErrors);NU1902;NU1903;NU1904</WarningsAsErrors>
   </PropertyGroup>
+
+  <!-- The shipped libraries (src/) build with the recommended analyzer set and no warnings
+       (review B-9). Tests, samples and benchmarks keep the SDK default. Turned off:
+       - CA1848, CA1873: LoggerMessage source generation; the kernel logs on rare paths
+         (failures, retries, startup), where the plain ILogger calls cost nothing measurable.
+       - CA1859: concrete collection types for a few interface calls; the IReadOnly* types
+         state intent, and the calls are not on a hot path.
+       - CA1711, CA1716: IEventHandler and its `event` parameter are public API; renaming
+         would break every consumer.
+       NU1901 (low-severity advisory) stays a warning, as in the audit settings above. -->
+  <PropertyGroup Condition="$(MSBuildProjectDirectory.StartsWith('$(MSBuildThisFileDirectory)src'))">
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901</WarningsNotAsErrors>
+    <NoWarn>$(NoWarn);CA1848;CA1873;CA1859;CA1711;CA1716</NoWarn>
+  </PropertyGroup>
 </Project>

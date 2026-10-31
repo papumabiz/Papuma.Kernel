@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -352,9 +353,9 @@ public static class SchemaManager
                 var columns = string.Join(", ", key.ComponentSegments
                     .Select(segments => $"(data #>> '{{{string.Join(',', segments)}}}')"));
                 var unique = key.Unique ? "UNIQUE " : string.Empty;
-                ddl.AppendLine($"CREATE {unique}INDEX IF NOT EXISTS {key.IndexName}");
-                ddl.AppendLine($"    ON papuma.document (scope, tenant_id, {columns})");
-                ddl.AppendLine($"    WHERE document_type = '{metadata.Name}';");
+                ddl.AppendLine(CultureInfo.InvariantCulture, $"CREATE {unique}INDEX IF NOT EXISTS {key.IndexName}");
+                ddl.AppendLine(CultureInfo.InvariantCulture, $"    ON papuma.document (scope, tenant_id, {columns})");
+                ddl.AppendLine(CultureInfo.InvariantCulture, $"    WHERE document_type = '{metadata.Name}';");
             }
         }
 

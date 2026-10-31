@@ -77,6 +77,11 @@ Security:
   it is pinned: **`Papuma.Kernel.FSharp` depends on `FSharp.Core` 10.1.303**, as 2.1.0 did — before, the
   dependency followed whatever SDK packed the release. `.editorconfig` asks for LF like `.gitattributes`. The
   unused `coverlet.collector` is removed from the test projects.
+- **The libraries build warning-free under the recommended analyzers (review B-9).** Projects under `src/` use
+  `AnalysisLevel=latest-recommended` with `TreatWarningsAsErrors`. Found and fixed on the way: the SQL and DDL text
+  builders and the SQLite key-value conversion formatted with the current culture; they use the invariant culture
+  now. CA1848/CA1873 (LoggerMessage), CA1859 and CA1711/CA1716 (public `IEventHandler` names) are turned off, with
+  the reasons in `Directory.Build.props`.
 
 Fixed:
 

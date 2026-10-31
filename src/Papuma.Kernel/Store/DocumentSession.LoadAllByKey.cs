@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
+using System.Globalization;
 using System.Linq.Expressions;
 using System.Text;
 
@@ -134,7 +135,7 @@ public sealed partial class DocumentSession
         var predicates = new StringBuilder();
         for (var i = 0; i < componentCount; i++)
         {
-            predicates.Append($" AND data #>> @path{i} = @value{i}");
+            predicates.Append(CultureInfo.InvariantCulture, $" AND data #>> @path{i} = @value{i}");
         }
 
         if (hasAfterId)

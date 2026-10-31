@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq.Expressions;
 using System.Text;
 using System.Text.Json;
@@ -365,7 +366,7 @@ public sealed partial class DocumentSession : IAsyncDisposable
         var predicates = new StringBuilder();
         for (var i = 0; i < values.Count; i++)
         {
-            predicates.Append($" AND data #>> @path{i} = @value{i}");
+            predicates.Append(CultureInfo.InvariantCulture, $" AND data #>> @path{i} = @value{i}");
             cmd.Parameters.AddWithValue($"path{i}", keyMetadata.ComponentSegments[i]);
             cmd.Parameters.AddWithValue($"value{i}", ToKeyText(values[i]));
         }
@@ -432,7 +433,7 @@ public sealed partial class DocumentSession : IAsyncDisposable
             var result = await ExecuteWriteAsync(
                 (conn, tx) => expectedVersion == 0
                     ? InsertAsync(conn, tx, metadata, id, newJson, ct)
-                    : UpdateAsync(conn, tx, metadata, id, newJson, expectedVersion, ct, extraMetadata: null),
+                    : UpdateAsync(conn, tx, metadata, id, newJson, expectedVersion, extraMetadata: null, ct),
                 ct);
             activity?.SetTag("papuma.version", result.Version);
             return result;
@@ -590,7 +591,7 @@ public sealed partial class DocumentSession : IAsyncDisposable
                 ["isRollback"] = true,
                 ["restoredVersion"] = toVersion,
             };
-            return await UpdateAsync(conn, tx, metadata, id, state, expectedVersion, ct, rollbackMetadata);
+            return await UpdateAsync(conn, tx, metadata, id, state, expectedVersion, rollbackMetadata, ct);
         }, ct);
         }
         catch (Exception ex) when (RecordFailure(activity, ex))
@@ -653,8 +654,8 @@ public sealed partial class DocumentSession : IAsyncDisposable
         string id,
         JsonObject newJson,
         long expectedVersion,
-        CancellationToken ct,
-        JsonObject? extraMetadata)
+        JsonObject? extraMetadata,
+        CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;

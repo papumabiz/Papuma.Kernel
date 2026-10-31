@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
+using System.Globalization;
 using System.Linq.Expressions;
 using System.Text;
 
@@ -140,7 +141,7 @@ public sealed partial class SqliteDocumentSession
         var predicates = new StringBuilder();
         for (var i = 0; i < jsonPaths.Count; i++)
         {
-            predicates.Append($" AND json_extract(data, '{jsonPaths[i]}') = @value{i}");
+            predicates.Append(CultureInfo.InvariantCulture, $" AND json_extract(data, '{jsonPaths[i]}') = @value{i}");
         }
 
         if (hasAfterId)

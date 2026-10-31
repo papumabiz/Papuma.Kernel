@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq.Expressions;
 using System.Text;
 using System.Text.Json;
@@ -437,7 +438,7 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
             var result = await ExecuteWriteAsync(
                 (conn, tx) => expectedVersion == 0
                     ? InsertAsync(conn, tx, metadata, id, newJson, ct)
-                    : UpdateAsync(conn, tx, metadata, id, newJson, expectedVersion, ct, extraMetadata: null),
+                    : UpdateAsync(conn, tx, metadata, id, newJson, expectedVersion, extraMetadata: null, ct),
                 ct);
             activity?.SetTag("papuma.version", result.Version);
             return result;
@@ -597,7 +598,7 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
                     ["isRollback"] = true,
                     ["restoredVersion"] = toVersion,
                 };
-                return await UpdateAsync(conn, tx, metadata, id, state, expectedVersion, ct, rollbackMetadata);
+                return await UpdateAsync(conn, tx, metadata, id, state, expectedVersion, rollbackMetadata, ct);
             }, ct);
         }
         catch (Exception ex) when (RecordFailure(activity, ex))
@@ -661,8 +662,8 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
         string id,
         JsonObject newJson,
         long expectedVersion,
-        CancellationToken ct,
-        JsonObject? extraMetadata)
+        JsonObject? extraMetadata,
+        CancellationToken ct)
     {
         // No RETURNING OLD/NEW in SQLite — capture "old" state via a plain SELECT first,
         // then run the version-checked UPDATE...RETURNING for "new" state. Safe: the
@@ -831,7 +832,7 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
                 }
 
                 values.Append(
-                    $"(@scope, @tenantId, @type, @id{i}, @version{i}, @schemaVersion{i}, @operation, @diff{i}, @actorId, @metadata, @occurredAt)");
+                    CultureInfo.InvariantCulture, $"(@scope, @tenantId, @type, @id{i}, @version{i}, @schemaVersion{i}, @operation, @diff{i}, @actorId, @metadata, @occurredAt)");
                 cmd.Parameters.AddWithValue($"id{i}", batch[i].Id);
                 cmd.Parameters.AddWithValue($"version{i}", batch[i].Version);
                 cmd.Parameters.AddWithValue($"schemaVersion{i}", batch[i].SchemaVersion);
@@ -1282,7 +1283,7 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
         var predicates = new StringBuilder();
         for (var i = 0; i < componentSegments.Count; i++)
         {
-            predicates.Append($" AND json_extract(data, '{ValidatedKeyJsonPath(componentSegments[i])}') = @value{i}");
+            predicates.Append(CultureInfo.InvariantCulture, $" AND json_extract(data, '{ValidatedKeyJsonPath(componentSegments[i])}') = @value{i}");
         }
 
         return $"""
@@ -1345,14 +1346,14 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
             case bool b:
                 return b ? 1L : 0L;
             case sbyte or byte or short or ushort or int or uint or long:
-                return Convert.ToInt64(value);
+                return Convert.ToInt64(value, CultureInfo.InvariantCulture);
             case ulong u:
                 // Beyond int64 SQLite stores the JSON number as REAL, so a double is all that can match.
                 return u <= long.MaxValue ? (long)u : (double)u;
             case decimal d when decimal.Truncate(d) == d && d >= long.MinValue && d <= long.MaxValue:
                 return (long)d; // an integral decimal is an integer key
             case float or double or decimal:
-                return Convert.ToDouble(value);
+                return Convert.ToDouble(value, CultureInfo.InvariantCulture);
             default:
                 var node = JsonSerializer.SerializeToNode(value, KernelJson.Options)
                     ?? throw new ArgumentException("Key value serialized to null.", nameof(value));
