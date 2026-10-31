@@ -57,6 +57,14 @@ Security:
   write statements that did. They carry `AND scope = @scope AND tenant_id = @tenantId` now, like every other
   statement (layer 1 of the two-layer model). The `seq` always came from a scoped `SELECT … FOR UPDATE` in the same
   transaction, so no cross-tenant write was reachable; this removes the sole reliance on layer 2.
+- **MCP: the operator binds the scope, `ExposeToMcp()` gates every content tool, protected keys are no oracle
+  (review M-1, M-2, decisions D-3, D-4).** The document tools took the tenant from the agent's `tenantId` argument,
+  as given, and read the platform scope when it was omitted — a prompt injection could read any tenant whose ids it
+  learned. They now read in the scope `PapumaMcpOptions.ScopeResolver` returns for the call; see Breaking.
+  `get_document_history` refused nothing: for a type not opted in with `ExposeToMcp()` its diffs reconstructed the
+  unprotected fields. It refuses such types now, and `get_changes_by_correlation` lists their changes without diff and
+  metadata (`"exposed": false`). `get_document_by_key` refuses a key under a privacy policy: "no document" versus "a
+  masked document" told whether a protected value — an e-mail address, say — exists (ADR-016 §5, review S-15).
 - **Policies on `[JsonDerivedType]` subtypes and `object` values are no longer silently ignored (review N-14,
   decision D-9).** The model scan followed the *declared* type of a property. `[SensitiveData]` on `Card.Pan` did
   nothing for a property declared as `Payment` with `[JsonDerivedType(typeof(Card), "card")]`, and nothing on the
@@ -303,6 +311,16 @@ Fixed:
   translated by a text match (hardening; a plain missing table behaves as before).
 
 Breaking:
+
+- **MCP document tools need a scope binding (review M-1, decision D-3).** `get_document`, `get_document_by_key`,
+  `get_document_history` and `get_changes_by_correlation` refuse every call until `WithPapumaKernel` sets
+  `PapumaMcpOptions.ScopeResolver` (`Func<McpScopeRequest, ScopeContext?>`, called per tool call with the call's
+  services and the agent's requested scope). With one, an omitted `tenantId` means the bound scope (no longer the
+  platform scope) and another tenant is refused. To keep the agent-chosen scope of 2.x for an operator tool whose every
+  caller may read every tenant, set `ScopeResolver = McpScopeResolvers.TrustToolArgument`. `get_model_inventory`,
+  `get_feed_lag` and `get_feed_failures` are unaffected. `PapumaKernelTools` takes an optional `IServiceProvider` as
+  its last constructor parameter. Also breaking for MCP users: history of types without `ExposeToMcp()` and key
+  lookups on protected keys are refused (see Security).
 
 - **`Build()` refuses `object` properties without a decision, and interface or abstract property types the serializer
   cannot round-trip (review N-14, N-15, decision D-9).** A property declared as `object` — also `List<object>`,

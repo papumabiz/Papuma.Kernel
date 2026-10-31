@@ -200,6 +200,7 @@ public sealed class MaskedReadTests : IAsyncLifetime
     {
         var change = new ChangeFeedProcessor(_fixture.DataSource, []);
         var events = new EventFeedProcessor(_fixture.DataSource, []);
-        return new PapumaKernelTools(_store, change, events);
+        return new PapumaKernelTools(
+            _store, change, events, new PapumaMcpOptions { ScopeResolver = McpScopeResolvers.TrustToolArgument });
     }
 }

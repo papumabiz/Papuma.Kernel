@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
+using Papuma.Kernel.Tenancy;
+
 namespace Papuma.Kernel.Mcp;
 
 /// <summary>
@@ -19,6 +21,24 @@ public sealed record PapumaMcpOptions
     /// <c>reset_feed_checkpoint</c>) are enabled. Default <c>false</c>.
     /// </summary>
     public bool AllowMutations { get; init; }
+
+    /// <summary>
+    /// Gets the binding of the scope-bound tools (<c>get_document</c>, <c>get_document_by_key</c>,
+    /// <c>get_document_history</c>, <c>get_changes_by_correlation</c>) to the caller (ADR-016). Called once per tool
+    /// call; the scope it returns is the one the tool reads in. A <c>tenantId</c> argument that names another scope is
+    /// refused, and an omitted one means the returned scope. <c>null</c> as the result refuses the call. Without a
+    /// resolver those tools refuse every call — the agent does not choose the tenant (review M-1).
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// // From the scope the application's middleware resolved for the HTTP request:
+    /// o => o with { ScopeResolver = r => r.Services.GetRequiredService&lt;IHttpContextAccessor&gt;().HttpContext?.GetScopeContext() }
+    ///
+    /// // An operator tool on a management port, where every caller may read every tenant:
+    /// o => o with { ScopeResolver = McpScopeResolvers.TrustToolArgument }
+    /// </code>
+    /// </example>
+    public Func<McpScopeRequest, ScopeContext?>? ScopeResolver { get; init; }
 
     /// <summary>
     /// Gets the most records one tool call returns (document history, changes by

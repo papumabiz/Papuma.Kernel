@@ -68,7 +68,12 @@ builder.Services.AddPapumaDashboard(); // embedded first-look dashboard
 builder.Services
     .AddMcpServer()
     .WithHttpTransport()
-    .WithPapumaKernel(); // read-only default; mutations need AllowMutations opt-in
+    .WithPapumaKernel(o => o with
+    {
+        // The document tools read in the caller's scope (ADR-016 §6) — here the demo tenant,
+        // like every request; a real app resolves it from the authenticated principal.
+        ScopeResolver = _ => SampleScope.Tenant,
+    }); // read-only default; mutations need AllowMutations opt-in
 
 var app = builder.Build();
 app.UseScopeResolution();

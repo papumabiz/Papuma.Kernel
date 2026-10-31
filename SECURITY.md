@@ -141,7 +141,9 @@ the kernel hides, but it matters when the caller is not trusted or the machine i
   "the whole history"): they are capped by `PapumaMcpOptions.MaxRecordsPerCall` (default 500; the
   history and correlation reads fetch at most the cap plus one row, the failure table is capped after
   loading) and report `"truncated"` ([observability](docs/observability.md)). The limit applies per
-  call, not per client, so rate-limit the endpoint if agents are not trusted.
+  call, not per client, so rate-limit the endpoint if agents are not trusted. The document tools read
+  only in the scope `PapumaMcpOptions.ScopeResolver` binds the caller to and refuse every call without
+  one; an agent cannot pick another tenant by argument (ADR-016 §6).
 - **Web applications.** Do not hand a client-controlled id list or key value to a `*Many`/`*Where`
   operation without bounding it in your endpoint.
 

@@ -179,14 +179,19 @@ MCP tools — a thin wrapper, no own diagnostics logic, read-only by default:
 builder.Services
     .AddMcpServer()
     .WithHttpTransport()        // or WithStdioServerTransport()
-    .WithPapumaKernel();        // read-only; mutations opt-in:
-    // .WithPapumaKernel(o => o with { AllowMutations = true });
+    .WithPapumaKernel(o => o with
+    {
+        // Which scope a caller reads in — required for the document tools (ADR-016 §6):
+        ScopeResolver = r => r.Services.GetRequiredService<IHttpContextAccessor>()
+            .HttpContext?.GetScopeContext(),
+        // AllowMutations = true,   // retry/reset tools, opt-in
+    });
 ```
 
 Over HTTP the server is **stateless** (the default since the MCP C# SDK 2.0): every
 request stands alone, no `Mcp-Session-Id` is issued, and a request carrying one is
-rejected with 400. The Papuma tools keep no session state — scope comes as a tool
-argument — so nothing is lost. A client that insists on sessions needs
+rejected with 400. The Papuma tools keep no session state — the scope is resolved per
+call — so nothing is lost. A client that insists on sessions needs
 `.WithHttpTransport(o => o.Stateless = false)`.
 
 | Tool | Corresponds to | Mutating? |
@@ -194,27 +199,31 @@ argument — so nothing is lost. A client that insists on sessions needs
 | `get_model_inventory` | `DataInventory.Build(model)` (Art.-30 inventory, policies, keys) | no |
 | `get_feed_lag` | `GetLagAsync()` of both processors | no |
 | `get_feed_failures` | `GetFailuresAsync()` of both processors | no |
-| `get_document_history` | `GetHistoryAsync` (scope-bound, policy-applied) | no |
+| `get_document_history` | `GetHistoryAsync` (scope-bound, policy-applied, `ExposeToMcp()` types only) | no |
 | `get_document` | `LoadMaskedAsync` by id (ADR-016: policy-masked, scope-bound, `ExposeToMcp()` types only) | no |
-| `get_changes_by_correlation` | `GetChangesByCorrelationAsync` — every change of one unit of work ("what did this command do?"), policy-applied, scope-bound | no |
-| `get_document_by_key` | masked load by a **declared** single-field key (no free-form query) | no |
+| `get_changes_by_correlation` | `GetChangesByCorrelationAsync` — every change of one unit of work ("what did this command do?"), policy-applied, scope-bound; types not exposed appear without diff and metadata | no |
+| `get_document_by_key` | masked load by a **declared**, unprotected single-field key (no free-form query) | no |
 | `retry_feed_failure` | `RetryFailureAsync` | yes — only with `AllowMutations` |
 | `reset_feed_checkpoint` | `ResetProjectionAsync` — empties a projection's target and replays; refuses effect handlers (ADR-024) | yes — only with `AllowMutations` |
 
 How the tools behave towards an agent:
 
 - **Scope.** The document tools (`get_document`, `get_document_by_key`, `get_document_history`,
-  `get_changes_by_correlation`) read in the scope given by their `tenantId` argument, as passed —
-  the tools do not bind it to the authenticated MCP caller (ADR-016: authorization is the
-  hosting application's). `get_feed_lag` and `get_feed_failures` are feed-wide across all
-  scopes (handler names, sequence numbers, error texts — no documents).
+  `get_changes_by_correlation`) read in the scope `PapumaMcpOptions.ScopeResolver` returns for
+  the call (ADR-016 §6). The agent's `tenantId` may only repeat it — another tenant is refused —
+  and omitting it means the bound scope. Without a resolver these tools refuse every call. An
+  operator tool whose callers may read every tenant sets
+  `ScopeResolver = McpScopeResolvers.TrustToolArgument` (the agent's `tenantId`, or the platform
+  scope when omitted). `get_feed_lag` and `get_feed_failures` are feed-wide across all scopes
+  (handler names, sequence numbers, error texts — no documents).
 - **Size.** History, correlation and failure results are capped at
   `PapumaMcpOptions.MaxRecordsPerCall` (default 500; `o with { MaxRecordsPerCall = 100 }`).
   `get_document_history` and `get_changes_by_correlation` return
   `{ "records": [...], "truncated": false }`; `get_feed_failures` adds a top-level
   `"truncated"`. History and correlation read at most the cap (plus one, to detect more) from
   the database; the failure table is capped after loading. `lastError` is cut at 300 characters.
-- **Errors.** What an agent can act on — invalid `tenantId`, unknown or non-exposed document type,
+- **Errors.** What an agent can act on — invalid or foreign `tenantId`, no scope binding, unknown
+  or non-exposed document type, a protected key,
   unknown feed or handler, mutations disabled — comes back as the tool's error text
   (`McpException`). Everything else (database down, bug) reaches the agent only as the SDK's
   generic "An error occurred invoking '…'", details stay in the server log.
@@ -225,7 +234,10 @@ How the tools behave towards an agent:
 The content tools (`get_document`, `get_document_by_key`) return **policy-masked**
 JSON: sensitive fields are masked, hashed or omitted exactly as in the feed
 (ADR-016, concepts §24). A type is only readable when the model opts in with
-`d.ExposeToMcp()` — the safe default is "not exposed." There is deliberately no
+`d.ExposeToMcp()` — the safe default is "not exposed" — and the same opt-in gates
+`get_document_history` and the diffs in `get_changes_by_correlation`. A lookup by a key
+under a privacy policy is refused: it would answer whether a document with that value
+exists (ADR-016 §5). There is deliberately no
 `gdpr_export` and no generic projection-query tool.
 
 The server runs **inside the application** (the metamodel only comes into being

@@ -17,6 +17,7 @@ using Papuma.Kernel.Mcp;
 using Papuma.Kernel.Model;
 using Papuma.Kernel.Processing;
 using Papuma.Kernel.Store;
+using Papuma.Kernel.Tenancy;
 using Papuma.Kernel.Tests.Infrastructure;
 
 namespace Papuma.Kernel.Tests.Mcp;
@@ -37,6 +38,8 @@ public sealed class McpWireTests
     }
 
     private sealed record WireDoc(string Id, string Name);
+
+    private sealed record BoundScope(ScopeContext Scope);
 
     private sealed class WireChangeHandler : IChangeHandler
     {
@@ -108,6 +111,29 @@ public sealed class McpWireTests
     }
 
     [Fact]
+    public async Task TheScopeResolver_GetsTheServersServices_AndBindsTheCall()
+    {
+        await using var harness = await Harness.StartAsync(_fixture.DataSource, _fixture.DataSource);
+
+        var foreign = await harness.Client.CallToolAsync(
+            "get_document",
+            new Dictionary<string, object?>
+            {
+                ["documentType"] = nameof(WireDoc),
+                ["documentId"] = "x",
+                ["tenantId"] = "someone-else",
+            });
+        var own = await harness.Client.CallToolAsync(
+            "get_document",
+            new Dictionary<string, object?> { ["documentType"] = nameof(WireDoc), ["documentId"] = "x" });
+
+        Assert.True(foreign.IsError);
+        Assert.Contains("outside the scope", ToText(foreign));
+        Assert.NotEqual(true, own.IsError); // IsError is null on success
+        Assert.Equal("null", ToText(own)); // read in the bound tenant, which has no such document
+    }
+
+    [Fact]
     public void WithPapumaKernel_RejectsANullOptionsTransform()
     {
         var builder = new ServiceCollection().AddMcpServer();
@@ -151,7 +177,7 @@ public sealed class McpWireTests
         /// <summary>Starts the tools over <paramref name="storeSource"/> (the store) and <paramref name="feedSource"/> (the processors).</summary>
         public static async Task<Harness> StartAsync(NpgsqlDataSource storeSource, NpgsqlDataSource feedSource)
         {
-            var model = new KernelModelBuilder().Document<WireDoc>().Build();
+            var model = new KernelModelBuilder().Document<WireDoc>(d => d.ExposeToMcp()).Build();
             await SchemaManager.EnsureSchemaAsync(storeSource, model);
             var change = new ChangeFeedProcessor(feedSource, [new WireChangeHandler()]);
             var events = new EventFeedProcessor(feedSource, [new WireEventHandler()]);
@@ -164,10 +190,16 @@ public sealed class McpWireTests
             services.AddSingleton(new DocumentStore(storeSource, model));
             services.AddSingleton(change);
             services.AddSingleton(events);
+            services.AddSingleton(new BoundScope(ScopeContext.Tenant($"t{Guid.NewGuid():N}")));
             services.AddMcpServer()
                 .WithStreamServerTransport(
                     clientToServer.Reader.AsStream(), serverToClient.Writer.AsStream())
-                .WithPapumaKernel();
+                .WithPapumaKernel(o => o with
+                {
+                    // Resolved from the services the SDK hands the tools — the path an HTTP request's
+                    // IHttpContextAccessor takes in a real host.
+                    ScopeResolver = r => r.Services.GetRequiredService<BoundScope>().Scope,
+                });
             var provider = services.BuildServiceProvider();
 
             var server = provider.GetRequiredService<McpServer>();

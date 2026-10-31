@@ -24,9 +24,11 @@ namespace Papuma.Kernel.Mcp;
 /// </summary>
 /// <remarks>
 /// Scope: the document tools (<c>get_document*</c>, <c>get_document_history</c>,
-/// <c>get_changes_by_correlation</c>) read in the scope named by their <c>tenantId</c>
-/// argument — the value the caller passes is used as given; the tools do not bind it to
-/// the authenticated MCP caller (ADR-016: that is the hosting application's authorization).
+/// <c>get_changes_by_correlation</c>) read in the scope <see cref="PapumaMcpOptions.ScopeResolver"/>
+/// returns for the call; a <c>tenantId</c> argument naming another scope is refused, and without a
+/// resolver the tools refuse every call (ADR-016, review M-1). They read only document types opted
+/// in with <c>ExposeToMcp()</c>; a correlation lists the changes of other types without diff and
+/// metadata (M-2), and a key lookup on a policy-protected key is refused.
 /// <c>get_feed_lag</c> and <c>get_feed_failures</c> are feed-wide and span all scopes
 /// (handler names, sequence numbers, error texts — no documents); <c>get_model_inventory</c>
 /// is pure metadata.
@@ -56,6 +58,7 @@ public sealed class PapumaKernelTools
     private readonly ChangeFeedProcessor _changeProcessor;
     private readonly EventFeedProcessor _eventProcessor;
     private readonly PapumaMcpOptions _options;
+    private readonly IServiceProvider _services;
 
     /// <summary>
     /// Initializes the tools over the application's kernel services.
@@ -63,12 +66,17 @@ public sealed class PapumaKernelTools
     /// <param name="store">The document store (carries the model).</param>
     /// <param name="changeProcessor">The change feed processor.</param>
     /// <param name="eventProcessor">The event feed processor.</param>
-    /// <param name="options">The MCP options; read-only defaults when omitted.</param>
+    /// <param name="options">The MCP options; read-only defaults (and no scope binding) when omitted.</param>
+    /// <param name="services">
+    /// The services of the call, handed to <see cref="PapumaMcpOptions.ScopeResolver"/>; the MCP server passes the
+    /// request's services. When omitted the resolver gets an empty provider.
+    /// </param>
     public PapumaKernelTools(
         DocumentStore store,
         ChangeFeedProcessor changeProcessor,
         EventFeedProcessor eventProcessor,
-        PapumaMcpOptions? options = null)
+        PapumaMcpOptions? options = null,
+        IServiceProvider? services = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(changeProcessor);
@@ -77,6 +85,7 @@ public sealed class PapumaKernelTools
         _changeProcessor = changeProcessor;
         _eventProcessor = eventProcessor;
         _options = options ?? new PapumaMcpOptions();
+        _services = services ?? NoServices.Instance;
     }
 
     [McpServerTool(Name = "get_model_inventory", ReadOnly = true)]
@@ -127,17 +136,18 @@ public sealed class PapumaKernelTools
         "operation, field diff, metadata (actor/correlation), timestamp, as " +
         "{ records, truncated } — at most MaxRecordsPerCall records, 'truncated' says " +
         "whether more exist (narrow with fromVersion/toVersion). Diffs are " +
-        "policy-applied — values of protected fields never appear. Scope-bound: " +
-        "pass tenantId for tenant data, omit it for platform documents." + UntrustedValues)]
+        "policy-applied — values of protected fields never appear. Scope-bound to the " +
+        "caller; only ExposeToMcp() types are readable." + UntrustedValues)]
     public async Task<string> GetDocumentHistoryAsync(
         [Description("The logical document type name as registered in the model.")] string documentType,
         [Description("The document identifier.")] string documentId,
-        [Description("The tenant id; omit for platform-scoped documents.")] string? tenantId = null,
+        [Description("The tenant id; omit it to read in the scope the server binds this caller to.")] string? tenantId = null,
         [Description("Inclusive lower version bound.")] long? fromVersion = null,
         [Description("Inclusive upper version bound.")] long? toVersion = null,
         CancellationToken ct = default)
     {
-        var scope = ScopeFor(tenantId);
+        var scope = ResolveScope(tenantId);
+        EnsureExposed(documentType);
         var max = _options.MaxRecordsPerCall;
         var history = await ActionableAsync(async () =>
         {
@@ -169,11 +179,12 @@ public sealed class PapumaKernelTools
         "document type and id, version, operation, field diff, metadata, timestamp, as " +
         "{ records, truncated } — at most MaxRecordsPerCall records. Answers " +
         "'what did this command do?'. The correlation id is in the metadata of any change or " +
-        "event. Diffs are policy-applied. Scope-bound: pass tenantId for tenant data." +
+        "event. Diffs are policy-applied. Scope-bound to the caller. Changes of types not " +
+        "opted in via ExposeToMcp() appear with exposed: false and without diff and metadata." +
         UntrustedValues)]
     public async Task<string> GetChangesByCorrelationAsync(
         [Description("The correlation id (a GUID, e.g. metadata.correlationId of a change).")] string correlationId,
-        [Description("The tenant id; omit for platform-scoped documents.")] string? tenantId = null,
+        [Description("The tenant id; omit it to read in the scope the server binds this caller to.")] string? tenantId = null,
         CancellationToken ct = default)
     {
         if (!Guid.TryParse(correlationId, out var id))
@@ -182,14 +193,30 @@ public sealed class PapumaKernelTools
                 $"'{correlationId}' is not a GUID. Pass the correlationId of a change's metadata.");
         }
 
-        var scope = ScopeFor(tenantId);
+        var scope = ResolveScope(tenantId);
         var max = _options.MaxRecordsPerCall;
         await using var session = _store.OpenSession(scope);
         var changes = await session.GetChangesByCorrelationForMcpAsync(id, ReadLimit(max), ct);
 
+        var exposed = _store.Model.DocumentTypes.Where(m => m.ExposedToMcp).Select(m => m.Name).ToHashSet(StringComparer.Ordinal);
         var records = new JsonArray();
         foreach (var change in changes.Take(max))
         {
+            if (!exposed.Contains(change.DocumentType))
+            {
+                // The chain stays visible — which documents the command touched — but not what changed (review M-2).
+                records.Add(new JsonObject
+                {
+                    ["seq"] = change.Seq,
+                    ["documentType"] = change.DocumentType,
+                    ["documentId"] = change.DocumentId,
+                    ["version"] = change.Version,
+                    ["operation"] = change.Operation.ToString(),
+                    ["exposed"] = false,
+                });
+                continue;
+            }
+
             records.Add(new JsonObject
             {
                 ["seq"] = change.Seq,
@@ -209,16 +236,16 @@ public sealed class PapumaKernelTools
     [McpServerTool(Name = "get_document", ReadOnly = true)]
     [Description("Loads the current state of one document by id, with privacy policies " +
         "applied: sensitive fields are masked, hashed or omitted — never clear text " +
-        "(ADR-016). Scope-bound (pass tenantId for tenant data). Only document types " +
+        "(ADR-016). Scope-bound to the caller. Only document types " +
         "opted in via ExposeToMcp() are readable; use get_model_inventory to discover types." +
         UntrustedValues)]
     public async Task<string> GetDocumentAsync(
         [Description("The logical document type name as registered in the model.")] string documentType,
         [Description("The document identifier.")] string documentId,
-        [Description("The tenant id; omit for platform-scoped documents.")] string? tenantId = null,
+        [Description("The tenant id; omit it to read in the scope the server binds this caller to.")] string? tenantId = null,
         CancellationToken ct = default)
     {
-        var scope = ScopeFor(tenantId);
+        var scope = ResolveScope(tenantId);
         EnsureExposed(documentType);
         var result = await ActionableAsync(async () =>
         {
@@ -231,16 +258,16 @@ public sealed class PapumaKernelTools
     [McpServerTool(Name = "get_document_by_key", ReadOnly = true)]
     [Description("Loads one document by a declared single-field key (ADR-006), policy-masked " +
         "like get_document. The key path must be a declared key — there is no free-form " +
-        "query, and composite keys are not supported here. Scope-bound; only ExposeToMcp() " +
-        "types are readable." + UntrustedValues)]
+        "query, composite keys are not supported here, and keys under a privacy policy are " +
+        "refused. Scope-bound to the caller; only ExposeToMcp() types are readable." + UntrustedValues)]
     public async Task<string> GetDocumentByKeyAsync(
         [Description("The logical document type name.")] string documentType,
         [Description("The declared key path (e.g. 'email').")] string keyPath,
         [Description("The key value to match.")] string value,
-        [Description("The tenant id; omit for platform-scoped documents.")] string? tenantId = null,
+        [Description("The tenant id; omit it to read in the scope the server binds this caller to.")] string? tenantId = null,
         CancellationToken ct = default)
     {
-        var scope = ScopeFor(tenantId);
+        var scope = ResolveScope(tenantId);
         EnsureExposed(documentType);
         var result = await ActionableAsync(async () =>
         {
@@ -315,23 +342,43 @@ public sealed class PapumaKernelTools
         }
     }
 
-    private static ScopeContext ScopeFor(string? tenantId)
+    /// <summary>
+    /// The scope of a scope-bound call: the resolver's answer for this caller (review M-1). The agent's
+    /// <c>tenantId</c> can only narrow it to the same scope — another one is refused, and the message does not
+    /// disclose the bound scope.
+    /// </summary>
+    private ScopeContext ResolveScope(string? tenantId)
     {
-        if (tenantId is null)
+        ScopeContext? requested = null;
+        if (tenantId is not null)
         {
-            return ScopeContext.Platform();
+            try
+            {
+                requested = ScopeContext.Tenant(tenantId);
+            }
+            catch (ArgumentException)
+            {
+                throw new McpException(
+                    "tenantId is not valid: it must match [A-Za-z0-9][A-Za-z0-9_-]{1,100}. " +
+                    "Omit it to read in the scope the server binds you to.");
+            }
         }
 
-        try
-        {
-            return ScopeContext.Tenant(tenantId);
-        }
-        catch (ArgumentException)
+        var resolver = _options.ScopeResolver
+            ?? throw new McpException(
+                "Document tools are disabled: this MCP server has no scope binding. The operator sets " +
+                "PapumaMcpOptions.ScopeResolver when registering the tools (WithPapumaKernel).");
+
+        var scope = resolver(new McpScopeRequest(_services, requested))
+            ?? throw new McpException("This caller is not bound to a scope; document tools are not available to it.");
+
+        if (requested is not null && requested != scope)
         {
             throw new McpException(
-                "tenantId is not valid: it must match [A-Za-z0-9][A-Za-z0-9_-]{1,100}. " +
-                "Omit it to read platform-scoped documents.");
+                $"tenantId '{tenantId}' is outside the scope this caller is bound to. Omit tenantId to read in your own scope.");
         }
+
+        return scope;
     }
 
     // The session enforces the opt-in itself (ADR-016); this only turns the outcome into a
@@ -347,6 +394,13 @@ public sealed class PapumaKernelTools
                 $"Document type '{documentType}' is not exposed for reading via MCP. " +
                 "Use get_model_inventory to see which types are.");
         }
+    }
+
+    private sealed class NoServices : IServiceProvider
+    {
+        public static readonly NoServices Instance = new();
+
+        public object? GetService(Type serviceType) => null;
     }
 
     /// <summary>

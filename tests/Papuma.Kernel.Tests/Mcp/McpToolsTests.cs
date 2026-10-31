@@ -33,6 +33,8 @@ public sealed class McpToolsTests : IAsyncLifetime
 
     private sealed record McpDoc(string Id, string Name, [property: SensitiveData] string? Secret = null);
 
+    private sealed record McpHiddenDoc(string Id, string Name);
+
     private sealed record McpEvent(string UserId);
 
     private sealed class NoopChangeHandler : IChangeHandler, IProjection
@@ -63,7 +65,8 @@ public sealed class McpToolsTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         var model = new KernelModelBuilder()
-            .Document<McpDoc>()
+            .Document<McpDoc>(d => d.ExposeToMcp())
+            .Document<McpHiddenDoc>() // not exposed
             .Event<McpEvent>()
             .Build();
 
@@ -75,9 +78,11 @@ public sealed class McpToolsTests : IAsyncLifetime
 
     private static string NewId() => Guid.NewGuid().ToString("N");
 
+    // These tests are about the tools' content, not the binding (McpScopeBindingTests): the agent's tenantId is
+    // trusted here, as before 3.0.
     private PapumaKernelTools CreateTools(
         ChangeFeedProcessor change, EventFeedProcessor events, PapumaMcpOptions? options = null) =>
-        new(_store, change, events, options);
+        new(_store, change, events, (options ?? new PapumaMcpOptions()) with { ScopeResolver = McpScopeResolvers.TrustToolArgument });
 
     [Fact]
     public async Task ModelInventory_DescribesTypesAndPolicies()
@@ -252,7 +257,7 @@ public sealed class McpToolsTests : IAsyncLifetime
         Assert.Contains("not registered", unknown.Message);
 
         var notExposed = await Assert.ThrowsAsync<McpException>(
-            () => tools.GetDocumentAsync(nameof(McpDoc), "x", tenant));
+            () => tools.GetDocumentAsync(nameof(McpHiddenDoc), "x", tenant));
         Assert.Contains("not exposed", notExposed.Message);
     }
 

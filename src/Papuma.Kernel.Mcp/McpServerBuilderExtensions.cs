@@ -16,10 +16,14 @@ namespace Papuma.Kernel.Mcp;
 /// builder.Services
 ///     .AddMcpServer()
 ///     .WithHttpTransport()                 // or WithStdioServerTransport()
-///     .WithPapumaKernel();                 // read-only default
+///     .WithPapumaKernel(o => o with
+///     {
+///         // The document tools read in the caller's scope; without a resolver they refuse:
+///         ScopeResolver = r => r.Services.GetRequiredService&lt;IHttpContextAccessor&gt;().HttpContext?.GetScopeContext(),
+///     });
 ///
 /// // Opt-in to mutating tools (retry, checkpoint reset):
-/// .WithPapumaKernel(o => o with { AllowMutations = true });
+/// .WithPapumaKernel(o => o with { ScopeResolver = …, AllowMutations = true });
 /// </code>
 /// </example>
 public static class McpServerBuilderExtensions

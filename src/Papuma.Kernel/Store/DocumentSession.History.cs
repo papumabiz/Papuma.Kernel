@@ -37,17 +37,12 @@ public sealed partial class DocumentSession
     /// <summary>
     /// MCP entry point: history by the type's logical name, reading at most
     /// <paramref name="limit"/> records (the caller asks for one more than it returns to
-    /// detect truncation) — replaces a reflection bridge to the generic overload.
+    /// detect truncation), and only for types opted in with <c>ExposeToMcp()</c> — the
+    /// history reconstructs the unprotected fields as well as a read does (review M-2).
     /// </summary>
     internal Task<IReadOnlyList<ChangeRecord>> GetHistoryForMcpAsync(
-        string documentType, string id, long? fromVersion, long? toVersion, int limit, CancellationToken ct)
-    {
-        var metadata = _model.DocumentTypes.FirstOrDefault(m => m.Name == documentType)
-            ?? throw new ArgumentException(
-                $"Document type '{documentType}' is not registered. Use get_model_inventory to list types.",
-                nameof(documentType));
-        return GetHistoryCoreAsync(metadata, id, fromVersion, toVersion, limit, ct);
-    }
+        string documentType, string id, long? fromVersion, long? toVersion, int limit, CancellationToken ct) =>
+        GetHistoryCoreAsync(ResolveExposedType(documentType), id, fromVersion, toVersion, limit, ct);
 
     /// <summary>MCP entry point: the unit of work's changes, reading at most <paramref name="limit"/> records.</summary>
     internal Task<IReadOnlyList<ChangeRecord>> GetChangesByCorrelationForMcpAsync(

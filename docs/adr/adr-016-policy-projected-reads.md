@@ -70,7 +70,12 @@ application's job (a projection, then its own tool).
 ### 3. Opt-in per document type, read-only, secure default
 
 Exposure is **not** global. A document type is readable over MCP only when the
-model opts it in (e.g. `d.ExposeToMcp()`); the default is not exposed. There is
+model opts it in (e.g. `d.ExposeToMcp()`); the default is not exposed. The opt-in covers
+every tool that shows a document's content (amendment, review M-2, 2026-10-31):
+`get_document_history` refuses a type that is not exposed — its diffs reconstruct the
+unprotected fields as well as a read does — and `get_changes_by_correlation` lists the
+changes of such a type with type, id, version and operation only (`"exposed": false`, no
+diff, no metadata), so the agent sees what a command touched but not what changed. There is
 **no write path** over MCP — writes go through the session (validation, versioning,
 diff, policies); an MCP write would be a different and much larger risk class.
 
@@ -83,7 +88,7 @@ generically. Application-specific projection tools are the consumer's to build;
 the kernel provides the pattern (a recipe), not the generic instrument. This is
 the same mechanism-vs-application boundary as everywhere else.
 
-### 5. Known limitation: a key lookup on a protected field is an existence oracle (review S-15)
+### 5. A key lookup on a protected field is an existence oracle (review S-15) — refused over MCP
 
 The masked read masks the **result**; the **lookup** compares the clear-text value. If a
 declared key is also a protected field — `Email` is `[UniqueKey]` *and* `[SensitiveData]`,
@@ -93,18 +98,29 @@ customer, without any protected value ever being returned. For a non-unique look
 multi-match error additionally reveals that more than one document carries the value
 (`LIMIT 2` + exception).
 
-This is accepted for now and documented rather than prevented: masking is data
-minimization, not authorization (see Consequences) — an agent allowed to look documents up by
-key is, by that permission, allowed to ask whether one exists. What follows for operators:
+**Decided 2026-10-31 (amendment):** `get_document_by_key` refuses a key whose effective policy
+is not `Track` (`Redact`, `Hash`, `Reference`, `DoNotTrack`, also inherited from an ancestor).
+The application keeps `LoadByKeyAsync`/`LoadMaskedAsync` in-process; only the agent loses the
+probe. Keys on unprotected fields stay an oracle for exactly their unprotected value, which the
+agent could read anyway — expose a type only if *finding* its documents by those keys is
+something the agent's principal may do. The oracle never crosses tenants (section 6).
 
-- Expose a type to MCP (`ExposeToMcp()`) only if *finding* its documents by every declared key
-  is something the agent's principal may do; a key on a field that is protected in the
-  feed (`Redact`, `Hash`, `Reference`) is exactly the case to think about.
-- The tool surface stays scope-bound: the oracle never crosses tenants.
+### 6. The scope comes from the caller, not from the agent (amendment, review M-1, 2026-10-31)
 
-Rejecting lookups by keys whose effective policy is not `Track` in the MCP path was
-considered. It changes what the content tools can do and is decided together with the
-MCP scope-binding work (WP-12); until then this section is the contract.
+The scope-bound tools took the tenant as a tool argument, as given: a prompt injection could
+read any tenant whose ids it learned, and the platform scope by omitting the argument. The
+scope is now the operator's: `PapumaMcpOptions.ScopeResolver`
+(`Func<McpScopeRequest, ScopeContext?>`) is called per tool call with the call's services
+(under HTTP the request's, so `IHttpContextAccessor` reaches the principal) and the scope the
+agent asked for (`Requested`, untrusted). The tool reads in the scope the resolver returns. A
+`tenantId` naming another scope is refused, without disclosing the bound one; an omitted
+`tenantId` means the bound scope, no longer "platform"; `null` refuses the call. **Without a
+resolver the scope-bound tools refuse every call** (fail closed); `get_model_inventory`,
+`get_feed_lag` and `get_feed_failures` are unaffected — they read no documents.
+
+An operator tool on a management port, whose every caller may read every tenant, restores the
+agent-chosen scope deliberately: `ScopeResolver = McpScopeResolvers.TrustToolArgument`. That
+is a decision in the code, not a default.
 
 ## Consequences
 

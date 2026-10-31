@@ -62,6 +62,16 @@ public sealed partial class DocumentSession
                 nameof(keyPath));
         }
 
+        // A lookup by the value of a protected field answers "does a document with this value exist?" — an oracle
+        // for exactly the value the policy hides. The application may look it up; the agent may not.
+        if (metadata.ResolvePolicy(keyPath) is var policy and not FieldPolicy.Track)
+        {
+            throw new ArgumentException(
+                $"'{keyPath}' on {metadata.Name} is under the {policy} policy. A lookup by its value would tell whether " +
+                "such a document exists, so MCP key reads are limited to unprotected keys (ADR-016).",
+                nameof(keyPath));
+        }
+
         var (conn, tx) = await EnsureTransactionAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
