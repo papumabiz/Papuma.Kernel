@@ -3,10 +3,12 @@
 
 using System.Text.Json.Nodes;
 
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 
 using ModelContextProtocol;
 
+using Papuma.Kernel.AspNetCore.Tenancy;
 using Papuma.Kernel.Changes;
 using Papuma.Kernel.Events;
 using Papuma.Kernel.Mcp;
@@ -176,6 +178,32 @@ public sealed class McpScopeBindingTests(PostgresFixture fixture) : IAsyncLifeti
         Assert.Equal("null", await tools.GetDocumentAsync(nameof(BoundDoc), id)); // omitted → platform
 
         Assert.Equal(ScopeContext.Platform(), McpScopeResolvers.TrustToolArgument(new McpScopeRequest(EmptyServices.Instance, null)));
+    }
+
+    [Fact]
+    public async Task TheDocumentedHttpResolver_BindsTheRequestsScope_AndRefusesARequestWithoutOne()
+    {
+        var tenant = NewTenant();
+        var (id, _) = await SeedAsync(tenant);
+        var accessor = new HttpContextAccessor { HttpContext = new DefaultHttpContext() };
+        var services = new ServiceCollection().AddSingleton<IHttpContextAccessor>(accessor).BuildServiceProvider();
+
+        // Exactly the resolver of observability.md and the XML docs.
+        Func<McpScopeRequest, ScopeContext?> resolver = r => r.Services.GetRequiredService<IHttpContextAccessor>().HttpContext is { } http
+            && http.TryGetScopeContext(out var scope) ? scope : null;
+        var tools = Tools(resolver, services);
+
+        var refused = await Assert.ThrowsAsync<McpException>(() => tools.GetDocumentAsync(nameof(BoundDoc), id));
+        Assert.Contains("not bound to a scope", refused.Message, StringComparison.Ordinal);
+
+        await new ScopeMiddleware(_ => Task.CompletedTask).InvokeAsync(accessor.HttpContext, new FixedResolver(tenant));
+        var found = JsonNode.Parse(await tools.GetDocumentAsync(nameof(BoundDoc), id))!;
+        Assert.Equal(id, (string?)found["document"]!["id"]);
+    }
+
+    private sealed class FixedResolver(ScopeContext scope) : IScopeResolver
+    {
+        public ScopeContext Resolve(HttpContext context) => scope;
     }
 
     // ── D-4: ExposeToMcp() gates history and correlation ───────────────────────

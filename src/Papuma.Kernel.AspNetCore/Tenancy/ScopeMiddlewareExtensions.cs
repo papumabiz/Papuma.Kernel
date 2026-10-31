@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Harald Lapp
 
+using System.Diagnostics.CodeAnalysis;
+
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -63,5 +65,21 @@ public static class ScopeMiddlewareExtensions
         }
 
         throw new InvalidOperationException("ScopeContext not set. Is ScopeMiddleware registered?");
+    }
+
+    /// <summary>
+    /// Gets the resolved scope context for the current request, or <c>false</c> when none was set — the form for code
+    /// that runs also outside the scope pipeline, such as an MCP <c>ScopeResolver</c>, where a missing scope must refuse
+    /// the call rather than throw.
+    /// </summary>
+    /// <param name="context">The current HTTP context.</param>
+    /// <param name="scope">The resolved scope context, or <c>null</c>.</param>
+    /// <returns><c>true</c> when the scope middleware resolved a scope for this request.</returns>
+    public static bool TryGetScopeContext(this HttpContext context, [NotNullWhen(true)] out ScopeContext? scope)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        scope = context.Items.TryGetValue(ScopeContextItemKey, out var value) ? value as ScopeContext : null;
+        return scope is not null;
     }
 }

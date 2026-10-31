@@ -18,8 +18,10 @@ namespace Papuma.Kernel.Mcp;
 ///     .WithHttpTransport()                 // or WithStdioServerTransport()
 ///     .WithPapumaKernel(o => o with
 ///     {
-///         // The document tools read in the caller's scope; without a resolver they refuse:
-///         ScopeResolver = r => r.Services.GetRequiredService&lt;IHttpContextAccessor&gt;().HttpContext?.GetScopeContext(),
+///         // The document tools read in the caller's scope; without a resolver they refuse.
+///         // The scope the application's middleware resolved (needs AddHttpContextAccessor):
+///         ScopeResolver = r => r.Services.GetRequiredService&lt;IHttpContextAccessor&gt;().HttpContext is { } http
+///             &amp;&amp; http.TryGetScopeContext(out var scope) ? scope : null,
 ///     });
 ///
 /// // Opt-in to mutating tools (retry, checkpoint reset):

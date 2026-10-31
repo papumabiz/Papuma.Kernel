@@ -127,6 +127,20 @@ public sealed class HardeningTests
         Assert.Throws<InvalidOperationException>(() => context.GetScopeContext());
     }
 
+    [Fact]
+    public async Task TryGetScopeContext_ReportsTheScope_OrFalse_WithoutThrowing()
+    {
+        var empty = new DefaultHttpContext();
+        Assert.False(empty.TryGetScopeContext(out var none));
+        Assert.Null(none);
+
+        var scope = ScopeContext.Tenant("acme");
+        var resolved = new DefaultHttpContext();
+        await new ScopeMiddleware(_ => Task.CompletedTask).InvokeAsync(resolved, new FixedResolver(scope));
+        Assert.True(resolved.TryGetScopeContext(out var found));
+        Assert.Same(scope, found);
+    }
+
     private sealed class FixedResolver(ScopeContext scope) : IScopeResolver
     {
         public ScopeContext Resolve(HttpContext context) => scope;

@@ -167,8 +167,9 @@ Fixed:
   (review L-5, decision D-7).** Every `SqliteDocumentSession` begins `IMMEDIATE` and holds the file's write lock from
   its first operation — kept open over a form it blocked every writer, and the feed worker's checkpoint write failed
   after the busy and command timeouts, so the batch went to the handlers again without a word beyond a generic error.
-  `SqliteDocumentStore.OpenReadSession(scope)` opens a session with a deferred transaction: under WAL it takes no write
-  lock, and its write methods throw `InvalidOperationException`. A checkpoint write that fails on a locked database
+  `SqliteDocumentStore.OpenReadSession(scope)` returns a `SqliteReadSession` in a deferred transaction: under WAL it
+  takes no write lock; it has the reads of `SqliteDocumentSession` and no write method, so a write in it is a compile
+  error. A checkpoint write that fails on a locked database
   now logs a warning naming the handler, the sequence range and that the batch will be redelivered. Sessions from
   `OpenSession` are unchanged. The playbook's Differences section describes the pattern (read session, short write
   session).
@@ -381,6 +382,12 @@ Fixed:
   translated by a text match (hardening; a plain missing table behaves as before).
 
 Breaking:
+
+- **`SqliteDocumentStore` takes the `SqliteChangeNotifier` instead of an `Action`.** The constructors had an
+  `Action? notifyWaiters` parameter — the internal wakeup hook, with nothing saying that a hand-built store needed
+  `notifier.TrySignal` there for its feed processors to react before their poll interval. They take
+  `SqliteChangeNotifier? notifier` now, the same instance the processors take. `null` stays valid for a store without
+  feed processors. `OpenReadSession` returns the new `SqliteReadSession` and has no `options` parameter.
 
 - **A `.` or `\` inside an object key is escaped in diff paths.** A `Dictionary<string, T>` with a key such as
   `"feature.enabled"` made `SaveAsync` throw, because diff paths are dot-separated — a failure that depended on the
@@ -621,6 +628,10 @@ Changed:
   that long.
 
 Added:
+
+- **`HttpContext.TryGetScopeContext(out scope)`** (`Papuma.Kernel.AspNetCore`): the resolved scope, or `false`
+  without throwing. `GetScopeContext()` throws when no scope was set, which made the documented MCP `ScopeResolver`
+  fail with a generic error instead of refusing the call; the examples use `TryGetScopeContext` now.
 
 - **`change.Is<T>(model)` and `@event.Is<TEvent>(model)`: a handler asks for its type through the model.** The docs
   and samples filtered with `change.DocumentType != "User"` / `nameof(Order)`. A record carries the logical name

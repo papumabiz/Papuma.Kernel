@@ -182,8 +182,9 @@ builder.Services
     .WithPapumaKernel(o => o with
     {
         // Which scope a caller reads in — required for the document tools (ADR-016 §6):
-        ScopeResolver = r => r.Services.GetRequiredService<IHttpContextAccessor>()
-            .HttpContext?.GetScopeContext(),
+        // The scope your middleware resolved for the request (AddHttpContextAccessor); none → refused.
+        ScopeResolver = r => r.Services.GetRequiredService<IHttpContextAccessor>().HttpContext is { } http
+            && http.TryGetScopeContext(out var scope) ? scope : null,
         // AllowMutations = true,   // retry/reset tools, opt-in
     });
 ```

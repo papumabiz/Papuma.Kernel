@@ -31,8 +31,12 @@ public sealed record PapumaMcpOptions
     /// </summary>
     /// <example>
     /// <code>
-    /// // From the scope the application's middleware resolved for the HTTP request:
-    /// o => o with { ScopeResolver = r => r.Services.GetRequiredService&lt;IHttpContextAccessor&gt;().HttpContext?.GetScopeContext() }
+    /// // From the scope the application's middleware resolved for the HTTP request (needs AddHttpContextAccessor):
+    /// o => o with
+    /// {
+    ///     ScopeResolver = r => r.Services.GetRequiredService&lt;IHttpContextAccessor&gt;().HttpContext is { } http
+    ///         &amp;&amp; http.TryGetScopeContext(out var scope) ? scope : null,
+    /// }
     ///
     /// // An operator tool on a management port, where every caller may read every tenant:
     /// o => o with { ScopeResolver = McpScopeResolvers.TrustToolArgument }
