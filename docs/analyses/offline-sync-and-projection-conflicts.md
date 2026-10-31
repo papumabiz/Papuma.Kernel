@@ -1,6 +1,7 @@
 # Exploration: offline-capable clients & multi-user conflicts in projections
 
-Status: **idea / not decided** (2026-08-11). No implementation triggered by this
+Status: **idea / not decided** (2026-08-11; extended 2026-10-20 with §6–§7: gaps
+found on review, and collaborative editing / CRDTs). No implementation triggered by this
 document — captured so the reasoning doesn't have to be redone if either question
 becomes real. Written while designing a desktop application on top of Papuma
 Kernel with a central Postgres server; the baseline architecture is: desktop
@@ -233,3 +234,75 @@ nicht"):
 - **Idea B has no independent trigger** — it activates automatically, without
   new design work, the moment Idea A does (§4). Don't design it separately if
   that day comes.
+
+---
+
+## 6. Gaps found on review (2026-10-20)
+
+§2 describes the **push** direction only and claims no kernel change is needed.
+That holds for push; a full sync (several offline users, mixed online/offline,
+single-user → central server later) has more to it:
+
+1. **Pull path / replication write path in `Papuma.Kernel.Local`.** Server
+   changes must be applied locally keeping the server's version and seq, and
+   must not re-enter the outbox (origin marker on local change records). Local
+   projections still run on them. This is probably a real addition to Local,
+   not a pure add-on package.
+2. **Two version lines.** Local and server versions are independent counters.
+   A sync-state table per document (`local version ↔ last known server
+   version`) and a per-device cursor on the server feed are required.
+3. **Cross-document invariants and natural keys** (ADR-006/020, "last seat")
+   cannot be guaranteed offline; two offline users can create the same key.
+   This surfaces at replay, never at write time, and only compensation
+   (not technology) resolves it.
+4. **Privacy.** A device may only receive what its user may see, so the
+   server's policy-projected reads (ADR-016) must apply to the pull, while
+   Local has no tenancy/scope. GDPR redaction must propagate to devices, and a
+   device that never syncs keeps its copy.
+5. **Schema versions.** Old client → new server works via upcasting; new
+   client data on an old reader does not.
+6. **Mixed mode.** Prefer *local-first* (always write to SQLite, sync in the
+   background) over two write paths (online direct, offline queued). Cost:
+   server-side guarantees (keys, invariants) apply at sync time instead of
+   write time. Online-first with offline fallback is the alternative if the
+   domain cannot tolerate that.
+7. **Single-user → server** is a one-time import (snapshot or history replay),
+   not a sync. Afterwards a second device of the same user is as hard as a
+   second user.
+
+Decisions to make before building: local-first vs. online-first; conflict unit
+(document / field / per-field strategy, see §7) and default rule (server wins /
+merge / UI); which data a device receives (scope filter on pull).
+
+## 7. Collaborative editing and CRDTs
+
+If the product gets genuinely collaborative UIs, §2.4 step 5 ("CRDTs only for
+shared rich text") becomes a real requirement for *some* fields. It does not
+replace the document model:
+
+- **Two classes of fields.** Structured fields (status, amounts, references)
+  stay document + version + field merge. Collaboratively edited fields (rich
+  text, maybe ordered lists/canvas) use a CRDT (Yjs/Automerge style), whose
+  merges never conflict by construction.
+- **Live collaboration is a separate channel.** Presence, cursors and live
+  updates need an online relay (WebSocket); offline CRDT edits merge on
+  reconnect. Neither is the kernel's job; the kernel stores the result.
+- **The kernel cannot see inside CRDT state.** The state is opaque; diff engine,
+  field policies (hash/mask) and `ChangeRecord` diffs do not apply to it.
+  Sketch: the document carries the CRDT snapshot plus a derived plain-text
+  projection (for search, policies, GDPR); incremental updates go to a
+  separate log with retention, not into the change feed (blob diffs would
+  bloat it).
+- **Fits the conflict model.** A `ConcurrencyException` on a CRDT field is
+  resolved by merging the two CRDT states and retrying the `Save` — a
+  deterministic "crdt-merge" strategy, i.e. a per-field conflict strategy next
+  to LWW/merge/manual.
+- **GDPR is the hard part.** CRDT histories keep deleted content (tombstones).
+  Erasure needs snapshot compaction that drops history, and every device must
+  compact too.
+- **Ecosystem risk.** Mature CRDT libraries are JS/Rust; .NET support is thin
+  and must be checked before committing (relay/bindings).
+
+Open question that decides the scope: what is "collaborative" — presence and
+live form editing (no CRDT needed: field-level merge + WebSocket), or
+simultaneous text editing (CRDT needed for those fields)?
