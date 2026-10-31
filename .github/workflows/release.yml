@@ -1,14 +1,18 @@
 name: Release
 
 # Publishes to nuget.org via Trusted Publishing (OIDC) — no long-lived API key
-# stored anywhere. Requires a Trusted Publishing policy on nuget.org pointing at
-# this repository and this workflow file (see docs/README.md release notes).
+# stored anywhere. Setup and the release steps are in CONTRIBUTING.md ("Releasing").
 #
-# Triggered by pushing a tag vX.Y.Z, or manually (Actions tab / `gh workflow run
-# release.yml -f tag=vX.Y.Z`) — the manual path takes an explicit tag input and
-# checks that tag out, because a tag from before this workflow existed carries no
-# copy of it to dispatch against. Every package's <Version> must equal X.Y.Z, or
-# the push is refused before anything reaches nuget.org.
+# Triggered by pushing a tag vX.Y.Z[-suffix], or manually (Actions tab / `gh workflow
+# run release.yml -f tag=vX.Y.Z`) — the manual path takes an explicit tag input and
+# checks that tag out. Every package's <Version> must equal the tag's version, or
+# nothing reaches nuget.org. The tag's tree must contain .github/scripts/verify-packages.sh,
+# so tags from before that script cannot be published by this workflow.
+#
+# Two jobs, so the OIDC token is never reachable from restore, build or test:
+#   build   — checkout, restore, build, test, pack, verify, upload; contents: read only.
+#   publish — download, attest, login, push; no checkout, no restore. Runs in the
+#             `nuget-org` environment, whose required reviewers gate the push.
 
 on:
   push:
@@ -17,30 +21,43 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to publish (e.g. v2.1.0) — must already exist"
+        description: "Tag to publish (e.g. v3.0.0) — must already exist"
         required: true
         type: string
 
-permissions:
-  contents: read
-  id-token: write # required for NuGet Trusted Publishing
+permissions: {}
 
 jobs:
-  publish:
+  build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.ref.outputs.tag }}
 
     steps:
-      - name: Resolve the tag to publish
+      # The tag only reaches the shell through env, never through ${{ }} in a script.
+      - name: Resolve and validate the tag
         id: ref
-        run: echo "tag=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag '${TAG}' is not vX.Y.Z or vX.Y.Z-suffix"
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout ${{ steps.ref.outputs.tag }}
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/tags/${{ steps.ref.outputs.tag }}
+          persist-credentials: false
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
 
@@ -56,32 +73,14 @@ jobs:
       - name: Pack
         run: dotnet pack Papuma.Kernel.slnx --configuration Release --output artifacts
 
-      # Fails closed: a tag that doesn't match every packed version must not publish
-      # a partial or wrongly-versioned release.
-      - name: Verify every package matches the tag
-        run: |
-          set -euo pipefail
-          TAG="${{ steps.ref.outputs.tag }}"
-          TAG_VERSION="${TAG#v}"
-          echo "Tag version: ${TAG_VERSION}"
-          shopt -s nullglob
-          count=0
-          for f in artifacts/*.nupkg; do
-            count=$((count + 1))
-            base="$(basename "$f" .nupkg)"
-            if [[ "$base" != *"${TAG_VERSION}" ]]; then
-              echo "::error file=$f::package version does not match tag ${TAG}"
-              exit 1
-            fi
-          done
-          if [ "$count" -eq 0 ]; then
-            echo "::error::no .nupkg files were produced"
-            exit 1
-          fi
-          echo "${count} package(s) match ${TAG}"
+      # Fails closed: exact file name per package (version == tag) and the embedded Core assembly.
+      - name: Verify packages
+        env:
+          VERSION: ${{ steps.ref.outputs.version }}
+        run: bash .github/scripts/verify-packages.sh artifacts "$VERSION"
 
       - name: Upload release artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: papuma-kernel-nupkg-${{ steps.ref.outputs.tag }}
           path: |
@@ -89,17 +88,41 @@ jobs:
             artifacts/*.snupkg
           if-no-files-found: error
 
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: nuget-org
+    permissions:
+      id-token: write # NuGet Trusted Publishing and the provenance attestation
+      attestations: write
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: papuma-kernel-nupkg-${{ needs.build.outputs.tag }}
+          path: artifacts
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: artifacts/*.nupkg
+
       # NuGet.org username (profile name, not email) — stored as a secret per
       # NuGet's own Trusted Publishing guidance, even though it isn't a credential.
       - name: NuGet login (OIDC -> short-lived API key)
-        uses: NuGet/login@v1
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
         id: login
         with:
           user: ${{ secrets.NUGET_USER }}
 
+      # The runner's preinstalled SDK is enough for `dotnet nuget push`; the matching
+      # .snupkg files next to the .nupkg are pushed along with them.
       - name: Push to nuget.org
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
         run: |
           dotnet nuget push "artifacts/*.nupkg" \
-            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+            --api-key "$NUGET_API_KEY" \
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate

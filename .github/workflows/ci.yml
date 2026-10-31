@@ -20,10 +20,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
 
@@ -41,8 +43,16 @@ jobs:
       - name: Pack
         run: dotnet pack Papuma.Kernel.slnx --configuration Release --output artifacts
 
+      # The same check the release runs: every package present under the <Version> of
+      # Directory.Build.props, and Papuma.Kernel.Core.dll embedded where it must be.
+      - name: Verify packages
+        run: |
+          set -euo pipefail
+          VERSION="$(dotnet msbuild src/Papuma.Kernel/Papuma.Kernel.csproj -getProperty:Version)"
+          bash .github/scripts/verify-packages.sh artifacts "$VERSION"
+
       - name: Upload NuGet package artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: papuma-kernel-nupkg
           path: |

@@ -62,6 +62,34 @@ short version:
   to a consumer (API, behaviour, packaging, docs layout).
 - CI must be green: build, tests and pack all run on every pull request.
 
+## Releasing
+
+Maintainers only. Packages go to nuget.org through
+[`.github/workflows/release.yml`](.github/workflows/release.yml) with NuGet
+Trusted Publishing (OIDC); no API key is stored anywhere.
+
+One-time setup:
+
+- **nuget.org:** a Trusted Publishing policy for this repository and the workflow
+  file `release.yml`.
+- **Secret `NUGET_USER`:** the nuget.org profile name (not the email address).
+- **Environment `nuget-org`** (repository settings → Environments) with required
+  reviewers. The publish job runs in it, so no push to nuget.org starts without
+  an approval.
+
+A release:
+
+1. Set `<Version>` in `Directory.Build.props` and move the `Unreleased` entries in
+   `CHANGELOG.md` under that version.
+2. Tag the commit `vX.Y.Z` (or `vX.Y.Z-suffix`) and push the tag. A tag that
+   already exists can be published from the Actions tab or with
+   `gh workflow run release.yml -f tag=vX.Y.Z`.
+3. The build job tests and packs the tag; it fails if the tag is not exactly the
+   packages' version or a package is missing. Approve the `nuget-org` deployment,
+   and the publish job attests the packages and pushes them.
+
+`publish-nuget.sh` publishes to GitHub Packages and is not part of a release.
+
 ## Security
 
 Please do not open a public issue for a vulnerability — see [SECURITY.md](SECURITY.md).

@@ -57,6 +57,18 @@ Security:
   write statements that did. They carry `AND scope = @scope AND tenant_id = @tenantId` now, like every other
   statement (layer 1 of the two-layer model). The `seq` always came from a scoped `SELECT … FOR UPDATE` in the same
   transaction, so no cross-tenant write was reachable; this removes the sole reliance on layer 2.
+- **Release pipeline hardened (review N-3, B-1, B-7, N-10, B-5, B-8, B-17).** `release.yml` ran restore, build and
+  tests in the job that could request the nuget.org OIDC token, so a compromised build or test dependency could have
+  published. It is split now: a **build** job with `contents: read` only, and a **publish** job (`id-token`,
+  `attestations`) that downloads the packed artifacts, attests them with `actions/attest-build-provenance` and
+  pushes — no checkout, no restore. The publish job runs in the **`nuget-org` environment**; create it with required
+  reviewers in the repository settings, or no approval gates the push. Every action in `ci.yml` and `release.yml` is
+  pinned to a commit SHA (Dependabot updates the pins), and the tag reaches the shell only through `env:`. The tag
+  must match `vX.Y.Z[-suffix]`, and each package must exist under exactly that version: the old suffix check let
+  `v2.1.0` pass for `12.1.0`. A new `.github/scripts/verify-packages.sh` also checks that `Papuma.Kernel.Core.dll`
+  is embedded in `Papuma.Kernel`, `.Local` and `.FSharp` — CI runs it on every push, which the csproj comment
+  had promised but no step did. `CONTRIBUTING.md` documents the release setup (Trusted Publishing, `NUGET_USER`,
+  the environment).
 
 Fixed:
 
