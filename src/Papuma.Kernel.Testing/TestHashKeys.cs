@@ -8,9 +8,9 @@ namespace Papuma.Kernel.Testing;
 /// <summary>
 /// A fixed hash key for tests (ADR-025). The <c>Hash</c> policy is keyed and the kernel refuses to
 /// start without a key; tests that use a model with <c>[TrackHash]</c> fields pass
-/// <see cref="Provider"/> to their store, or set <see cref="MasterKeyBase64"/> and
-/// <see cref="KeyId"/> in the hosting options. <b>Never use this key outside tests</b> — it is
-/// published, so the hashes it produces protect nothing.
+/// <see cref="Provider"/> to their store, or register it as the <c>IHashKeyProvider</c> of a host.
+/// The key is published, so the hashes it produces protect nothing: configured as
+/// <c>HashMasterKey</c>, the kernel refuses to start (review P-16).
 /// </summary>
 public static class TestHashKeys
 {
@@ -19,9 +19,6 @@ public static class TestHashKeys
 
     /// <summary>The key id of the test key.</summary>
     public const string KeyId = "test";
-
-    /// <summary>Gets the test master key, base64 — the form <c>PapumaKernelOptions.HashMasterKey</c> takes.</summary>
-    public static string MasterKeyBase64 { get; } = Convert.ToBase64String(MasterKeyBytes);
 
     /// <summary>Gets a key provider for the test key.</summary>
     public static IHashKeyProvider Provider { get; } = new MasterKeyHashKeyProvider(MasterKeyBytes, KeyId);

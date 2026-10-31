@@ -77,14 +77,30 @@ public sealed class HashKeyProviderTests
     [Fact]
     public void FromBase64_ReadsTheConfigurationForm_AndRejectsGarbage()
     {
-        var provider = MasterKeyHashKeyProvider.FromBase64(Convert.ToBase64String(MasterKey), "prod_2026-10");
+        var own = Convert.FromHexString("7c1e94d20a5f3b86e4219dc07f6a58b3d1940e2c6b8f7a35c2e90d4b1f6a8c27"); // configuration refuses the published test key
+        var provider = MasterKeyHashKeyProvider.FromBase64(Convert.ToBase64String(own), "prod_2026-10");
 
         Assert.Equal("prod_2026-10", provider.ActiveKeyId);
         Assert.Equal(
-            Provider().GetKey(Acme, "Account").ToArray(),
+            new MasterKeyHashKeyProvider(own, "prod_2026-10").GetKey(Acme, "Account").ToArray(),
             provider.GetKey(Acme, "Account").ToArray());
         Assert.Throws<ArgumentException>(() => MasterKeyHashKeyProvider.FromBase64("not base64!", "k1"));
         Assert.Throws<ArgumentException>(() => MasterKeyHashKeyProvider.FromBase64("  ", "k1"));
+    }
+
+    [Fact]
+    public void FromBase64_RefusesThePublishedTestKey_TheConstructorStillTakesIt()
+    {
+        var published = Convert.FromHexString(
+            "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+
+        var ex = Assert.Throws<ArgumentException>(
+            () => MasterKeyHashKeyProvider.FromBase64(Convert.ToBase64String(published), "test"));
+
+        Assert.Equal("masterKeyBase64", ex.ParamName);
+        Assert.Contains("published test key", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("TestHashKeys.Provider", ex.Message, StringComparison.Ordinal);
+        Assert.Equal("test", new MasterKeyHashKeyProvider(published, "test").ActiveKeyId); // code, not configuration
     }
 
     // ── The feed diff ──────────────────────────────────────────────────────────

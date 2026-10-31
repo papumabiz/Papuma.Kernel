@@ -312,6 +312,10 @@ Fixed:
 
 Breaking:
 
+- **The published test hash key is refused as configuration (review P-16, decision D-8).** `MasterKeyHashKeyProvider.FromBase64` — the path `HashMasterKey` takes — throws `ArgumentException` for the key of
+  `Papuma.Kernel.Testing` (`TestHashKeys`), whatever the environment: anyone with the package can compute its hashes.
+  `TestHashKeys.MasterKeyBase64` is removed; tests register `TestHashKeys.Provider` as the `IHashKeyProvider`.
+
 - **`Papuma.Kernel.Core` is a package of its own; Papuma packages depend on each other exactly (review B-4, N-7,
   B-15, decision D-5).** The Core assembly was embedded in `Papuma.Kernel`, `.Local` and `.FSharp`, and
   `.AspNetCore`, `.Mcp` and `.Testing` used Core types without declaring a dependency. With `Papuma.Kernel` 3.0.0 and

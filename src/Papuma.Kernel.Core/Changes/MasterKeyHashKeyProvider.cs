@@ -49,9 +49,15 @@ public sealed class MasterKeyHashKeyProvider : IHashKeyProvider
         ActiveKeyId = keyId;
     }
 
-    /// <summary>Creates a provider from a base64 master key — the form it takes in configuration.</summary>
+    /// <summary>
+    /// Creates a provider from a base64 master key — the form it takes in configuration, and the path
+    /// <c>HashMasterKey</c> of the hosting options takes. Refuses the published test key of
+    /// <c>Papuma.Kernel.Testing</c> (<c>TestHashKeys</c>): anyone with the package can compute the hashes it
+    /// produces, so it must never be configured (review P-16). Tests pass <c>TestHashKeys.Provider</c> instead.
+    /// </summary>
     /// <param name="masterKeyBase64">The master key, base64-encoded.</param>
     /// <param name="keyId">The identifier of this master key.</param>
+    /// <exception cref="ArgumentException">The key is not base64, or it is the published test key.</exception>
     public static MasterKeyHashKeyProvider FromBase64(string masterKeyBase64, string keyId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(masterKeyBase64);
@@ -65,7 +71,37 @@ public sealed class MasterKeyHashKeyProvider : IHashKeyProvider
             throw new ArgumentException("The hash master key is not valid base64.", nameof(masterKeyBase64), ex);
         }
 
+        if (IsPublishedTestKey(bytes))
+        {
+            throw new ArgumentException(
+                "The hash master key is the published test key of Papuma.Kernel.Testing (TestHashKeys): its hashes protect " +
+                "nothing, because anyone with the package can compute them. Generate a key of your own (32 random bytes, " +
+                "base64, e.g. `openssl rand -base64 32`) and keep it in a secret store. Tests register " +
+                "TestHashKeys.Provider as the IHashKeyProvider instead of configuring a master key.",
+                nameof(masterKeyBase64));
+        }
+
         return new MasterKeyHashKeyProvider(bytes, keyId);
+    }
+
+    // The bytes 0x00…0x1f: TestHashKeys in Papuma.Kernel.Testing and the spec vectors (docs/spec/vectors/hash.json).
+    // HashKeyProviderTests pins that both still agree.
+    internal static bool IsPublishedTestKey(ReadOnlySpan<byte> key)
+    {
+        if (key.Length != 32)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < key.Length; i++)
+        {
+            if (key[i] != i)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <inheritdoc />

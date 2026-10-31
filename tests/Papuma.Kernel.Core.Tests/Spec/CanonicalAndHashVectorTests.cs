@@ -112,6 +112,16 @@ public sealed class CanonicalAndHashVectorTests
     private static JsonObject Find(string file, string array, string name) =>
         ((JsonArray)Load(file)[array]!).Cast<JsonObject>().Single(v => (string?)v["name"] == name);
 
+    [Fact]
+    public void TheVectorsMasterKey_IsThePublishedTestKey_ThatConfigurationRefuses()
+    {
+        // The key FromBase64 refuses (review P-16) is the one the vectors and TestHashKeys publish.
+        Assert.True(MasterKeyHashKeyProvider.IsPublishedTestKey(Convert.FromHexString((string)Load("hash.json")["masterKeyHex"]!)));
+        Assert.False(MasterKeyHashKeyProvider.IsPublishedTestKey(new byte[32]));
+        Assert.False(MasterKeyHashKeyProvider.IsPublishedTestKey(Convert.FromHexString(
+            "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20")));
+    }
+
     private static JsonObject Load(string file) =>
         (JsonObject)JsonNode.Parse(File.ReadAllText(Path.Combine(RepoRoot(), "docs", "spec", "vectors", file)))!;
 

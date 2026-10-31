@@ -24,7 +24,7 @@ namespace Papuma.Kernel.Tests.Store;
 public sealed class HashKeyCheckTests(PostgresFixture fixture) : IAsyncLifetime
 {
     private static readonly byte[] MasterKey = Convert.FromHexString(
-        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+        "7c1e94d20a5f3b86e4219dc07f6a58b3d1940e2c6b8f7a35c2e90d4b1f6a8c27");
 
     private static readonly byte[] OtherKey = Convert.FromHexString(
         "1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100");

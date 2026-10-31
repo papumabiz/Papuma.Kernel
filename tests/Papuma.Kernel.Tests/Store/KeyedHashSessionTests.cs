@@ -27,7 +27,7 @@ namespace Papuma.Kernel.Tests.Store;
 public sealed class KeyedHashSessionTests(PostgresFixture fixture) : IAsyncLifetime
 {
     private static readonly byte[] MasterKey = Convert.FromHexString(
-        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+        "7c1e94d20a5f3b86e4219dc07f6a58b3d1940e2c6b8f7a35c2e90d4b1f6a8c27");
 
     private KernelModel _model = null!;
 
@@ -191,6 +191,7 @@ public sealed class KeyedHashSessionTests(PostgresFixture fixture) : IAsyncLifet
     [Theory]
     [InlineData("not base64!")]
     [InlineData("AAAA")] // valid base64, 3 bytes
+    [InlineData("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=")] // the published test key (review P-16)
     public void Options_RejectAnInvalidMasterKeyAtStartup(string key)
     {
         Assert.ThrowsAny<ArgumentException>(() => Host(o => o.HashMasterKey = key));
