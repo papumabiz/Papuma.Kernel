@@ -140,7 +140,7 @@ savepoints: a failure does not discard earlier session writes.
 ## 4. Reacting — change handlers
 
 ```csharp
-public sealed class UserProjection : IChangeHandler, IProjection
+public sealed class UserProjection(KernelModel model) : IChangeHandler, IProjection
 {
     public string Name => "user-projection";
     public int Version => 1;                               // raise → rebuilt at the next start
@@ -149,7 +149,7 @@ public sealed class UserProjection : IChangeHandler, IProjection
 
     public async Task HandleAsync(ChangeRecord change, CancellationToken ct)
     {
-        if (change.DocumentType != "User") return;
+        if (!change.Is<User>(model)) return;                // by the model, not by name (ADR-028)
 
         if (change.FieldChanged<User>(x => x.Email))
         {

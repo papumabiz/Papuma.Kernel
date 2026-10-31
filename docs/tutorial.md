@@ -278,13 +278,13 @@ public sealed class OpenTicketStats
     public void Add(int delta) => Interlocked.Add(ref _open, delta);
 }
 
-public sealed class OpenTicketProjection(OpenTicketStats stats) : IChangeHandler
+public sealed class OpenTicketProjection(OpenTicketStats stats, KernelModel model) : IChangeHandler
 {
     public string Name => "open-ticket-stats";   // the checkpoint identity — never rename
 
     public Task HandleAsync(ChangeRecord change, CancellationToken ct)
     {
-        if (change.DocumentType != nameof(SupportTicket)) return Task.CompletedTask;
+        if (!change.Is<SupportTicket>(model)) return Task.CompletedTask;   // not nameof: see ADR-028
 
         if (change.Operation == ChangeOperation.Insert)
             stats.Add(+1);                                  // a new ticket is Open

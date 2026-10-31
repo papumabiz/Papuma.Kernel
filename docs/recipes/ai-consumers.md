@@ -51,7 +51,7 @@ public sealed class ProductEmbeddingProjection(
 
     public async Task HandleAsync(ChangeRecord change, CancellationToken ct)
     {
-        if (change.DocumentType != "Product") return;
+        if (!change.Is<Product>(store.Model)) return;
         if (change.Operation == ChangeOperation.Delete) { /* DELETE embedding row */ return; }
         if (!change.FieldChanged("name") && !change.FieldChanged("description")) return;
 
@@ -132,7 +132,7 @@ public sealed class LoginAnomalyDetector(DocumentStore store) : IEventHandler
 
     public async Task HandleAsync(EventRecord @event, CancellationToken ct)
     {
-        if (@event.EventType != nameof(UserLoggedIn)) return;
+        if (!@event.Is<UserLoggedIn>(store.Model)) return;
         var login = @event.Deserialize<UserLoggedIn>();
 
         if (!await _detector.IsSuspiciousAsync(login, ct)) return;

@@ -108,7 +108,7 @@ public sealed class OnOrderPlaced(DocumentStore store) : IChangeHandler
     public string Name => "on-order-placed";
     public async Task HandleAsync(ChangeRecord change, CancellationToken ct)
     {
-        if (change.DocumentType != nameof(Order) || change.Operation != ChangeOperation.Insert) return; // VARIABLE trigger
+        if (!change.Is<Order>(store.Model) || change.Operation != ChangeOperation.Insert) return; // VARIABLE trigger
         // VARIABLE: build + issue the next command (idempotent — deterministic id, §18)
     }
 }

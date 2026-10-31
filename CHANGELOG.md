@@ -560,6 +560,13 @@ Changed:
 
 Added:
 
+- **`change.Is<T>(model)` and `@event.Is<TEvent>(model)`: a handler asks for its type through the model.** The docs
+  and samples filtered with `change.DocumentType != "User"` / `nameof(Order)`. A record carries the logical name
+  (ADR-028), so such a handler stopped matching — without an error, every record skipped — the day the type got a
+  `[DocumentType]` or `.Named(…)`. The new checks compare against the name the model gives the type; handlers take
+  the model from `store.Model` or from dependency injection. Getting started, the tutorial, the recipes, the slice
+  conventions and the `event-modeled-slices` sample use them.
+
 - **`PapumaTestDatabase.DropRoleOnDispose`** (default `false`, review P-20): removes the application role (and its
   privileges, `DROP OWNED BY`) on dispose when `ConnectAsync` created it, so test runs on a long-lived server stop
   accumulating roles. A role that existed before is left alone; with `StartAsync` the container takes the role

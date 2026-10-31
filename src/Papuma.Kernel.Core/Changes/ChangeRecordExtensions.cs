@@ -27,4 +27,24 @@ public static class ChangeRecordExtensions
         ArgumentNullException.ThrowIfNull(property);
         return change.FieldChanged(JsonPathResolver.Resolve(property, nameof(property)));
     }
+
+    /// <summary>
+    /// Returns whether this record is a change of documents of type <typeparamref name="T"/>
+    /// (e.g. <c>if (!change.Is&lt;Order&gt;(model)) return;</c>). Compares the record's logical name with the one the
+    /// model gives <typeparamref name="T"/> — from <c>[DocumentType]</c>, <c>.Named(…)</c> or the class name
+    /// (ADR-028). Comparing <see cref="ChangeRecord.DocumentType"/> with <c>nameof(Order)</c> instead stops matching,
+    /// without an error, the day the type gets a logical name of its own. Handlers take the
+    /// <see cref="KernelModel"/> from dependency injection.
+    /// </summary>
+    /// <typeparam name="T">The document CLR type.</typeparam>
+    /// <param name="change">The change record.</param>
+    /// <param name="model">The kernel model the record was written with.</param>
+    /// <exception cref="DocumentTypeNotRegisteredException"><typeparamref name="T"/> is not registered in <paramref name="model"/>.</exception>
+    public static bool Is<T>(this ChangeRecord change, KernelModel model)
+        where T : class
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        ArgumentNullException.ThrowIfNull(model);
+        return string.Equals(change.DocumentType, model.GetRequired<T>().Name, StringComparison.Ordinal);
+    }
 }

@@ -76,7 +76,7 @@ public sealed class TicketListProjection(DocumentStore store, NpgsqlDataSource a
 
     public async Task HandleAsync(ChangeRecord change, CancellationToken ct)
     {
-        if (change.DocumentType != "Ticket") return;
+        if (!change.Is<Ticket>(store.Model)) return;
         if (change.Operation != ChangeOperation.Delete && !change.FieldChanged("title")) return;
 
         // The diff is the trigger, the state the payload — loaded in the change's scope.

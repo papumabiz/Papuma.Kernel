@@ -22,8 +22,9 @@ public sealed class OnOrderPlaced(DocumentStore store) : IChangeHandler
 
     public async Task HandleAsync(ChangeRecord change, CancellationToken ct)
     {
-        // Trigger (variable): only a freshly inserted Order.
-        if (change.DocumentType != nameof(Order) || change.Operation != ChangeOperation.Insert)
+        // Trigger (variable): only a freshly inserted Order — checked through the model, which knows the
+        // logical name the record carries (ADR-028); nameof(Order) would stop matching once it gets one.
+        if (!change.Is<Order>(store.Model) || change.Operation != ChangeOperation.Insert)
         {
             return;
         }

@@ -21,7 +21,7 @@ public sealed class SearchIndexProjection(DocumentStore store, ISearchClient sea
 
     public async Task HandleAsync(ChangeRecord change, CancellationToken ct)
     {
-        if (change.DocumentType != "Product") return;
+        if (!change.Is<Product>(store.Model)) return;
 
         if (change.Operation == ChangeOperation.Delete)
         {
