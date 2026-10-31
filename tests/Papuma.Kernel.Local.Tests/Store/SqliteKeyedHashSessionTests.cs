@@ -43,7 +43,7 @@ public sealed class SqliteKeyedHashSessionTests(SqliteFixture fixture) : IAsyncL
     private static ScopeContext NewTenant() => ScopeContext.Tenant($"t{Guid.NewGuid():N}");
 
     private SqliteDocumentStore Store(IHashKeyProvider? hashKeys) =>
-        new(fixture.ConnectionString, _model, notifyWaiters: null, logger: null, hashKeys);
+        new(fixture.ConnectionString, _model, notifier: null, logger: null, hashKeys);
 
     [Fact]
     public async Task WithAProvider_FeedAndMaskedRead_ShowTheSameKeyedHash()

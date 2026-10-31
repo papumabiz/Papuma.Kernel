@@ -34,7 +34,7 @@ public sealed class SqliteUncommittedDisposalTests : IAsyncLifetime
     {
         var model = new KernelModelBuilder().Document<PendingDoc>().Build();
         await _fixture.CreateStoreAsync(model); // applies the schema
-        _store = new SqliteDocumentStore(_fixture.ConnectionString, model, notifyWaiters: null, _logger);
+        _store = new SqliteDocumentStore(_fixture.ConnectionString, model, notifier: null, _logger);
     }
 
     public Task DisposeAsync() => Task.CompletedTask;

@@ -63,23 +63,25 @@ public sealed class SqliteReadSessionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task AReadSession_RefusesEveryWrite()
+    public void AReadSession_HasNoWriteMethod_AWriteIsACompileError()
     {
-        var (scope, id) = await SeedAsync();
-        await using var session = _store.OpenReadSession(scope);
+        var methods = typeof(SqliteReadSession).GetMethods().Select(m => m.Name).ToHashSet();
 
-        foreach (var write in new Func<Task>[]
+        foreach (var write in new[]
                  {
-                     () => session.SaveAsync(new ReadDoc(id, "Bob"), 1),
-                     () => session.DeleteAsync<ReadDoc>(id, 1),
-                     () => session.PatchAsync<ReadDoc>(id, p => p.Set(x => x.Name, "Bob")),
+                     "SaveAsync", "DeleteAsync", "PatchAsync", "PatchManyAsync", "PatchWhereAsync", "DeleteManyAsync",
+                     "DeleteWhereAsync", "AppendAsync", "RedactHistoryAsync", "RedactEventsAsync", "RollbackAsync",
+                     "CommitAsync",
                  })
         {
-            var ex = await Assert.ThrowsAsync<InvalidOperationException>(write);
-            Assert.Contains("OpenReadSession", ex.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain(write, methods);
         }
 
-        Assert.Equal("Ann", (await session.LoadAsync<ReadDoc>(id))!.Document.Name); // still usable
+        // Every read of the write session is there.
+        var reads = typeof(SqliteDocumentSession).GetMethods()
+            .Where(m => m.DeclaringType == typeof(SqliteDocumentSession) && (m.Name.StartsWith("Load", StringComparison.Ordinal) || m.Name.StartsWith("Get", StringComparison.Ordinal)))
+            .Select(m => m.Name);
+        Assert.All(reads, name => Assert.Contains(name, methods));
     }
 
     [Fact]

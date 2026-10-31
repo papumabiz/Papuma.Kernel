@@ -68,7 +68,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(sp => new SqliteDocumentStore(
             options.ResolveConnectionString(),
             sp.GetRequiredService<KernelModel>(),
-            sp.GetRequiredService<SqliteChangeNotifier>().TrySignal,
+            sp.GetRequiredService<SqliteChangeNotifier>(),
             sp.GetService<ILogger<SqliteDocumentStore>>(),
             sp.GetService<IHashKeyProvider>()));
 

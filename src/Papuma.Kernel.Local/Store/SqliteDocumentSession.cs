@@ -973,9 +973,8 @@ public sealed partial class SqliteDocumentSession : IAsyncDisposable
     {
         if (_readOnly)
         {
-            throw new InvalidOperationException(
-                "This session was opened with OpenReadSession and only reads. Open a session with OpenSession for " +
-                "writes, and keep it short: it holds the database's write lock until it is committed or disposed.");
+            // Unreachable through SqliteReadSession, which has no write methods; kept as the backstop.
+            throw new InvalidOperationException("A read session does not write. Open a session with OpenSession for writes.");
         }
 
         var (conn, tx) = await EnsureTransactionAsync(ct);

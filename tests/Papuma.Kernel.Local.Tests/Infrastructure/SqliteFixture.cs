@@ -4,6 +4,7 @@
 using Microsoft.Data.Sqlite;
 
 using Papuma.Kernel.Model;
+using Papuma.Kernel.Processing;
 using Papuma.Kernel.Store;
 
 namespace Papuma.Kernel.Local.Tests.Infrastructure;
@@ -53,14 +54,14 @@ public sealed class SqliteFixture : IAsyncLifetime
     /// setup step (mirrors <c>SchemaManager.EnsureSchemaAsync</c> + <c>new DocumentStore(...)</c>
     /// in the Postgres test suite).
     /// </summary>
-    public async Task<SqliteDocumentStore> CreateStoreAsync(KernelModel model, Action? notifyWaiters = null)
+    public async Task<SqliteDocumentStore> CreateStoreAsync(KernelModel model, SqliteChangeNotifier? notifier = null)
     {
         await using (var connection = await SqliteConnectionFactory.OpenAsync(ConnectionString))
         {
             await SqliteSchemaManager.EnsureSchemaAsync(connection, model);
         }
 
-        return new SqliteDocumentStore(ConnectionString, model, notifyWaiters, logger: null, TestHashKeys.Provider);
+        return new SqliteDocumentStore(ConnectionString, model, notifier, logger: null, TestHashKeys.Provider);
     }
 }
 

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 
 using Papuma.Kernel.Changes;
 using Papuma.Kernel.Model;
+using Papuma.Kernel.Processing;
 using Papuma.Kernel.Tenancy;
 
 namespace Papuma.Kernel.Store;
@@ -31,16 +32,15 @@ public sealed class SqliteDocumentStore
     /// </summary>
     /// <param name="connectionString">The SQLite connection string (e.g. <c>Data Source=app.db</c>).</param>
     /// <param name="model">The startup-built kernel model.</param>
-    /// <param name="notifyWaiters">
-    /// Optional in-process wakeup hook, invoked after a session commits writes — the
-    /// single-writer-embedded replacement for Postgres's LISTEN/NOTIFY (ADR-010 does not
-    /// apply here: there is no concurrent-writer visibility gap to guard against). Wired
-    /// to <c>Papuma.Kernel.Local.Processing.SqliteChangeNotifier.TrySignal</c> by
-    /// <c>AddPapumaKernelLocal</c>; <c>null</c> is a valid, fully functional choice for a
-    /// store used without a feed processor (e.g. tests, or a document-only consumer).
+    /// <param name="notifier">
+    /// The in-process wakeup the feed processors wait on, signalled after a session commits writes — the
+    /// single-writer-embedded replacement for Postgres's LISTEN/NOTIFY. Pass the same instance to the
+    /// <see cref="SqliteChangeFeedProcessor"/> and <c>SqliteEventFeedProcessor</c> of this file, or they only see
+    /// commits at their poll interval. <c>AddPapumaKernelLocal</c> wires it; <c>null</c> is fine for a store used
+    /// without feed processors (tests, a document-only consumer).
     /// </param>
-    public SqliteDocumentStore(string connectionString, KernelModel model, Action? notifyWaiters = null)
-        : this(connectionString, model, notifyWaiters, logger: null)
+    public SqliteDocumentStore(string connectionString, KernelModel model, SqliteChangeNotifier? notifier = null)
+        : this(connectionString, model, notifier, logger: null)
     {
     }
 
@@ -50,11 +50,11 @@ public sealed class SqliteDocumentStore
     /// </summary>
     /// <param name="connectionString">The SQLite connection string (e.g. <c>Data Source=app.db</c>).</param>
     /// <param name="model">The startup-built kernel model.</param>
-    /// <param name="notifyWaiters">Optional in-process wakeup hook (see the other constructor).</param>
+    /// <param name="notifier">The in-process wakeup of the feed processors, or <c>null</c> (see the other constructor).</param>
     /// <param name="logger">The logger sessions report through; <c>null</c> disables logging.</param>
     public SqliteDocumentStore(
-        string connectionString, KernelModel model, Action? notifyWaiters, ILogger<SqliteDocumentStore>? logger)
-        : this(connectionString, model, notifyWaiters, logger, hashKeys: null)
+        string connectionString, KernelModel model, SqliteChangeNotifier? notifier, ILogger<SqliteDocumentStore>? logger)
+        : this(connectionString, model, notifier, logger, hashKeys: null)
     {
     }
 
@@ -64,7 +64,7 @@ public sealed class SqliteDocumentStore
     /// </summary>
     /// <param name="connectionString">The SQLite connection string (e.g. <c>Data Source=app.db</c>).</param>
     /// <param name="model">The startup-built kernel model.</param>
-    /// <param name="notifyWaiters">Optional in-process wakeup hook (see the first constructor).</param>
+    /// <param name="notifier">The in-process wakeup of the feed processors, or <c>null</c> (see the first constructor).</param>
     /// <param name="logger">The logger sessions report through; <c>null</c> disables logging.</param>
     /// <param name="hashKeys">
     /// The hash key provider; <c>null</c> keeps the legacy v1 hash for <c>[TrackHash]</c> fields
@@ -73,7 +73,7 @@ public sealed class SqliteDocumentStore
     public SqliteDocumentStore(
         string connectionString,
         KernelModel model,
-        Action? notifyWaiters,
+        SqliteChangeNotifier? notifier,
         ILogger<SqliteDocumentStore>? logger,
         IHashKeyProvider? hashKeys)
     {
@@ -83,7 +83,7 @@ public sealed class SqliteDocumentStore
 
         ConnectionString = connectionString;
         Model = model;
-        _notifyWaiters = notifyWaiters;
+        _notifyWaiters = notifier is null ? null : notifier.TrySignal;
         _logger = logger;
         _hashKeys = hashKeys;
     }
@@ -103,21 +103,15 @@ public sealed class SqliteDocumentStore
     /// <summary>
     /// Opens a session that only reads (review L-5). A session from <see cref="OpenSession"/> takes the file's single
     /// write lock with its first operation and holds it until commit or dispose — kept open over user interaction (load,
-    /// form, save) it blocks every writer, the feed workers included. A read session starts a deferred transaction
-    /// instead: under SQLite's WAL mode it takes no write lock and blocks no writer, and it reads one consistent snapshot
-    /// until it is committed or disposed. Every write method throws <see cref="InvalidOperationException"/>; open a
-    /// session with <see cref="OpenSession"/> for the save, and keep that one short.
+    /// form, save) it blocks every writer, the feed workers included. A <see cref="SqliteReadSession"/> runs in a deferred
+    /// transaction instead: under SQLite's WAL mode it takes no write lock and blocks no writer. It has no write methods;
+    /// save in a short session from <see cref="OpenSession"/>.
     /// </summary>
-    /// <remarks>
-    /// The snapshot is held as long as the session is open, so the WAL file cannot be checkpointed past it and grows;
-    /// commit or dispose a read session when the reads are done, not when the window closes.
-    /// </remarks>
     /// <param name="scope">The scope context all session operations run under.</param>
-    /// <param name="options">Optional session metadata (correlation/causation/actor).</param>
-    public SqliteDocumentSession OpenReadSession(ScopeContext scope, SessionOptions? options = null)
+    public SqliteReadSession OpenReadSession(ScopeContext scope)
     {
         ArgumentNullException.ThrowIfNull(scope);
-        return new SqliteDocumentSession(
-            ConnectionString, Model, scope, options, _notifyWaiters, _logger, _hashKeys, readOnly: true);
+        return new SqliteReadSession(new SqliteDocumentSession(
+            ConnectionString, Model, scope, options: null, _notifyWaiters, _logger, _hashKeys, readOnly: true));
     }
 }

@@ -194,7 +194,8 @@ same hard rules above — with these engine-specific adjustments:
 - **Feed wakeup is in-process** (`SqliteChangeNotifier`: every processor holds
   its own subscription, a commit wakes all of them), not `LISTEN`/`NOTIFY` — the
   realtime-UI-notifications recipe's *pattern* still applies, its
-  Postgres-specific wiring doesn't.
+  Postgres-specific wiring doesn't. Built by hand, give the store and both processors the same
+  `SqliteChangeNotifier`, or the processors see commits only at their poll interval.
 - **Handlers run outside any feed transaction.** The processor reads a batch,
   releases the database, runs the handlers, then records the checkpoint. A local
   projection writes to the same `.db` file through its own connection; a slow
@@ -208,11 +209,11 @@ same hard rules above — with these engine-specific adjustments:
   whose checkpoint write meets that lock fails after the busy and command timeouts; its handlers
   already ran, so the batch is delivered again (at-least-once — effect handlers must be idempotent)
   and the feed logs a warning saying so. For screens and reports open the session with
-  `store.OpenReadSession(scope)`: a deferred transaction that, under WAL, takes no write lock and
-  blocks no writer; every write method throws `InvalidOperationException`. Load in a read session,
-  let the user edit, then save in a short `OpenSession` (with the loaded version as
-  `expectedVersion`). Commit or dispose a read session when the reads are done: its snapshot keeps
-  the WAL file from being checkpointed past it (review L-5).
+  `store.OpenReadSession(scope)`: a `SqliteReadSession` in a deferred transaction that, under WAL,
+  takes no write lock and blocks no writer; it has the reads of a session and no write method. Load
+  in a read session, let the user edit, then save in a short `OpenSession` (with the loaded version
+  as `expectedVersion`). Dispose a read session when the reads are done: its snapshot keeps the WAL
+  file from being checkpointed past it (review L-5).
 - **Schema contributors take a `SqliteConnection`.** `AddSchemaContributor<T>()`
   with an `ISqliteSchemaContributor` runs after the kernel schema, before the feed
   workers — same place as on Postgres, no advisory lock needed (one process owns
