@@ -36,16 +36,21 @@ namespace Papuma.Kernel.Store;
 /// <b>Cancellation is checked before a command runs, not while it waits.</b>
 /// Microsoft.Data.Sqlite runs commands synchronously behind its <c>*Async</c> methods: a
 /// <see cref="CancellationToken"/> that fires while a statement runs, or while it waits for another
-/// writer's lock, is not observed until the call returns. Such a wait ends with the command timeout
-/// (30 s by default; measured here: a token cancelled after 300 ms, <c>SQLITE_BUSY</c> after about
-/// 33 s), a running statement with its own completion. A host shutdown can therefore take that long;
-/// plan <c>HostOptions.ShutdownTimeout</c> accordingly. The <c>busy_timeout</c> below (5 s) only
-/// bounds the engine's own busy handler.
+/// writer's lock, is not observed until the call returns. A running statement ends with its own completion,
+/// a wait for a lock with <c>SQLITE_BUSY</c> after the <c>busy_timeout</c> below (5 s).
+/// </para>
+/// <para>
+/// <b>The command timeout is the busy timeout.</b> Microsoft.Data.Sqlite retries a statement that got
+/// <c>SQLITE_BUSY</c> until its command timeout, 30 s by default, on top of the engine's busy handler:
+/// a write blocked by a session took about 31 s to fail (measured), a frozen UI in a desktop app. Every
+/// connection therefore gets <see cref="SqliteConnection.DefaultTimeout"/> = 5 s, unless the connection
+/// string sets <c>Default Timeout</c> (or <c>Command Timeout</c>) itself.
 /// </para>
 /// </remarks>
 internal static class SqliteConnectionFactory
 {
     private const int BusyTimeoutMilliseconds = 5000;
+    private const int CommandTimeoutSeconds = BusyTimeoutMilliseconds / 1000;
 
     /// <summary>
     /// Opens a connection and applies the kernel's PRAGMAs. Use this instead of
@@ -54,6 +59,11 @@ internal static class SqliteConnectionFactory
     public static async Task<SqliteConnection> OpenAsync(string connectionString, CancellationToken ct = default)
     {
         var connection = new SqliteConnection(connectionString);
+        if (!SetsCommandTimeout(connectionString))
+        {
+            connection.DefaultTimeout = CommandTimeoutSeconds;
+        }
+
         try
         {
             await connection.OpenAsync(ct);
@@ -65,6 +75,14 @@ internal static class SqliteConnectionFactory
             await connection.DisposeAsync();
             throw;
         }
+    }
+
+    // DbConnectionStringBuilder (not SqliteConnectionStringBuilder, which reports every known keyword as present)
+    // holds only the keys the string names.
+    private static bool SetsCommandTimeout(string connectionString)
+    {
+        var given = new System.Data.Common.DbConnectionStringBuilder { ConnectionString = connectionString };
+        return given.ContainsKey("Default Timeout") || given.ContainsKey("Command Timeout");
     }
 
     private static async Task ApplyPragmasAsync(SqliteConnection connection, CancellationToken ct)

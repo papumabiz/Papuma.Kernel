@@ -34,13 +34,7 @@ public sealed class SqliteReadSessionTests : IAsyncLifetime
         _store = await _fixture.CreateStoreAsync(new KernelModelBuilder().Document<ReadDoc>().Build());
     }
 
-    public Task DisposeAsync()
-    {
-        // The processors use their own connection string (Default Timeout), hence their own pool: release it too,
-        // or Windows keeps the file open and the fixture cannot delete it.
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        return _fixture.DisposeAsync();
-    }
+    public Task DisposeAsync() => _fixture.DisposeAsync();
 
     private static ScopeContext NewTenant() => ScopeContext.Tenant($"t{Guid.NewGuid():N}");
 
@@ -54,11 +48,8 @@ public sealed class SqliteReadSessionTests : IAsyncLifetime
         return (scope, id);
     }
 
-    // Microsoft.Data.Sqlite retries a busy statement until its command timeout (30 s by default) on top of the
-    // busy_timeout; one second keeps the locked case quick.
     private SqliteChangeFeedProcessor Processor(IChangeHandler handler, CapturingLogger? logger = null) =>
-        new($"{_fixture.ConnectionString};Default Timeout=1", [handler], notifier: null,
-            new ChangeFeedProcessorOptions { MaxAttempts = 1 }, logger);
+        new(_fixture.ConnectionString, [handler], notifier: null, new ChangeFeedProcessorOptions { MaxAttempts = 1 }, logger);
 
     [Fact]
     public async Task AReadSession_ReadsLikeASession()
@@ -133,6 +124,23 @@ public sealed class SqliteReadSessionTests : IAsyncLifetime
         Assert.Equal(1, await processor.ProcessOnceAsync());
         Assert.Equal(before + 2, handler.Seen.Count);
         Assert.Equal(handler.Seen.ElementAt(before), handler.Seen.ElementAt(before + 1));
+    }
+
+    [Fact]
+    public async Task AWriteBlockedByAnotherSession_FailsAfterTheBusyTimeout_NotAfterHalfAMinute()
+    {
+        var (scope, id) = await SeedAsync();
+        await using var holder = _store.OpenSession(scope);
+        await holder.LoadAsync<ReadDoc>(id); // holds the write lock
+
+        await using var blocked = _store.OpenSession(scope);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var ex = await Assert.ThrowsAnyAsync<Microsoft.Data.Sqlite.SqliteException>(() => blocked.LoadAsync<ReadDoc>(id));
+        watch.Stop();
+
+        // busy_timeout is 5 s; Microsoft.Data.Sqlite used to retry until its 30 s command timeout on top of it.
+        Assert.Equal(5, ex.SqliteErrorCode); // SQLITE_BUSY
+        Assert.InRange(watch.Elapsed, TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(15));
     }
 
     private sealed class RecordingHandler(string name) : IChangeHandler

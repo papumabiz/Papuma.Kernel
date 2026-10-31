@@ -234,10 +234,11 @@ same hard rules above — with these engine-specific adjustments:
   (`Cache=Shared`) is accepted and lives only while a connection to it stays open.
 - **Cancellation is checked before a command, not during it.** Microsoft.Data.Sqlite does not
   interrupt a running statement or a wait for a lock when the token fires. A write that waits for
-  another writer's lock returns only after the command timeout (30 s by default; measured: a token
-  cancelled after 300 ms, the call returned after about 33 s) — so a host shutdown can take that
-  long. The kernel's own `PRAGMA busy_timeout` is 5 s; a long-running statement also runs to its
-  end. Plan `HostOptions.ShutdownTimeout` (default 30 s) with that in mind: if it elapses first, the
+  another writer's lock fails with `SQLITE_BUSY` after the kernel's `busy_timeout` of 5 s — the kernel
+  sets the connections' command timeout to the same 5 s, because Microsoft.Data.Sqlite would otherwise
+  retry until its own 30 s default (measured: about 31 s); a `Default Timeout` in your connection
+  string wins. A long-running statement runs to its end. Plan `HostOptions.ShutdownTimeout` (default
+  30 s) with that in mind: if it elapses first, the
   host stops waiting and the process ends — SQLite rolls the interrupted write back, and the
   records of an unfinished feed cycle come again (at-least-once). Keep write sessions short and never
   hold one open across user interaction (it holds the write lock); read with `OpenReadSession`.

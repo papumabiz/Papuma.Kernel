@@ -103,6 +103,12 @@ Security:
 
 Fixed:
 
+- **SQLite: a write blocked by another session fails after 5 s, not after half a minute.** Microsoft.Data.Sqlite
+  retries a statement that got `SQLITE_BUSY` until its command timeout (30 s by default), on top of the kernel's
+  `busy_timeout` of 5 s — a write blocked by an open session took about 31 s to fail, in a desktop app a frozen
+  window, and the token is not observed meanwhile. The kernel now sets every connection's command timeout to the
+  busy timeout; a `Default Timeout` (or `Command Timeout`) in the connection string is kept.
+
 - **Recording a feed failure no longer throws when path scrubbing times out.** `FeedDiagnostics.SanitizeError` strips
   file-system paths from an exception message with a regex bounded to 100 ms; on a loaded machine the match could exceed
   it, and the `RegexMatchTimeoutException` broke the failure path (seen as an intermittent test failure). The message is
