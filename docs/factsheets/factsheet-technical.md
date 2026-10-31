@@ -185,8 +185,8 @@ application's users to install or operate.
 
 ### 8.1 What's shared code, not a lookalike
 
-`Papuma.Kernel.Core` — extracted once, referenced by both kernels, embedded
-in whichever package is installed — supplies the diff engine, the field
+`Papuma.Kernel.Core` — extracted once, referenced by both kernels, a package
+of its own that both depend on at exactly their version — supplies the diff engine, the field
 policy engine, the model/validation layer, GDPR redaction logic, the
 storage-neutral half of feed processing (`IChangeHandler`/`IEventHandler`,
 processor options, failure/lag types), and `KernelDiagnostics`

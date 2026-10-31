@@ -312,6 +312,17 @@ Fixed:
 
 Breaking:
 
+- **`Papuma.Kernel.Core` is a package of its own; Papuma packages depend on each other exactly (review B-4, N-7,
+  B-15, decision D-5).** The Core assembly was embedded in `Papuma.Kernel`, `.Local` and `.FSharp`, and
+  `.AspNetCore`, `.Mcp` and `.Testing` used Core types without declaring a dependency. With `Papuma.Kernel` 3.0.0 and
+  `Papuma.Kernel.FSharp` 3.0.1 in one application, two different `Papuma.Kernel.Core.dll` met in one build — the
+  SDK silently took one, and the other package failed at run time (`MissingMethodException`; Kernel and Local use
+  Core's internals). Core is now published as `Papuma.Kernel.Core`; every Papuma package depends on it, and every
+  dependency between Papuma packages is an exact range (`[3.0.0]`, `Directory.Build.targets`). **Mixing versions of
+  Papuma packages is now a restore error (`NU1107`)** — update them together, as they always shared one version.
+  Nothing changes for code; the new package arrives transitively. The release check (`verify-packages.sh`) fails
+  if Core.dll appears in another package or a Papuma dependency is not exact.
+
 - **MCP document tools need a scope binding (review M-1, decision D-3).** `get_document`, `get_document_by_key`,
   `get_document_history` and `get_changes_by_correlation` refuse every call until `WithPapumaKernel` sets
   `PapumaMcpOptions.ScopeResolver` (`Func<McpScopeRequest, ScopeContext?>`, called per tool call with the call's

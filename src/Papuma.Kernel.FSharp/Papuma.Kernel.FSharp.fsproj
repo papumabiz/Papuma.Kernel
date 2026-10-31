@@ -27,23 +27,9 @@
 
   <ItemGroup>
     <!-- PatchBuilder<T> (the type being extended) lives in Papuma.Kernel.Core, shared by
-         both kernels — referencing Core directly (not Papuma.Kernel or .Local) keeps this
-         package usable with either. Same embedding pattern as Papuma.Kernel.csproj /
-         Papuma.Kernel.Local.csproj: Core is not independently published
-         (IsPackable=false in its own csproj), so its assembly must be copied into this
-         package explicitly — the target below does that. -->
-    <ProjectReference Include="..\Papuma.Kernel.Core\Papuma.Kernel.Core.csproj">
-      <PrivateAssets>all</PrivateAssets>
-    </ProjectReference>
+         both kernels — depending on Core (not Papuma.Kernel or .Local) keeps this package
+         usable with either, and the exact-version dependency keeps it on the kernel's build. -->
+    <ProjectReference Include="..\Papuma.Kernel.Core\Papuma.Kernel.Core.csproj" />
   </ItemGroup>
-
-  <PropertyGroup>
-    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);CopyProjectReferencesToPackage</TargetsForTfmSpecificBuildOutput>
-  </PropertyGroup>
-  <Target Name="CopyProjectReferencesToPackage" DependsOnTargets="BuildOnlySettings;ResolveReferences">
-    <ItemGroup>
-      <BuildOutputInPackage Include="@(ReferenceCopyLocalPaths->WithMetadataValue('ReferenceSourceTarget', 'ProjectReference'))" />
-    </ItemGroup>
-  </Target>
 
 </Project>

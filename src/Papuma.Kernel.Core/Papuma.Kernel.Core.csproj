@@ -1,8 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <IsPackable>false</IsPackable>
+    <IsPackable>true</IsPackable>
+    <PackageId>Papuma.Kernel.Core</PackageId>
+    <Description>The storage-neutral core shared by Papuma.Kernel (PostgreSQL) and Papuma.Kernel.Local (SQLite) — diff engine, privacy policies, model and validation, feed contracts. It comes with the kernel packages; install Papuma.Kernel or Papuma.Kernel.Local, not this package on its own.</Description>
+    <PackageTags>documents;cqrs;change-feed;diff;privacy;gdpr</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Papuma.Kernel" />

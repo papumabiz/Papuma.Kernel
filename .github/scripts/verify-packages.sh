@@ -11,8 +11,10 @@
 #     no suffix match: v2.1.0 must not pass for 12.1.0),
 #   - a .nupkg is present that is not in PACKAGES (a new or renamed package has
 #     to be added here deliberately),
-#   - a package that embeds Papuma.Kernel.Core lacks lib/net10.0/Papuma.Kernel.Core.dll
-#     (Core is not packed on its own; see the comment in Papuma.Kernel.csproj).
+#   - a package other than Papuma.Kernel.Core carries Papuma.Kernel.Core.dll (Core is a
+#     package of its own; one copy per build, review B-4),
+#   - a dependency on another Papuma package is not exactly [<version>] (the packages use
+#     each other's internals, so only the same build is safe; Directory.Build.targets).
 
 set -euo pipefail
 
@@ -32,17 +34,11 @@ fi
 PACKAGES=(
   Papuma.Kernel
   Papuma.Kernel.AspNetCore
+  Papuma.Kernel.Core
   Papuma.Kernel.FSharp
   Papuma.Kernel.Local
   Papuma.Kernel.Mcp
   Papuma.Kernel.Testing
-)
-
-# The packages whose csproj embeds the Core assembly (CopyProjectReferencesToPackage).
-EMBEDS_CORE=(
-  Papuma.Kernel
-  Papuma.Kernel.FSharp
-  Papuma.Kernel.Local
 )
 
 failed=0
@@ -70,14 +66,31 @@ for f in "${ARTIFACTS}"/*.nupkg; do
   fi
 done
 
-for id in "${EMBEDS_CORE[@]}"; do
+for id in "${PACKAGES[@]}"; do
   f="${ARTIFACTS}/${id}.${VERSION}.nupkg"
   [ -f "$f" ] || continue
-  if ! unzip -Z1 "$f" | grep -qx 'lib/net10.0/Papuma.Kernel.Core.dll'; then
-    echo "::error file=${f}::lib/net10.0/Papuma.Kernel.Core.dll is not embedded"
+
+  if [ "$id" != "Papuma.Kernel.Core" ] && unzip -Z1 "$f" | grep -q 'Papuma\.Kernel\.Core\.dll$'; then
+    echo "::error file=${f}::carries Papuma.Kernel.Core.dll, which belongs to the Papuma.Kernel.Core package only"
     failed=1
   fi
+
+  # Every <dependency id="Papuma..." version="..."> of the nuspec must pin exactly this version.
+  while read -r dependency; do
+    [ -n "$dependency" ] || continue
+    if [ "${dependency#* }" != "[${VERSION}]" ]; then
+      echo "::error file=${f}::dependency ${dependency% *} is '${dependency#* }', expected '[${VERSION}]'"
+      failed=1
+    fi
+  done < <(unzip -p "$f" '*.nuspec' \
+    | sed -n 's/.*<dependency id="\(Papuma[^"]*\)" version="\([^"]*\)".*/\1 \2/p')
 done
+
+if [ "$failed" -eq 0 ] \
+  && ! unzip -Z1 "${ARTIFACTS}/Papuma.Kernel.Core.${VERSION}.nupkg" | grep -qx 'lib/net10.0/Papuma.Kernel.Core.dll'; then
+  echo "::error::Papuma.Kernel.Core.${VERSION}.nupkg lacks lib/net10.0/Papuma.Kernel.Core.dll"
+  failed=1
+fi
 
 if [ "$failed" -ne 0 ]; then
   exit 1

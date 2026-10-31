@@ -27,22 +27,9 @@
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
   </ItemGroup>
 
-  <!-- Same embedding pattern as Papuma.Kernel.csproj: Papuma.Kernel.Core is not
-       independently published (IsPackable=false in its own csproj), so its assembly
-       must be embedded into this package explicitly. -->
+  <!-- As in Papuma.Kernel.csproj: Papuma.Kernel.Core is an exact-version package dependency. -->
   <ItemGroup>
-    <ProjectReference Include="..\Papuma.Kernel.Core\Papuma.Kernel.Core.csproj">
-      <PrivateAssets>all</PrivateAssets>
-    </ProjectReference>
+    <ProjectReference Include="..\Papuma.Kernel.Core\Papuma.Kernel.Core.csproj" />
   </ItemGroup>
-
-  <PropertyGroup>
-    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);CopyProjectReferencesToPackage</TargetsForTfmSpecificBuildOutput>
-  </PropertyGroup>
-  <Target Name="CopyProjectReferencesToPackage" DependsOnTargets="BuildOnlySettings;ResolveReferences">
-    <ItemGroup>
-      <BuildOutputInPackage Include="@(ReferenceCopyLocalPaths->WithMetadataValue('ReferenceSourceTarget', 'ProjectReference'))" />
-    </ItemGroup>
-  </Target>
 
 </Project>

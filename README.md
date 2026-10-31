@@ -154,9 +154,11 @@ SQLite-only (`Papuma.Kernel.Local`):
 | `Papuma.Kernel.Testing` | optional integration-test support — PostgreSQL 18 test database with a non-superuser role (RLS applies), feed draining; test-framework agnostic |
 | `Papuma.Kernel.FSharp` | optional F# facade — `Result`-returning writes, an `IAsyncDisposable`-safe session runner; works with either kernel ([details](https://github.com/papumabiz/Papuma.Kernel/blob/master/src/Papuma.Kernel.FSharp/README.md)) |
 
-`Papuma.Kernel.Core` (diff engine, policies, model, validation) is shared
-internally by the two kernels; it is not independently published — its
-assembly ships embedded inside whichever kernel package you install.
+`Papuma.Kernel.Core` (diff engine, policies, model, validation) is shared by
+the two kernels and comes with them as a dependency — you never reference it
+yourself. All Papuma packages share one version and depend on each other
+exactly (`[x.y.z]`): mixing two versions is a restore error (`NU1107`), not a
+runtime surprise.
 
 ## Samples
 

@@ -11,6 +11,20 @@
        layout, so relative links resolve inside the package; links to anything outside this
        set must be absolute. PackagedDocsLinkTests reads this item group (by its label) and
        fails on any link that would dangle in the package. -->
+  <!-- Every dependency of one Papuma package on another is exact, [x.y.z] instead of NuGet's ">= x.y.z" (review
+       B-15, N-7, decision D-5): Kernel and Local use Core's internals and Mcp uses the kernel's, so only the same
+       build is safe, and mixing 3.0.0 with 3.0.1 is a restore error instead of a MissingMethodException at run time.
+       All Papuma packages share one version. Rewrites what NuGet's pack read from the project references. -->
+  <Target Name="PinPapumaProjectReferenceVersions" AfterTargets="_GetProjectReferenceVersions" Condition="'$(IsPackable)' == 'true'">
+    <ItemGroup>
+      <_PapumaExactProjectReference Include="@(_ProjectReferencesWithVersions)">
+        <ProjectVersion>[%(_ProjectReferencesWithVersions.ProjectVersion)]</ProjectVersion>
+      </_PapumaExactProjectReference>
+      <_ProjectReferencesWithVersions Remove="@(_ProjectReferencesWithVersions)" />
+      <_ProjectReferencesWithVersions Include="@(_PapumaExactProjectReference)" />
+    </ItemGroup>
+  </Target>
+
   <ItemGroup Label="PackagedDocs" Condition="'$(IsPackable)' == 'true'">
     <None Include="$(MSBuildThisFileDirectory)docs/*.md" Pack="true" PackagePath="docs\" Visible="false" />
     <None Include="$(MSBuildThisFileDirectory)docs/adr/*.md" Pack="true" PackagePath="docs\adr\" Visible="false" />
