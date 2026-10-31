@@ -27,7 +27,19 @@ internal static partial class FeedDiagnostics
     /// </summary>
     public static string SanitizeError(Exception ex)
     {
-        var message = FileSystemPath().Replace(ex.Message, "<path>");
+        string message;
+        try
+        {
+            message = FileSystemPath().Replace(ex.Message, "<path>");
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            // The pattern is linear; a timeout means a starved thread (a loaded machine), not a hostile input. The
+            // message is withheld rather than stored unscrubbed, and the failure is still recorded — this path must
+            // not throw (an intermittent test failure under full-suite load, 2026-10-31).
+            return $"{ex.GetType().Name}: <message withheld: path scrubbing timed out>";
+        }
+
         message = message.ReplaceLineEndings(" ").Trim();
         if (message.Length > MaxStoredErrorLength)
         {

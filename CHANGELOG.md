@@ -103,6 +103,11 @@ Security:
 
 Fixed:
 
+- **Recording a feed failure no longer throws when path scrubbing times out.** `FeedDiagnostics.SanitizeError` strips
+  file-system paths from an exception message with a regex bounded to 100 ms; on a loaded machine the match could exceed
+  it, and the `RegexMatchTimeoutException` broke the failure path (seen as an intermittent test failure). The message is
+  now withheld in that case (`<message withheld: path scrubbing timed out>`), never stored unscrubbed.
+
 - **SQLite: `OpenReadSession` for reads that must not block writers; the feed says when a batch is redelivered
   (review L-5, decision D-7).** Every `SqliteDocumentSession` begins `IMMEDIATE` and holds the file's write lock from
   its first operation — kept open over a form it blocked every writer, and the feed worker's checkpoint write failed

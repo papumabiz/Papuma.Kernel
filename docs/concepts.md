@@ -1234,7 +1234,8 @@ Two boundaries keep this honest:
   document an agent sees, never *whether* the agent may see that document at all —
   that stays scope binding plus the host's auth (§23 is the isolation story;
   this is the content-shape story). The two compose: scope decides the rows,
-  policy projection decides the columns.
+  policy projection decides the columns. For the MCP tools the scope is the
+  operator's `ScopeResolver`, never the agent's `tenantId` argument (ADR-016 §6).
 - **The clear-text path still exists, on purpose.** `LoadAsync` returns the full
   document for in-process business logic. The masked read is the variant for
   consumers you would not hand the raw store to — AI agents, support surfaces.
