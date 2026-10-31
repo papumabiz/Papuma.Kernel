@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.0.0 (2026-10-31)
 
 ### Upgrading from 2.x
 

@@ -4,9 +4,8 @@
 
 | Version | Supported |
 |---|---|
-| 3.0.0-preview.x (`main`) | ✅ pre-release — fixes land here first |
-| 2.1.x | ✅ |
-| < 2.1 | ❌ — upgrade to the latest 2.1.x (2.0.x lets the `All` scope delete across tenants; 1.x feeds can skip records — see the changelog) |
+| 3.0.x | ✅ |
+| < 3.0 | ❌ — upgrade to 3.0 ([Upgrading from 2.x](CHANGELOG.md#upgrading-from-2x)); 2.x leaks policy-protected values of structs and `[JsonDerivedType]` subtypes into the feed and lets an MCP agent pick any tenant, 2.0.x lets the `All` scope delete across tenants, 1.x feeds can skip records |
 
 Papuma Kernel has not yet carried production traffic (see
 [Maturity](README.md#maturity-stated-plainly)). Fixes land on the current minor
