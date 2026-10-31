@@ -11,7 +11,7 @@
          Pinned here instead of following the installed SDK, so the Papuma.Kernel.FSharp
          dependency no longer changes with the build machine (2.1.0 shipped 10.1.303). -->
     <PackageVersion Include="FSharp.Core" Version="10.1.303" />
-    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.14" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
