@@ -57,6 +57,16 @@ Security:
   write statements that did. They carry `AND scope = @scope AND tenant_id = @tenantId` now, like every other
   statement (layer 1 of the two-layer model). The `seq` always came from a scoped `SELECT … FOR UPDATE` in the same
   transaction, so no cross-tenant write was reachable; this removes the sole reliance on layer 2.
+- **Policies on `[JsonDerivedType]` subtypes and `object` values are no longer silently ignored (review N-14,
+  decision D-9).** The model scan followed the *declared* type of a property. `[SensitiveData]` on `Card.Pan` did
+  nothing for a property declared as `Payment` with `[JsonDerivedType(typeof(Card), "card")]`, and nothing on the
+  members of a value held by an `object` property — checked with a real session: the card number in the stored
+  diff. The scan now reads the policies of every `[JsonDerivedType]` subtype under the property's path (also when
+  the declared type is an interface); two subtypes with different policies on one path are a build error.
+  **A projection that relied on such a value in the feed no longer sees it.** `object` properties need a decision,
+  see Breaking. `DataInventory` lists the members of every subtype, and an `object` property as a leaf (it was
+  missing). Data written before stays in the feed: review it with `DataInventory.Build(model)` and clean up with
+  `RedactHistoryAsync` (docs/gdpr.md). Details: ADR-007 (amendment).
 - **Release pipeline hardened (review N-3, B-1, B-7, N-10, B-5, B-8, B-17).** `release.yml` ran restore, build and
   tests in the job that could request the nuget.org OIDC token, so a compromised build or test dependency could have
   published. It is split now: a **build** job with `contents: read` only, and a **publish** job (`id-token`,
@@ -85,6 +95,10 @@ Security:
 
 Fixed:
 
+- **A `[JsonDerivedType]` document read back from PostgreSQL fails no more.** `jsonb` stores object keys in its own
+  order, so the `$type` discriminator was no longer the first property and `System.Text.Json` refused the read
+  ("must specify a type discriminator"). The serializer options allow the discriminator anywhere in the object now.
+  SQLite, which stores the text as written, was not affected.
 - **A scope resolver returning `null` fails with a clear message (review A-5).** `ScopeMiddleware` stored the
   `null`, and the request then failed later with "ScopeContext not set. Is ScopeMiddleware registered?" — a
   misleading pointer. It now throws `InvalidOperationException` naming the resolver type. Nothing failed open
@@ -289,6 +303,17 @@ Fixed:
   translated by a text match (hardening; a plain missing table behaves as before).
 
 Breaking:
+
+- **`Build()` refuses `object` properties without a decision, and interface or abstract property types the serializer
+  cannot round-trip (review N-14, N-15, decision D-9).** A property declared as `object` — also `List<object>`,
+  `Dictionary<string, object>`, or an `object` member beneath a collection's element type — throws
+  `InvalidOperationException` until it, or an ancestor, has a policy (attribute or fluent) or an explicit
+  `.Property(x => x.Payload).Track()`. `JsonNode`, `JsonObject` and `JsonElement` need none. A property (or a
+  collection's element type) declared as an interface or abstract class without `[JsonDerivedType]` subtypes or a
+  converter throws as well: the serializer wrote only the declared members (an interface property was stored as
+  `{}`) and could not read the document back. **An application whose model has such a property stops at startup
+  until it declares the concrete type, lists the subtypes, or decides the `object` property.** A concrete base class
+  holding a subtype cannot be detected and still loses the subtype's members; the playbook says so.
 
 - **`ClaimsSessionOptionsEnricher`: causation type from explicit names only, actor id bounded (review A-8).**
   `CausationType` was the endpoint *display name* — `HTTP: GET /orders/{id} => Handler` for Minimal APIs,

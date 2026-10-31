@@ -21,5 +21,10 @@ internal static class KernelJson
     public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
     {
         MaxDepth = Changes.JsonLimits.MaxDepth + 1,
+
+        // jsonb stores object keys in its own order (shorter keys first), so the "$type" discriminator of a
+        // [JsonDerivedType] value is no longer the first property when PostgreSQL hands the document back. Without
+        // this the read fails with "must specify a type discriminator".
+        AllowOutOfOrderMetadataProperties = true,
     };
 }

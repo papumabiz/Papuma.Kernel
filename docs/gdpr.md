@@ -49,8 +49,12 @@ nothing: a policy attribute on a member of a collection's element type (`List<Ad
 `[SensitiveData]` on `Address.Street`) fails at startup, because a collection is one atomic
 value and has no path for "the street of element 2". Declare the policy on the collection
 property (`[SensitiveData] List<Address> Homes`, or `.Property(x => x.Homes).Redact()`), or
-say `.Track()` if the elements are meant to be stored as they are. More than one policy
-attribute on one property is refused as well. If a model once had such a declaration, its
+say `.Track()` if the elements are meant to be stored as they are. A property declared as
+`object` needs the same decision, because the model cannot see the members of its run-time
+value; `JsonNode`/`JsonObject` properties need none and are protected by a fluent policy on the
+property. Policies on `[JsonDerivedType]` subtypes act under the property's path, and the
+inventory lists the members of every subtype. More than one policy attribute on one property is
+refused as well. If a model once had such a declaration, its
 values went into the feed unprotected before: `RedactHistoryAsync` cleans the history up.
 
 ## Export (Art. 15 access / Art. 20 portability)

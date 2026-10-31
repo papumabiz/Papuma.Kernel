@@ -11,7 +11,8 @@ namespace Papuma.Kernel.Tests.Gdpr;
 
 /// <summary>
 /// The Art.-30 inventory is the review tool for policies (ADR-007), so it must see the same paths the metamodel
-/// scan protects (review C-1, S-20): the members of structs — and a framework or custom-converted struct stays one leaf.
+/// scan protects (review C-1, S-20): the members of structs — and a framework or custom-converted struct stays one leaf —
+/// and the members of every [JsonDerivedType] subtype (review N-14).
 /// </summary>
 public sealed class DataInventoryShapeTests
 {
@@ -27,6 +28,31 @@ public sealed class DataInventoryShapeTests
         Guid Token,
         TimeSpan Age,
         Money Balance);
+
+    [JsonDerivedType(typeof(Card), "card")]
+    [JsonDerivedType(typeof(Transfer), "transfer")]
+    private abstract record Payment(decimal Amount);
+
+    private sealed record Card(decimal Amount, [property: SensitiveData] string Pan) : Payment(Amount);
+
+    private sealed record Transfer(decimal Amount, [property: DoNotTrack] string Iban) : Payment(Amount);
+
+    private sealed record Order(string Id, Payment Payment, [property: SensitiveData] object? Payload);
+
+    [Fact]
+    public void Inventory_ListsTheMembersOfEveryDerivedType_OnceEach_AndAnObjectAsOneLeaf()
+    {
+        var model = new KernelModelBuilder().Document<Order>().Build();
+
+        var fields = DataInventory.Build(model).Documents.Single().Fields;
+        var byPath = fields.ToDictionary(f => f.Path, f => f.Policy);
+
+        Assert.Equal(FieldPolicy.Redact, byPath["payment.pan"]);
+        Assert.Equal(FieldPolicy.DoNotTrack, byPath["payment.iban"]);
+        Assert.Equal(FieldPolicy.Track, byPath["payment.amount"]);           // shared by both subtypes, listed once
+        Assert.Single(fields, f => f.Path == "payment.amount");
+        Assert.Equal(FieldPolicy.Redact, byPath["payload"]);                 // an object is a leaf, not dropped
+    }
 
     [Fact]
     public void Inventory_ListsStructMembers_WithTheirEffectivePolicy_AndKeepsFrameworkStructsAsLeaves()
@@ -51,11 +77,15 @@ public sealed class DataInventoryShapeTests
         Assert.Contains("balance.cents", fields.Keys);
     }
 
-    [Fact]
-    public void Inventory_AndModel_AgreeOnEveryProtectedPath()
+    [Theory]
+    [InlineData(typeof(Customer))]
+    [InlineData(typeof(Order))]
+    public void Inventory_AndModel_AgreeOnEveryProtectedPath(Type documentType)
     {
-        var model = new KernelModelBuilder().Document<Customer>().Build();
-        var protectedByModel = model.GetRequired<Customer>().Policies.Keys.Order(StringComparer.Ordinal).ToList();
+        var builder = new KernelModelBuilder();
+        typeof(KernelModelBuilder).GetMethod(nameof(KernelModelBuilder.Document), 1, [])!.MakeGenericMethod(documentType).Invoke(builder, null);
+        var model = builder.Build();
+        var protectedByModel = model.DocumentTypes.Single().Policies.Keys.Order(StringComparer.Ordinal).ToList();
 
         var protectedByInventory = DataInventory.Build(model).Documents.Single().Fields
             .Where(f => f.Policy != FieldPolicy.Track)

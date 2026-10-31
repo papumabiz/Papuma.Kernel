@@ -228,7 +228,8 @@ public sealed class KernelModelBuilder
             var policies = new Dictionary<string, FieldPolicy>(StringComparer.Ordinal);
             var attributeKeys = new Dictionary<string, bool>(StringComparer.Ordinal);
             var collections = new List<(string Path, Type Element)>();
-            ScanType(clrType, prefix: null, policies, attributeKeys, collections, visited: []);
+            var shapes = new ShapeFindings();
+            ScanType(clrType, prefix: null, policies, attributeKeys, collections, shapes, visited: []);
 
             // Events have no keys (ADR-013): a [UniqueKey]/[LookupKey] used to be dropped without a word.
             if (attributeKeys.Count > 0)
@@ -251,7 +252,9 @@ public sealed class KernelModelBuilder
                 }
             }
 
+            EnsureRoundTrippable("Event", name, shapes.Lossy);
             EnsureNoSilentElementPolicies("Event", name, collections, policies, _policyOverrides);
+            EnsureUntypedDecided("Event", name, shapes.Untyped, policies, _policyOverrides);
 
             // Reference has no source location for events — the event IS the record (ADR-013).
             var reference = policies.FirstOrDefault(p => p.Value == FieldPolicy.Reference);
@@ -458,7 +461,8 @@ public sealed class KernelModelBuilder
             var policies = new Dictionary<string, FieldPolicy>(StringComparer.Ordinal);
             var keys = new Dictionary<string, bool>(StringComparer.Ordinal);
             var collections = new List<(string Path, Type Element)>();
-            ScanType(clrType, prefix: null, policies, keys, collections, visited: []);
+            var shapes = new ShapeFindings();
+            ScanType(clrType, prefix: null, policies, keys, collections, shapes, visited: []);
 
             // 2. Fluent overrides win.
             foreach (var (path, policy) in _policyOverrides)
@@ -473,7 +477,9 @@ public sealed class KernelModelBuilder
                 }
             }
 
+            EnsureRoundTrippable("Document", name, shapes.Lossy);
             EnsureNoSilentElementPolicies("Document", name, collections, policies, _policyOverrides);
+            EnsureUntypedDecided("Document", name, shapes.Untyped, policies, _policyOverrides);
 
             foreach (var (path, unique) in _keyOverrides)
             {
@@ -582,6 +588,7 @@ public sealed class KernelModelBuilder
         Dictionary<string, FieldPolicy> policies,
         Dictionary<string, bool> keys,
         List<(string Path, Type Element)> collections,
+        ShapeFindings shapes,
         HashSet<Type> visited)
     {
         if (!visited.Add(type))
@@ -614,19 +621,148 @@ public sealed class KernelModelBuilder
                 keys[path] = false;
             }
 
-            if (ModelTypeShape.NestedTypeOf(property.PropertyType) is { } nested)
+            var propertyType = property.PropertyType;
+            if (ModelTypeShape.DerivedTypesOf(propertyType) is { Count: > 0 } derived)
+            {
+                // The serializer writes the run-time subtype with its own members under this path (review N-14).
+                ScanSubtypes(propertyType, derived, path, policies, keys, collections, shapes, visited);
+            }
+            else if (ModelTypeShape.LosesMembers(propertyType))
+            {
+                shapes.Lossy.Add((path, Nullable.GetUnderlyingType(propertyType) ?? propertyType));
+            }
+            else if (ModelTypeShape.IsUntyped(propertyType))
+            {
+                shapes.Untyped.Add(path);
+            }
+            else if (ModelTypeShape.NestedTypeOf(propertyType) is { } nested)
             {
                 // Classes and structs alike: the serializer writes both as JSON objects, so a policy attribute
                 // on a struct member has a path (review C-1).
-                ScanType(nested, path, policies, keys, collections, visited);
+                ScanType(nested, path, policies, keys, collections, shapes, visited);
             }
-            else if (ModelTypeShape.ElementTypeOf(property.PropertyType) is { } element)
+            else if (ModelTypeShape.ElementTypeOf(propertyType) is { } element)
             {
                 collections.Add((path, element));
             }
         }
 
         visited.Remove(type);
+    }
+
+    /// <summary>
+    /// Scans every <c>[JsonDerivedType]</c> subtype of a polymorphic property — and the declared type itself when it
+    /// can be instantiated — under the property's path. Two subtypes may share a member path only with the same policy
+    /// and key: a path has one policy (ADR-007), whichever subtype a document holds.
+    /// </summary>
+    private static void ScanSubtypes(
+        Type declaredType,
+        IReadOnlyList<Type> derived,
+        string path,
+        Dictionary<string, FieldPolicy> policies,
+        Dictionary<string, bool> keys,
+        List<(string Path, Type Element)> collections,
+        ShapeFindings shapes,
+        HashSet<Type> visited)
+    {
+        var baseType = Nullable.GetUnderlyingType(declaredType) ?? declaredType;
+        var variants = baseType.IsInterface || baseType.IsAbstract ? derived : [baseType, .. derived];
+        var policyOrigin = new Dictionary<string, Type>(StringComparer.Ordinal);
+        var keyOrigin = new Dictionary<string, Type>(StringComparer.Ordinal);
+
+        foreach (var variant in variants)
+        {
+            var variantPolicies = new Dictionary<string, FieldPolicy>(StringComparer.Ordinal);
+            var variantKeys = new Dictionary<string, bool>(StringComparer.Ordinal);
+            ScanType(variant, path, variantPolicies, variantKeys, collections, shapes, visited);
+
+            foreach (var (memberPath, policy) in variantPolicies)
+            {
+                if (policyOrigin.TryGetValue(memberPath, out var other) && policies[memberPath] != policy)
+                {
+                    throw new InvalidOperationException(
+                        $"Property '{memberPath}' has the {policies[memberPath]} policy in {other.Name} and the {policy} " +
+                        $"policy in {variant.Name}, both [JsonDerivedType] subtypes of {baseType.Name}. A path has one " +
+                        "policy, whichever subtype a document holds (ADR-007): give the member the same policy attribute " +
+                        "in both, or rename one of them.");
+                }
+
+                policies[memberPath] = policy;
+                policyOrigin.TryAdd(memberPath, variant);
+            }
+
+            foreach (var (memberPath, unique) in variantKeys)
+            {
+                if (keyOrigin.TryGetValue(memberPath, out var other) && keys[memberPath] != unique)
+                {
+                    throw new InvalidOperationException(
+                        $"Property '{memberPath}' is a {(keys[memberPath] ? "unique" : "lookup")} key in {other.Name} and " +
+                        $"a {(unique ? "unique" : "lookup")} key in {variant.Name}, both [JsonDerivedType] subtypes of " +
+                        $"{baseType.Name}. A path has one index: declare the same key attribute in both.");
+                }
+
+                keys[memberPath] = unique;
+                keyOrigin.TryAdd(memberPath, variant);
+            }
+        }
+    }
+
+    /// <summary>The paths a scan found whose declared type does not show what is stored (review N-14, N-15).</summary>
+    private sealed class ShapeFindings
+    {
+        /// <summary>Properties declared as <c>object</c>.</summary>
+        public List<string> Untyped { get; } = [];
+
+        /// <summary>Properties of an interface or abstract type the serializer cannot round-trip.</summary>
+        public List<(string Path, Type Type)> Lossy { get; } = [];
+    }
+
+    /// <summary>
+    /// Fails for a property — or a collection's element type — declared as an interface or abstract class without
+    /// <c>[JsonDerivedType]</c> subtypes or a converter. The serializer writes only the declared type's members (an
+    /// interface property was stored as <c>{}</c>) and cannot create an instance of it when reading, so the data is lost
+    /// on the first save and the document fails on the first load (review N-15). No policy changes that.
+    /// </summary>
+    private static void EnsureRoundTrippable(string kind, string typeName, IReadOnlyList<(string Path, Type Type)> lossy)
+    {
+        if (lossy.Count > 0)
+        {
+            var (path, type) = lossy[0];
+            throw new InvalidOperationException(
+                $"{kind} type {typeName}: property '{path}' is declared as {(type.IsInterface ? "the interface" : "the abstract type")} " +
+                $"{type.Name}, which has no [JsonDerivedType] subtypes. The serializer writes only the members {type.Name} " +
+                "declares and cannot create an instance of it when reading, so data would be lost on save and the document " +
+                $"would fail to load. Declare the concrete type, list the subtypes with [JsonDerivedType(typeof(…), \"…\")] on " +
+                $"{type.Name}, or give it a JsonConverter.");
+        }
+    }
+
+    /// <summary>
+    /// Fails for a property declared as <c>object</c> that has no decision: the serializer writes the members of whatever
+    /// value it holds, and policy attributes on them cannot take effect, because the model sees no type — a payload with
+    /// <c>[SensitiveData]</c> went into the feed in clear text (review N-14). The way out is the same as for a collection:
+    /// a policy on the property or an ancestor, or an explicit <c>Track()</c>.
+    /// </summary>
+    private static void EnsureUntypedDecided(
+        string kind,
+        string typeName,
+        IReadOnlyList<string> untyped,
+        IReadOnlyDictionary<string, FieldPolicy> policies,
+        IReadOnlyDictionary<string, FieldPolicy> fluentOverrides)
+    {
+        foreach (var path in untyped)
+        {
+            if (IsDecided(path, policies, fluentOverrides))
+            {
+                continue;
+            }
+
+            throw new InvalidOperationException(
+                $"{kind} type {typeName}: property '{path}' is declared as object. Its value is stored with whatever members " +
+                "it has at run time, and policy attributes on those cannot take effect — the model sees no type — so they " +
+                "would reach the change feed in clear text. Declare a policy on the property — an attribute on it or " +
+                ".Property(x => x.…).Redact() — or state that the value is stored as it is with .Property(x => x.…).Track().");
+        }
     }
 
     /// <summary>
@@ -645,8 +781,34 @@ public sealed class KernelModelBuilder
     {
         foreach (var (path, element) in collections)
         {
-            var beneath = ModelTypeShape.PolicyAttributesBeneath(element);
-            if (beneath.Count == 0 || IsDecided(path, policies, fluentOverrides))
+            var findings = ModelTypeShape.Beneath(element);
+            if (findings.Lossy.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"{kind} type {typeName}: property '{path}' is a collection whose elements hold interface or abstract " +
+                    $"types without [JsonDerivedType] subtypes ({string.Join(", ", findings.Lossy)}). The serializer writes " +
+                    "only the declared members and cannot create instances of them when reading, so data would be lost on " +
+                    "save and the document would fail to load (review N-15). Declare concrete types, list the subtypes " +
+                    "with [JsonDerivedType(typeof(…), \"…\")], or give the type a JsonConverter.");
+            }
+
+            if (IsDecided(path, policies, fluentOverrides))
+            {
+                continue;
+            }
+
+            if (findings.Policies.Count == 0 && findings.Untyped.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"{kind} type {typeName}: property '{path}' is a collection of {element.Name} that holds untyped values " +
+                    $"({string.Join(", ", findings.Untyped)}), declared as object. A collection is tracked as one atomic value " +
+                    "(ADR-004) and the model sees no type for those values, so policy attributes on them cannot take effect. " +
+                    "Declare a policy on the collection property — an attribute on it or .Property(x => x.…).Redact() — or " +
+                    "state that the elements are stored as they are with .Property(x => x.…).Track().");
+            }
+
+            var beneath = findings.Policies;
+            if (beneath.Count == 0)
             {
                 continue;
             }

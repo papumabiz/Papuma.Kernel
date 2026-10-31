@@ -57,6 +57,24 @@ opt-in resolution instead of invisible magic.
      (the whole value is then redacted, hashed, …), or an explicit `.Property(x => x.Homes).Track()`
      that says the elements are stored as they are. A policy on an ancestor decides it too. Per-element
      policies would need element paths in the wire format — a decision for its own ADR.
+   - *Subtypes* (amendment, review N-14, 2026-10-31). A property whose declared type lists
+     `[JsonDerivedType]` subtypes is stored with the members of whichever subtype it holds, so the
+     scan reads the policies of every listed subtype under the property's path (`payment.pan` from
+     `Card : Payment`). Two subtypes may share a member path only with the same policy: one path has
+     one policy, whichever subtype a document holds. The same applies to keys.
+   - *Untyped values.* A property declared as `object` — also as a collection element or dictionary
+     value, or beneath a collection's element type — is stored with the members of its run-time
+     value, which the model cannot see. It needs the same decision as a collection: a policy on it
+     or an ancestor, or an explicit `.Track()`. `JsonNode`, `JsonObject` and `JsonElement` say
+     "free-form JSON" by their type and carry no attributes of ours; they need no decision, and a
+     fluent policy on the property protects them.
+   - *Types the serializer cannot round-trip* (review N-15). A property (or a collection's element
+     type) declared as an interface or abstract class without `[JsonDerivedType]` subtypes or a
+     converter is refused: the serializer writes only the declared type's members — an interface
+     property became `{}` — and cannot create an instance when reading. A **concrete** base class
+     holding a subtype at run time loses the subtype's members the same way, but cannot be detected
+     when the model is built (any unsealed class could be subclassed): declare the concrete type, or
+     make the base polymorphic with `[JsonDerivedType]`.
    - *One attribute per property.* `[SensitiveData]` together with `[TrackHash]` (or any two of the
      four) is an error. It used to be resolved by an undocumented precedence — and the winner was not
      the strongest protection: a hash still allows equality correlation. Fluent configuration still

@@ -49,23 +49,23 @@ public static class DataInventory
     /// <summary>
     /// Enumerates all leaf JSON paths of a CLR type with their effective policy.
     /// Mirrors the diff engine's view: collections are atomic leaves (ADR-004),
-    /// nested POCOs are traversed, policies inherit from the nearest declared
-    /// ancestor path (ADR-007).
+    /// nested POCOs are traversed, the members of every <c>[JsonDerivedType]</c> subtype
+    /// are listed under the property's path (review N-14), policies inherit from the
+    /// nearest declared ancestor path (ADR-007).
     /// </summary>
     private static List<FieldInventory> EnumerateFields(
         Type clrType, IReadOnlyDictionary<string, FieldPolicy> policies)
     {
-        var fields = new List<FieldInventory>();
+        var fields = new Dictionary<string, FieldInventory>(StringComparer.Ordinal);
         Walk(clrType, prefix: null, policies, fields, visited: []);
-        fields.Sort((a, b) => string.CompareOrdinal(a.Path, b.Path));
-        return fields;
+        return fields.Values.OrderBy(f => f.Path, StringComparer.Ordinal).ToList();
     }
 
     private static void Walk(
         Type type,
         string? prefix,
         IReadOnlyDictionary<string, FieldPolicy> policies,
-        List<FieldInventory> fields,
+        Dictionary<string, FieldInventory> fields,
         HashSet<Type> visited)
     {
         if (!visited.Add(type))
@@ -85,13 +85,27 @@ public static class DataInventory
 
             // The same view as the metamodel scan (ModelTypeShape): classes and structs are traversed, so the
             // inventory shows the paths a policy on a struct member protects (review C-1, S-20).
-            if (ModelTypeShape.NestedTypeOf(property.PropertyType) is { } nested)
+            if (ModelTypeShape.DerivedTypesOf(property.PropertyType) is { Count: > 0 } derived)
+            {
+                // Subtypes share the property's path; a member two of them declare is listed once.
+                var declared = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+                if (!declared.IsInterface && !declared.IsAbstract)
+                {
+                    Walk(declared, path, policies, fields, visited);
+                }
+
+                foreach (var subtype in derived)
+                {
+                    Walk(subtype, path, policies, fields, visited);
+                }
+            }
+            else if (ModelTypeShape.NestedTypeOf(property.PropertyType) is { } nested)
             {
                 Walk(nested, path, policies, fields, visited);
             }
             else
             {
-                fields.Add(new FieldInventory(path, ResolvePolicy(policies, path)));
+                fields[path] = new FieldInventory(path, ResolvePolicy(policies, path));
             }
         }
 
