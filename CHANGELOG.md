@@ -2,6 +2,55 @@
 
 ## Unreleased
 
+### Upgrading from 2.x
+
+3.0 changes a lot under "Breaking" below; this is the short list, in the order you meet it. Update **all** Papuma
+packages to the same version at once.
+
+**Restore fails until:**
+
+- every Papuma package has the same version — they depend on each other exactly (`[3.0.0]`), mixing is `NU1107`.
+  The new `Papuma.Kernel.Core` package arrives by itself.
+
+**Startup fails until:**
+
+- a model with `[TrackHash]` / `StoreAsHash()` has a hash key: `HashMasterKey` (your own, `openssl rand -base64 32`)
+  and `HashKeyId`, or an `IHashKeyProvider`. The published test key of `Papuma.Kernel.Testing` is refused; tests
+  register `TestHashKeys.Provider`.
+- the model has no declaration that would do nothing or lose data — `Build()` names each one: a policy attribute on a
+  collection's element type, more than one policy attribute on a property, an `object` property without a policy or
+  `.Track()`, an interface or abstract property type without `[JsonDerivedType]`, a fluent policy or key on a
+  `[JsonIgnore]` property, a key on an event.
+- every handler `Name` matches `[A-Za-z0-9][A-Za-z0-9._-]{0,99}` (no `:`).
+- `ChangeFeedHealthCheckOptions.MaxAllowedLag` is above zero.
+- SQLite: `DbPath` is a real file path (it is taken literally; empty and `:memory:` are refused).
+
+**MCP (`Papuma.Kernel.Mcp`):**
+
+- set `ScopeResolver` in `WithPapumaKernel` — without it the document tools refuse every call. To keep the 2.x
+  behaviour for an operator-only endpoint: `ScopeResolver = McpScopeResolvers.TrustToolArgument`.
+- `get_document_history` needs `ExposeToMcp()` on the type, `get_document_by_key` refuses keys under a privacy policy,
+  list results are `{ "records": [...], "truncated": … }`.
+
+**Stored data and the feed change shape:**
+
+- enum values are stored by name (`"Paid"`, not `1`); old documents still read and are rewritten on their next save.
+  A key on an enum field finds such a document only after that save.
+- new hashes are `v2:<kid>:<hex>` (keyed); v1 hashes already in the feed stay as they are.
+- policies now also act on struct members and `[JsonDerivedType]` subtype members — values that went into the feed
+  in clear text before no longer do. Clean up the history with `RedactHistoryAsync` (docs/gdpr.md).
+- a `.` or `\` inside an object key is escaped in diff paths (`settings.feature\.enabled`); paths without either are
+  unchanged.
+- refused from now on: tenant ids or type names with a trailing newline, document ids with control characters,
+  duplicate keys in one object, documents nested deeper than 64 levels.
+
+**Code that compiles but behaves differently:**
+
+- filter handler input with `change.Is<Order>(store.Model)` instead of `change.DocumentType == nameof(Order)` — the
+  record carries the logical name.
+- `GdprExport` leaves out other people's identifiers by default; `RedactHistoryAsync([])` throws; `ScopeMiddleware`
+  answers a malformed tenant with `400`; SQLite reads that must not block writers use `OpenReadSession`.
+
 Security:
 
 - **Dashboard guard-rail: error instead of warning, once, without false alarms (review A-3).** The check for an
@@ -332,6 +381,13 @@ Fixed:
   translated by a text match (hardening; a plain missing table behaves as before).
 
 Breaking:
+
+- **A `.` or `\` inside an object key is escaped in diff paths.** A `Dictionary<string, T>` with a key such as
+  `"feature.enabled"` made `SaveAsync` throw, because diff paths are dot-separated — a failure that depended on the
+  data, not the model. Such a key is now one escaped segment (`settings.feature\.enabled`, `\` as `\\`), the same in
+  the diff engine, policy resolution, masked reads, redaction, GDPR selectors, patches and keys (spec changes.md).
+  Paths without a dot or backslash in a key are byte-for-byte unchanged; **a consumer that splits paths on `.`
+  must handle the escape** (`DiffPath`).
 
 - **Enum values are stored by member name, not by number.** The serializer had no enum converter, so `Status.Paid`
   went into documents, diffs, the feed and key indexes as `1`: the feed was unreadable,
