@@ -69,6 +69,14 @@ Security:
   is embedded in `Papuma.Kernel`, `.Local` and `.FSharp` — CI runs it on every push, which the csproj comment
   had promised but no step did. `CONTRIBUTING.md` documents the release setup (Trusted Publishing, `NUGET_USER`,
   the environment).
+- **Build supply chain (review B-2, B-3, B-10, B-11, B-12).** A repository `nuget.config` clears the machine's
+  feeds and maps every package to nuget.org, so a same-named package on another configured feed can no longer be
+  restored. NuGet audit covers transitive packages, and a moderate, high or critical advisory fails the restore.
+  `global.json` requires a .NET 10 SDK (`10.0.100`, `latestFeature`). All package versions are set once in
+  `Directory.Packages.props` (Central Package Management). Under it the F# SDK adds no implicit `FSharp.Core`, so
+  it is pinned: **`Papuma.Kernel.FSharp` depends on `FSharp.Core` 10.1.303**, as 2.1.0 did — before, the
+  dependency followed whatever SDK packed the release. `.editorconfig` asks for LF like `.gitattributes`. The
+  unused `coverlet.collector` is removed from the test projects.
 
 Fixed:
 

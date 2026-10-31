@@ -32,4 +32,12 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
+
+  <!-- NuGet audit over direct and transitive packages (review B-3): a known moderate,
+       high or critical vulnerability fails the restore; low ones stay warnings. -->
+  <PropertyGroup>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <WarningsAsErrors>$(WarningsAsErrors);NU1902;NU1903;NU1904</WarningsAsErrors>
+  </PropertyGroup>
 </Project>

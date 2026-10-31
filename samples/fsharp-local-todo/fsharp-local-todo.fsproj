@@ -11,6 +11,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Papuma.Kernel.Core\Papuma.Kernel.Core.csproj" />
     <ProjectReference Include="..\..\src\Papuma.Kernel.Local\Papuma.Kernel.Local.csproj" />
     <ProjectReference Include="..\..\src\Papuma.Kernel.FSharp\Papuma.Kernel.FSharp.fsproj" />

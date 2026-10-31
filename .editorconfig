@@ -2,7 +2,8 @@ root = true
 
 [*]
 charset = utf-8
-end_of_line = crlf
+# LF, as .gitattributes stores every text file in the repository (review B-10).
+end_of_line = lf
 insert_final_newline = true
 indent_style = space
 indent_size = 4
@@ -11,9 +12,6 @@ trim_trailing_whitespace = true
 [*.{md,yml,yaml,json}]
 indent_size = 2
 trim_trailing_whitespace = false
-
-[*.sh]
-end_of_line = lf
 
 [*.{cs,fs}]
 # Papuma conventions (see AGENTS.md)

@@ -1,0 +1,36 @@
+<Project>
+  <!-- Central Package Management (review B-11): every package version of the repository —
+       libraries, tests, samples, benchmarks — is set here once; a PackageReference in a
+       project file carries no Version. -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <ItemGroup Label="Libraries">
+    <!-- The F# SDK's implicit FSharp.Core reference is off under Central Package Management.
+         Pinned here instead of following the installed SDK, so the Papuma.Kernel.FSharp
+         dependency no longer changes with the build machine (2.1.0 shipped 10.1.303). -->
+    <PackageVersion Include="FSharp.Core" Version="10.1.303" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+    <PackageVersion Include="ModelContextProtocol" Version="2.2.0" />
+    <PackageVersion Include="Npgsql" Version="10.0.3" />
+    <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
+    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.15.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Tests">
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Samples and benchmarks">
+    <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
+    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
+    <PackageVersion Include="NATS.Net" Version="2.8.1" />
+  </ItemGroup>
+</Project>

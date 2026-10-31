@@ -20,6 +20,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Central Package Management turns off the SDK's implicit FSharp.Core reference, so it
+         is explicit; its version in Directory.Packages.props is the floor consumers get. -->
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- PatchBuilder<T> (the type being extended) lives in Papuma.Kernel.Core, shared by
          both kernels — referencing Core directly (not Papuma.Kernel or .Local) keeps this
          package usable with either. Same embedding pattern as Papuma.Kernel.csproj /
