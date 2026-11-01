@@ -80,13 +80,17 @@ One-time setup:
 A release:
 
 1. Set `<Version>` in `Directory.Build.props` and move the `Unreleased` entries in
-   `CHANGELOG.md` under that version.
-2. Tag the commit `vX.Y.Z` (or `vX.Y.Z-suffix`) and push the tag. A tag that
+   `CHANGELOG.md` under that version (`## X.Y.Z (date)`).
+2. Optionally write curated release notes to `.github/release-notes/vX.Y.Z.md`;
+   without them the release shows the version's CHANGELOG section.
+3. Tag the commit `vX.Y.Z` (or `vX.Y.Z-suffix`) and push the tag. A tag that
    already exists can be published from the Actions tab or with
    `gh workflow run release.yml -f tag=vX.Y.Z`.
-3. The build job tests and packs the tag; it fails if the tag is not exactly the
+4. The build job tests and packs the tag; it fails if the tag is not exactly the
    packages' version or a package is missing. Approve the `nuget-org` deployment,
-   and the publish job attests the packages and pushes them.
+   and the publish job attests the packages and pushes them. The last job creates
+   the GitHub release (a tag with a suffix as a pre-release); a release that
+   already exists is left alone.
 
 `publish-nuget.sh` publishes to GitHub Packages and is not part of a release.
 

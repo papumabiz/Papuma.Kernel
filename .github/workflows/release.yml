@@ -9,10 +9,15 @@ name: Release
 # nothing reaches nuget.org. The tag's tree must contain .github/scripts/verify-packages.sh,
 # so tags from before that script cannot be published by this workflow.
 #
-# Two jobs, so the OIDC token is never reachable from restore, build or test:
-#   build   — checkout, restore, build, test, pack, verify, upload; contents: read only.
-#   publish — download, attest, login, push; no checkout, no restore. Runs in the
-#             `nuget-org` environment, whose required reviewers gate the push.
+# Three jobs, so the OIDC token is never reachable from restore, build or test, and the
+# write access to the repository never from the push:
+#   build          — checkout, restore, build, test, pack, verify, release notes, upload;
+#                    contents: read only.
+#   publish        — download, attest, login, push; no checkout, no restore. Runs in the
+#                    `nuget-org` environment, whose required reviewers gate the push.
+#   github-release — creates the GitHub release of the tag from the notes the build job
+#                    wrote (.github/release-notes/<tag>.md, else the CHANGELOG section);
+#                    contents: write, nothing else. A tag with a suffix is a pre-release.
 
 on:
   push:
@@ -79,6 +84,11 @@ jobs:
           VERSION: ${{ steps.ref.outputs.version }}
         run: bash .github/scripts/verify-packages.sh artifacts "$VERSION"
 
+      - name: Write release notes
+        env:
+          TAG: ${{ steps.ref.outputs.tag }}
+        run: bash .github/scripts/release-notes.sh "$TAG" artifacts/release-notes.md
+
       - name: Upload release artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -86,6 +96,7 @@ jobs:
           path: |
             artifacts/*.nupkg
             artifacts/*.snupkg
+            artifacts/release-notes.md
           if-no-files-found: error
 
   publish:
@@ -126,3 +137,37 @@ jobs:
             --api-key "$NUGET_API_KEY" \
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate
+
+  github-release:
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release; no id-token, no packages
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: papuma-kernel-nupkg-${{ needs.build.outputs.tag }}
+          path: artifacts
+
+      # The runner's preinstalled gh. Idempotent: a release that already exists (created by hand,
+      # or by an earlier run of this workflow) is left as it is.
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release ${TAG} exists; left unchanged."
+            exit 0
+          fi
+          flags=()
+          if [[ "$TAG" == *-* ]]; then
+            flags+=(--prerelease)
+          else
+            flags+=(--latest)
+          fi
+          gh release create "$TAG" --verify-tag --title "$TAG" --notes-file artifacts/release-notes.md "${flags[@]}"
