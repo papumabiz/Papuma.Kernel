@@ -12,9 +12,9 @@
          dependency no longer changes with the build machine (2.1.0 shipped 10.1.303). -->
     <PackageVersion Include="FSharp.Core" Version="10.1.303" />
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.14" />
     <PackageVersion Include="ModelContextProtocol" Version="2.2.0" />
     <PackageVersion Include="Npgsql" Version="10.0.3" />
     <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
@@ -29,7 +29,7 @@
 
   <ItemGroup Label="Samples and benchmarks">
     <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
     <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
     <PackageVersion Include="NATS.Net" Version="2.8.1" />
   </ItemGroup>
